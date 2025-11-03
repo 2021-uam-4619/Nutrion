@@ -319,7 +319,7 @@ def delete_invoice(invoice_id):
         conn.commit()
 
         if c.rowcount > 0:
-            return jsonify({'success': True, 'message': 'Invoice deleted successfully'})
+            return jsonify({'success': True, 'message': 'Invoice deleted successfully')
         else:
             return jsonify({'success': False, 'error': 'Invoice not found'}), 404
 
@@ -383,4 +383,5 @@ if __name__ == '__main__':
     print("Starting Flask server...")
     print(f"Database location: {DB_PATH}")
     init_db()
-    app.run(debug=True, port=5001)
+    # Fixed: Remove use_reloader and debug mode to avoid signal handling issues
+    app.run(host='0.0.0.0', port=5001, threaded=True)
