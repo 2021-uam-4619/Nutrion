@@ -319,7 +319,7 @@ def delete_invoice(invoice_id):
         conn.commit()
 
         if c.rowcount > 0:
-            return jsonify({'success': True, 'message': 'Invoice deleted successfully')
+            return jsonify({'success': True, 'message': 'Invoice deleted successfully'})  # FIXED: Added missing closing brace
         else:
             return jsonify({'success': False, 'error': 'Invoice not found'}), 404
 
