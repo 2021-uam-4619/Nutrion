@@ -5,3 +5,4 @@ plotly
 fpdf
 Flask
 flask_cors
+gunicorn
