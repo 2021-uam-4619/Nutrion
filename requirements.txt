@@ -1,9 +1,3 @@
 streamlit
-pandas
-Pillow
-plotly
-fpdf
-Flask
-flask_cors
-gunicorn
-A4
+reportlab
+sqlite3
