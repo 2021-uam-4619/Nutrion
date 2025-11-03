@@ -6,3 +6,4 @@ fpdf
 Flask
 flask_cors
 gunicorn
+A4
