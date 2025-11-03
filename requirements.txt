@@ -4,3 +4,4 @@ Pillow
 plotly
 fpdf
 Flask
+flask_cors
