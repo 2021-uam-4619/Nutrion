@@ -7,6 +7,8 @@ import tempfile
 import base64
 from fpdf import FPDF
 import pandas as pd
+import requests
+import io
 
 # Initialize session state
 def init_session_state():
@@ -23,6 +25,67 @@ def init_session_state():
         st.session_state.active_tab = 'without_gst'
     if 'current_invoice_id' not in st.session_state:
         st.session_state.current_invoice_id = None
+    if 'db_initialized' not in st.session_state:
+        st.session_state.db_initialized = False
+
+# Download and integrate existing database
+def download_and_integrate_db():
+    """Download existing database from GitHub and integrate with current database"""
+    try:
+        # GitHub raw content URL (aap apni actual URL yahan dalen)
+        github_db_url = "https://github.com/yourusername/yourrepo/raw/main/invoices.db"
+        
+        # Temporary file for downloaded database
+        temp_db_path = "invoices.db"
+        
+        # Download the database file
+        response = requests.get(github_db_url)
+        if response.status_code == 200:
+            with open(temp_db_path, 'wb') as f:
+                f.write(response.content)
+            
+            # Connect to both databases
+            conn_main = sqlite3.connect('invoices.db')
+            conn_temp = sqlite3.connect(temp_db_path)
+            
+            # Copy data from temp database to main database
+            temp_cursor = conn_temp.cursor()
+            main_cursor = conn_main.cursor()
+            
+            # Check if tables exist in temp database
+            temp_cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='invoices'")
+            if temp_cursor.fetchone():
+                # Get all invoices from temp database
+                temp_cursor.execute("SELECT * FROM invoices")
+                temp_invoices = temp_cursor.fetchall()
+                
+                # Insert into main database if they don't exist
+                for invoice in temp_invoices:
+                    # Check if invoice already exists
+                    main_cursor.execute("SELECT id FROM invoices WHERE invoice_number = ?", (invoice[1],))
+                    if not main_cursor.fetchone():
+                        main_cursor.execute('''
+                            INSERT INTO invoices 
+                            (invoice_number, fbr_invoice_number, date, due_date, party_name, party_ntn, items, 
+                             subtotal, gst_total, grand_total, invoice_type, created_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', invoice[1:])
+                
+                conn_main.commit()
+                st.success(f"Successfully integrated {len(temp_invoices)} invoices from existing database!")
+            
+            # Close connections
+            conn_temp.close()
+            conn_main.close()
+            
+            # Clean up temporary file
+            os.remove(temp_db_path)
+            
+        else:
+            st.warning("Could not download existing database file. Starting with fresh database.")
+            
+    except Exception as e:
+        st.warning(f"Could not integrate existing database: {str(e)}")
 
 # Database setup
 def init_db():
@@ -47,6 +110,11 @@ def init_db():
     ''')
     conn.commit()
     conn.close()
+    
+    # Download and integrate existing database only once
+    if not st.session_state.db_initialized:
+        download_and_integrate_db()
+        st.session_state.db_initialized = True
 
 # Product and packing options
 product_options = [
@@ -220,6 +288,17 @@ def get_invoices_by_date_range(start_date, end_date, invoice_type=None):
     
     conn.close()
     return invoices
+
+def get_all_invoices_count():
+    """Get total count of invoices in database"""
+    conn = sqlite3.connect('invoices.db')
+    c = conn.cursor()
+    
+    c.execute('SELECT COUNT(*) FROM invoices')
+    count = c.fetchone()[0]
+    
+    conn.close()
+    return count
 
 # Streamlit UI Components
 def render_invoice_form():
@@ -427,6 +506,10 @@ def render_invoice_form():
 
 def render_search_section():
     st.header("Search & Manage Invoices")
+    
+    # Show total invoices count
+    total_invoices = get_all_invoices_count()
+    st.info(f"Total Invoices in Database: {total_invoices}")
     
     search_term = st.text_input("Search by invoice number, party name, or FBR number")
     
