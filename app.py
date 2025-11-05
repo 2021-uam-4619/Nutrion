@@ -1,1060 +1,681 @@
 import streamlit as st
-import os
-import sqlite3
-import traceback
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-from datetime import datetime
-from urllib.parse import unquote
+import requests
+import json
+import pandas as pd
+from datetime import datetime, date
+import time
+import base64
+from io import BytesIO
 
-# --- Configuration ---
-DATABASE_FILE = 'invoice_app_v4.db'
-INITIAL_INVOICE_NUMBER = 30
+# Configuration
+API_BASE_URL = "http://127.0.0.1:5000"
 
-app = Flask(__name__)
-CORS(app)
+# Initialize session state
+if 'initialized' not in st.session_state:
+    st.session_state.initialized = False
+if 'invoice_items' not in st.session_state:
+    st.session_state.invoice_items = []
+if 'stock_items' not in st.session_state:
+    st.session_state.stock_items = []
+if 'current_invoice_number' not in st.session_state:
+    st.session_state.current_invoice_number = "1"
+if 'parties' not in st.session_state:
+    st.session_state.parties = []
 
+# Product configuration
+PRODUCTS = [
+    "Strophase G", "Strophase P", "Strozyme NSP", "SP200", "SP300", 
+    "SP300 Advance", "Monica", "Linco Magic", "Enra Magic", "InduceAcid Plus",
+    "InduceAcid Buty", "Huntox", "Strozyme XYL", "Super Ener Emusifier", 
+    "Antioxdant", "Toxin Binder Weilituo", "Toxin Clean", "GutPro 60 (Tributyrin)", 
+    "InduceAcid Liquid"
+]
 
-# --- Database Helper Functions ---
+PACKING_OPTIONS = ["Ltr", "Kg", "25 Ltr", "25 kg"]
 
-def get_db_connection():
-    conn = sqlite3.connect(DATABASE_FILE)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def init_db(clear_existing_data=False):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    if clear_existing_data:
-        print("Clearing existing data from all tables...")
-        cursor.execute("DROP TABLE IF EXISTS opening_balance_adjustments")
-        cursor.execute("DROP TABLE IF EXISTS invoice_items")
-        cursor.execute("DROP TABLE IF EXISTS invoices")
-        cursor.execute("DROP TABLE IF EXISTS payments")
-        cursor.execute("DROP TABLE IF EXISTS parties")
-        cursor.execute("DROP TABLE IF EXISTS stock")
-        print("Existing tables dropped.")
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS parties (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL,
-            initial_opening_balance REAL DEFAULT 0.0
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS opening_balance_adjustments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            party_id INTEGER NOT NULL,
-            adjustment_date TEXT NOT NULL,
-            old_balance REAL NOT NULL,
-            new_balance REAL NOT NULL,
-            reason TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (party_id) REFERENCES parties (id) ON DELETE CASCADE
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS invoices (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            invoice_number TEXT UNIQUE NOT NULL,
-            party_name TEXT NOT NULL,
-            date TEXT NOT NULL,
-            total_amount REAL NOT NULL,
-            previous_balance REAL NOT NULL, -- This will now store the party's balance *before* this invoice
-            grand_total REAL NOT NULL, -- This is previous_balance + total_amount for *this* invoice
-            FOREIGN KEY (party_name) REFERENCES parties (name) ON UPDATE CASCADE ON DELETE CASCADE
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS invoice_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            invoice_id INTEGER NOT NULL,
-            product_name TEXT NOT NULL,
-            qty REAL NOT NULL,
-            packing TEXT,
-            unit_price REAL NOT NULL,
-            amount REAL NOT NULL,
-            FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS payments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            party_name TEXT NOT NULL,
-            amount REAL NOT NULL,
-            date TEXT NOT NULL,
-            remarks TEXT,
-            FOREIGN KEY (party_name) REFERENCES parties (name) ON UPDATE CASCADE ON DELETE CASCADE
-        )
-    ''')
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS stock (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_name TEXT NOT NULL,
-            batch_no TEXT,
-            date TEXT NOT NULL,
-            quantity REAL NOT NULL DEFAULT 0
-        )
-    ''')
-
-    conn.commit()
-    conn.close()
-    print("Database initialized/checked successfully.")
-
-
-# --- Helper to calculate the current balance for a party ---
-def calculate_current_party_balance(party_name, conn):
-    """Calculates the current balance for a party based on initial balance, invoices, and payments."""
-    cursor = conn.cursor()
-
-    # Get initial opening balance
-    cursor.execute("SELECT initial_opening_balance FROM parties WHERE name = ?", (party_name,))
-    party_row = cursor.fetchone()
-    initial_balance = party_row['initial_opening_balance'] if party_row and party_row['initial_opening_balance'] is not None else 0.0
-
-    # Sum of all invoice total amounts for this party
-    cursor.execute("SELECT SUM(total_amount) FROM invoices WHERE party_name = ?", (party_name,))
-    total_invoices_row = cursor.fetchone()
-    total_invoices = total_invoices_row[0] if total_invoices_row and total_invoices_row[0] is not None else 0.0
-
-    # Sum of all payment amounts for this party
-    cursor.execute("SELECT SUM(amount) FROM payments WHERE party_name = ?", (party_name,))
-    total_payments_row = cursor.fetchone()
-    total_payments = total_payments_row[0] if total_payments_row and total_payments_row[0] is not None else 0.0
-
-    # Current balance = Initial Balance + Total Invoices - Total Payments
-    current_balance = round(initial_balance + total_invoices - total_payments, 2)
-
-    return current_balance
-
-
-# --- Helper to update subsequent invoice balances after an update/delete ---
-def update_subsequent_invoice_balances(party_name, starting_date, starting_invoice_number, conn):
-    """
-    Recalculates the previous_balance and grand_total for invoices
-    that occurred after a specific point in time for a party.
-    This is needed after an invoice is updated or deleted.
-    """
-    cursor = conn.cursor()
-
-    # Get invoices for the party, ordered chronologically from the starting point
-    cursor.execute('''
-        SELECT id, invoice_number, date, total_amount, previous_balance, grand_total
-        FROM invoices
-        WHERE party_name = ? AND (date > ? OR (date = ? AND CAST(invoice_number AS INTEGER) > CAST(? AS INTEGER)))
-        ORDER BY date ASC, CAST(invoice_number AS INTEGER) ASC
-    ''', (party_name, starting_date, starting_date, starting_invoice_number))
-    subsequent_invoices = cursor.fetchall()
-
-    # Get the balance *immediately preceding* the starting point
-    # This requires calculating the balance up to the transaction just before the starting point
-    cursor.execute("SELECT initial_opening_balance FROM parties WHERE name = ?", (party_name,))
-    party_row = cursor.fetchone()
-    initial_balance = party_row['initial_opening_balance'] if party_row and party_row['initial_opening_balance'] is not None else 0.0
-
-    # Sum of invoice amounts before the starting point
-    cursor.execute('''
-        SELECT SUM(total_amount) FROM invoices
-        WHERE party_name = ? AND (date < ? OR (date = ? AND CAST(invoice_number AS INTEGER) < CAST(? AS INTEGER)))
-    ''', (party_name, starting_date, starting_date, starting_invoice_number))
-    invoices_before_row = cursor.fetchone()
-    total_invoices_before = invoices_before_row[0] if invoices_before_row and invoices_before_row[0] is not None else 0.0
-
-    # Sum of payment amounts before the starting point
-    cursor.execute('''
-        SELECT SUM(amount) FROM payments
-        WHERE party_name = ? AND date <= ? -- Payments on the same day as the starting invoice are included if they occurred before it chronologically (by ID)
-    ''', (party_name, starting_date)) # Note: This date comparison might need refinement if payments and invoices on the same day need strict ordering.
-    payments_before_row = cursor.fetchone()
-    total_payments_before = payments_before_row[0] if payments_before_row and payments_before_row[0] is not None else 0.0
-
-    # The balance before the starting point is initial balance + invoices before - payments before
-    current_previous_balance = initial_balance + total_invoices_before - total_payments_before
-
-
-    for invoice in subsequent_invoices:
-        # The new previous_balance for this invoice is the calculated balance before it
-        new_previous_balance = current_previous_balance
-        new_grand_total = new_previous_balance + invoice['total_amount']
-
-        cursor.execute('''
-            UPDATE invoices SET previous_balance = ?, grand_total = ? WHERE id = ?
-        ''', (new_previous_balance, new_grand_total, invoice['id']))
-
-        # The grand_total of this invoice becomes the previous_balance for the *next* invoice
-        current_previous_balance = new_grand_total
-
-
-# --- API Endpoints ---
-
-@app.route('/api/status', methods=['GET'])
-def get_status():
-    db_exists = os.path.exists(DATABASE_FILE)
-    return jsonify({
-        "status": "Backend is running",
-        "database_file": f"{DATABASE_FILE} {'exists' if db_exists else 'does not exist (will be created upon first operation)'}"
-    }), 200
-
-@app.route('/api/ledger/<party_name>', methods=['GET'])
-def get_party_ledger_api(party_name):
-    """
-    Provides data for the detailed ledger view.
-    Opening balance is the initial_opening_balance from the parties table.
-    Transactions include invoice items and payments.
-    Current balance is initial_opening_balance + grand_total of last invoice - total payments.
-    """
+# API Helper Functions
+def api_call(endpoint, method='GET', data=None):
+    """Make API calls to backend"""
     try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-
-        party_name_param = unquote(party_name)
-
-        # Fetch the initial opening balance for the party
-        cursor.execute("SELECT id, initial_opening_balance FROM parties WHERE name = ?", (party_name_param,))
-        party_row = cursor.fetchone()
-
-        if party_row is None:
-            conn.close()
-            return jsonify({"error": "Party not found"}), 404
-
-        party_id = party_row['id']
-        initial_opening_balance = party_row['initial_opening_balance'] if party_row['initial_opening_balance'] is not None else 0.0
-
-        # Fetch all invoices for the party, ordered chronologically
-        cursor.execute(
-            '''SELECT id, invoice_number, date, total_amount, previous_balance, grand_total
-               FROM invoices WHERE party_name = ? ORDER BY date ASC, CAST(invoice_number AS INTEGER) ASC''', (party_name_param,))
-        invoices = cursor.fetchall()
-
-        # Fetch all payments for the party, ordered chronologically
-        cursor.execute(
-            "SELECT id as paymentId, amount, date, remarks FROM payments WHERE party_name = ? ORDER BY date ASC, paymentId ASC", (party_name_param,))
-        payments = cursor.fetchall()
-
-        # Combine invoice items and payments into a single timeline
-        timeline = []
-        for inv in invoices:
-            cursor.execute(
-                "SELECT product_name, qty, packing, unit_price, amount FROM invoice_items WHERE invoice_id = ? ORDER BY id",
-                (inv['id'],))
-            items = cursor.fetchall()
-
-            # Add each invoice item as a separate transaction entry for the detailed ledger
-            for item in items:
-                 timeline.append({
-                    'type': 'invoice_item',
-                    'date': inv['date'],
-                    'invoiceNumber': inv['invoice_number'],
-                    'productName': item['product_name'],
-                    'qty': item['qty'],
-                    'packing': item['packing'],
-                    'unitPrice': item['unit_price'],
-                    'amount': item['amount'] # This is the debit amount for the item
-                })
-
-        for pay in payments:
-            # Add each payment as a separate transaction entry
-            timeline.append({
-                'type': 'payment',
-                'date': pay['date'],
-                'remarks': pay['remarks'],
-                'amount': pay['amount'] # This is the credit amount for the payment
-            })
-
-        # Sort the combined timeline of invoice items and payments by date and then by type/id for consistency
-        try:
-            timeline.sort(key=lambda x: (
-                datetime.strptime(x.get('date', '1970-01-01'), '%Y-%m-%d'),
-                0 if x['type'] == 'invoice_item' else 1, # Invoice items before payments on the same day
-                int(x.get('invoiceNumber', '0')) if x['type'] == 'invoice_item' else x.get('paymentId', 0) # Then by invoice/payment ID
-            ))
-        except ValueError:
-            # Handle cases with bad date formats gracefully, though DB constraints should prevent this
-            pass
-
-        # Calculate the current cumulative balance using the dedicated helper function
-        current_cumulative_balance = calculate_current_party_balance(party_name_param, conn)
-
-
-        conn.close()
-
-        # The frontend now receives a clean, sorted timeline of events to display.
-        return jsonify({
-            "partyName": party_name_param,
-            "openingBalance": initial_opening_balance, # Use the initial_opening_balance from the parties table
-            "currentBalance": current_cumulative_balance, # initial_opening_balance + grand_total of last invoice - total payments
-            "transactions": timeline,  # This is the key change for the ledger display
-        }), 200
-
-    except Exception as e:
-        print(f"Error fetching ledger for {party_name_param}: {e}")
-        traceback.print_exc() # Print traceback for debugging
-        return jsonify({"error": f"Error fetching ledger: {str(e)}"}), 500
-
-
-@app.route('/api/parties', methods=['GET'])
-def get_parties_list():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    # We now need to calculate the current balance for each party for this list
-    cursor.execute("SELECT name FROM parties ORDER BY name")
-    parties_names = cursor.fetchall()
-
-    parties_with_balance = []
-    for party_row in parties_names:
-        party_name = party_row['name']
-
-        # Calculate the current balance using the dedicated helper function
-        current_balance = calculate_current_party_balance(party_name, conn)
-
-        parties_with_balance.append({
-            "name": party_name,
-            "balance": current_balance
-        })
-
-    conn.close()
-    return jsonify(parties_with_balance), 200
-
-
-@app.route('/api/party-balance', methods=['GET'])
-def get_party_balance_for_invoice():
-    """
-    Fetches the previous_balance for a *new* invoice for a party.
-    This is the party's current balance before the new invoice is added.
-    Also returns the initial_opening_balance separately.
-    """
-    party_name = request.args.get('partyName')
-    if not party_name:
-        return jsonify({"error": "Party name is required"}), 400
-    conn = get_db_connection()
-
-    cursor = conn.cursor()
-    cursor.execute("SELECT initial_opening_balance FROM parties WHERE name = ?", (party_name,))
-    party_row = cursor.fetchone()
-    initial_balance = party_row['initial_opening_balance'] if party_row and party_row['initial_opening_balance'] is not None else 0.0
-
-    # The previous balance for the new invoice is the party's current balance before this invoice
-    previous_balance_for_new_invoice = calculate_current_party_balance(party_name, conn)
-
-    conn.close()
-    return jsonify({"balance": previous_balance_for_new_invoice, "initialOpeningBalance": initial_balance}), 200
-
-
-@app.route('/api/next-invoice-number', methods=['GET'])
-def get_next_invoice_number_api():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT MAX(CAST(invoice_number AS INTEGER)) FROM invoices WHERE invoice_number GLOB '[0-9]*'")
-    max_invoice_num_row = cursor.fetchone()
-    conn.close()
-    next_num_val = INITIAL_INVOICE_NUMBER
-    if max_invoice_num_row and max_invoice_num_row[0] is not None:
-        next_num_val = int(max_invoice_num_row[0]) + 1
-    next_num_val = max(INITIAL_INVOICE_NUMBER, next_num_val)
-    return jsonify({"nextInvoiceNumber": str(next_num_val)}), 200
-
-
-# --- CREATE INVOICE API ---
-@app.route('/api/invoices', methods=['POST'])
-def create_invoice_api():
-    data = request.get_json()
-    party_name = data.get('partyName')
-    invoice_date = data.get('date')
-    invoice_number = data.get('invoiceNumber')
-    items = data.get('items', [])
-
-    # Basic validation
-    if not all([party_name, invoice_date, invoice_number]):
-        return jsonify({"error": "Missing required invoice data (partyName, date, invoiceNumber)."}), 400
-    if not items:
-        return jsonify({"error": "Invoice must have at least one item."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Ensure party exists or create it
-        cursor.execute("SELECT id FROM parties WHERE name = ?", (party_name,))
-        party_row = cursor.fetchone()
-        if not party_row:
-            cursor.execute("INSERT INTO parties (name, initial_opening_balance) VALUES (?, 0.0)", (party_name,))
-
-        # 1. Recalculate total_amount on the server from the items list for accuracy.
-        total_amount = round(sum(float(item.get('amount', 0)) for item in items), 2)
-
-        # 2. Get the party's current balance *before* this new invoice. This is the previous_balance for this invoice.
-        previous_balance = calculate_current_party_balance(party_name, conn)
-
-        # 3. Calculate the grand_total for this new invoice.
-        grand_total = previous_balance + total_amount
-
-        # Insert the new invoice
-        cursor.execute('''
-            INSERT INTO invoices (invoice_number, party_name, date, total_amount, previous_balance, grand_total)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (invoice_number, party_name, invoice_date, total_amount, previous_balance, grand_total))
-        invoice_id = cursor.lastrowid
-
-        # Insert the associated invoice items
-        for item in items:
-            cursor.execute('''
-                INSERT INTO invoice_items (invoice_id, product_name, qty, packing, unit_price, amount)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (invoice_id, item.get('productName'), float(item.get('qty', 0)), item.get('packing'),
-                  float(item.get('unitPrice', 0)), float(item.get('amount', 0))))
-
-        conn.commit()
-
-        # Get the next invoice number for the frontend
-        cursor.execute("SELECT MAX(CAST(invoice_number AS INTEGER)) FROM invoices WHERE invoice_number GLOB '[0-9]*'")
-        max_num_row = cursor.fetchone()
-        next_inv_num = INITIAL_INVOICE_NUMBER
-        if max_num_row and max_num_row[0] is not None:
-            next_inv_num = int(max_num_row[0]) + 1
-        next_inv_num = max(INITIAL_INVOICE_NUMBER, next_inv_num)
-
-        # The previous balance for the *next* invoice is the grand_total of the just-created invoice
-        new_previous_balance_for_next_invoice = grand_total
-
-        return jsonify({
-            "message": "Invoice created successfully!",
-            "invoiceNumber": invoice_number,
-            "nextInvoiceNumber": str(next_inv_num),
-            "previousBalanceForNextInvoice": new_previous_balance_for_next_invoice # Return the grand_total of this invoice
-        }), 201
-    except sqlite3.IntegrityError as e:
-        conn.rollback()
-        if "UNIQUE constraint failed: invoices.invoice_number" in str(e):
-            return jsonify({"error": f"Invoice number '{invoice_number}' already exists."}), 409
-        return jsonify({"error": f"Database integrity error: {str(e)}"}), 409
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"Error creating invoice: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-# --- UPDATE INVOICE API ---
-@app.route('/api/invoices/<string:invoice_number_to_update>', methods=['PUT'])
-def update_invoice_api(invoice_number_to_update):
-    data = request.get_json()
-    party_name = data.get('partyName')
-    date = data.get('date')
-    items = data.get('items', [])
-
-    if not all([party_name, date]):
-        return jsonify({"error": "Missing required invoice data for update (partyName, date)."}), 400
-    if not items:
-        return jsonify({"error": "Invoice must have at least one item."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Find the original invoice details
-        cursor.execute("SELECT id, party_name, date, invoice_number, total_amount FROM invoices WHERE invoice_number = ?",
-                       (invoice_number_to_update,))
-        original_invoice = cursor.fetchone()
-        if not original_invoice:
-            conn.close()
-            return jsonify({"error": "Invoice to update not found"}), 404
-
-        original_invoice_id = original_invoice['id']
-        original_party_name = original_invoice['party_name']
-        original_date = original_invoice['date']
-        original_invoice_number = original_invoice['invoice_number']
-        original_total_amount = original_invoice['total_amount']
-
-        # Ensure new party exists if changed
-        if original_party_name != party_name:
-             cursor.execute("SELECT id FROM parties WHERE name = ?", (party_name,))
-             party_exists = cursor.fetchone()
-             if not party_exists:
-                 cursor.execute("INSERT INTO parties (name, initial_opening_balance) VALUES (?, 0.0)", (party_name,))
-
-
-        # 1. Recalculate the new total_amount from the updated items list
-        new_total_amount = round(sum(float(item.get('amount', 0)) for item in items), 2)
-
-        # 2. Get the party's balance *before* this invoice (based on transactions before its original date/number).
-        #    This value should not change based on the update itself, only the grand_total changes.
-        #    We need to fetch the previous_balance that was stored with this invoice.
-        cursor.execute("SELECT previous_balance FROM invoices WHERE id = ?", (original_invoice_id,))
-        previous_balance_for_this_invoice = cursor.fetchone()['previous_balance']
-
-
-        # 3. Calculate the new grand_total for this invoice record.
-        new_grand_total = previous_balance_for_this_invoice + new_total_amount
-
-        # Update invoice details in the invoices table
-        cursor.execute('''
-            UPDATE invoices SET party_name = ?, date = ?, total_amount = ?, grand_total = ?
-            WHERE id = ? ''',
-                       (party_name, date, new_total_amount, new_grand_total,
-                        original_invoice_id))
-
-        # Delete old items and insert new ones
-        cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (original_invoice_id,))
-        for item in items:
-            cursor.execute(
-                '''INSERT INTO invoice_items (invoice_id, product_name, qty, packing, unit_price, amount) VALUES (?, ?, ?, ?, ?, ?)''',
-                (original_invoice_id, item.get('productName'), float(item.get('qty', 0)), item.get('packing'),
-                 float(item.get('unitPrice', 0)), float(item.get('amount', 0))))
-
-        # --- IMPORTANT: Recalculate balances for subsequent invoices if total_amount changed or party changed ---
-        if new_total_amount != original_total_amount or original_party_name != party_name:
-            # If party changed, we need to recalculate balances for subsequent invoices of *both* parties
-            if original_party_name != party_name:
-                 # Recalculate for the original party starting from the invoice *after* the deleted one
-                 # (or the first invoice if the deleted one was the first)
-                 update_subsequent_invoice_balances(original_party_name, original_date, original_invoice_number, conn)
-
-            # Recalculate for the current party starting from this updated invoice
-            update_subsequent_invoice_balances(party_name, date, invoice_number_to_update, conn)
-
-
-        conn.commit()
-
-        # After updating, get the grand_total of this invoice to return as the new previous balance for the *next* invoice
-        cursor.execute("SELECT grand_total FROM invoices WHERE id = ?", (original_invoice_id,))
-        updated_grand_total = cursor.fetchone()['grand_total']
-
-
-        return jsonify({"message": f"Invoice {invoice_number_to_update} updated successfully",
-                        "previousBalanceForNextInvoice": updated_grand_total, # Return the grand_total of this updated invoice
-                        "partyName": party_name # Return party name in case it changed
-                        }), 200
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"Error updating invoice: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/invoices/<string:invoice_number>', methods=['GET'])
-def get_single_invoice_api(invoice_number):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM invoices WHERE invoice_number = ?", (invoice_number,))
-    invoice = cursor.fetchone()
-
-    if not invoice:
-        conn.close()
-        return jsonify({"error": "Invoice not found"}), 404
-
-    # Fetch items associated with this invoice
-    invoice_id = invoice['id']
-    cursor.execute("SELECT * FROM invoice_items WHERE invoice_id = ? ORDER BY id", (invoice_id,))
-    items = cursor.fetchall()
-    conn.close()
-
-    # Structure the response to match frontend expectations
-    invoice_dict = dict(invoice)
-    invoice_dict['items'] = [dict(item) for item in items]
-    invoice_dict['invoiceNumber'] = invoice_dict.pop('invoice_number')
-    invoice_dict['partyName'] = invoice_dict.pop('party_name')
-    invoice_dict['totalAmount'] = invoice_dict.pop('total_amount')
-    invoice_dict['previousBalance'] = invoice_dict.pop('previous_balance')
-    invoice_dict['grandTotal'] = invoice_dict.pop('grand_total')
-
-    # Convert snake_case from DB to camelCase for frontend
-    for item in invoice_dict['items']:
-        item['productName'] = item.pop('product_name')
-        item['unitPrice'] = item.pop('unit_price')
-
-    return jsonify(invoice_dict), 200
-
-
-@app.route('/api/invoices', methods=['GET'])
-def get_all_invoices_api():
-    """Fetches all invoices, with optional filtering by date range."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    start_date = request.args.get('startDate')
-    end_date = request.args.get('endDate')
-
-    base_query = '''
-        SELECT id, invoice_number, party_name, date, total_amount, previous_balance, grand_total
-        FROM invoices
-    '''
-    where_clauses = []
-    params = []
-
-    if start_date:
-        where_clauses.append("date >= ?")
-        params.append(start_date)
-    if end_date:
-        where_clauses.append("date <= ?")
-        params.append(end_date)
-
-    if where_clauses:
-        base_query += " WHERE " + " AND ".join(where_clauses)
-
-    base_query += " ORDER BY date DESC, CAST(invoice_number AS INTEGER) DESC"
-
-    cursor.execute(base_query, params)
-    invoices_master_rows = cursor.fetchall()
-
-    result_invoices = []
-    for inv_master_row in invoices_master_rows:
-        invoice_entry = {
-            "invoiceNumber": inv_master_row['invoice_number'],
-            "partyName": inv_master_row['party_name'],
-            "date": inv_master_row['date'],
-            "totalAmount": inv_master_row['total_amount'],
-            "previousBalance": inv_master_row['previous_balance'],
-            "grandTotal": inv_master_row['grand_total'],
-            "items": []
-        }
-        cursor.execute(
-            "SELECT product_name, qty, packing, unit_price, amount FROM invoice_items WHERE invoice_id = ? ORDER BY id",
-            (inv_master_row['id'],))
-        items_db = cursor.fetchall()
-        for item_db_row in items_db:
-            invoice_entry['items'].append({
-                "productName": item_db_row['product_name'],
-                "qty": item_db_row['qty'],
-                "packing": item_db_row['packing'],
-                "unitPrice": item_db_row['unit_price'],
-                "amount": item_db_row['amount']
-            })
-        result_invoices.append(invoice_entry)
-
-    conn.close()
-    return jsonify(result_invoices), 200
-
-
-@app.route('/api/payments', methods=['POST'])
-def record_payment_api():
-    data = request.get_json()
-    party_name = data.get('partyName')
-    amount = data.get('amount')
-    date = data.get('date')
-    remarks = data.get('remarks', None)
-
-    if not party_name or not date or amount is None:
-        return jsonify({"error": "Missing required payment data (partyName, amount, date)."}), 400
-
-    try:
-        amount = float(amount)
-    except ValueError:
-        return jsonify({"error": "Invalid amount format."}), 400
-
-    if amount <= 0:
-        return jsonify({"error": "Payment amount must be positive."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Ensure party exists or create it
-        cursor.execute("SELECT id FROM parties WHERE name = ?", (party_name,))
-        party_exists = cursor.fetchone()
-        if not party_exists:
-            cursor.execute("INSERT INTO parties (name, initial_opening_balance) VALUES (?, 0.0)", (party_name,))
-
-        cursor.execute("INSERT INTO payments (party_name, amount, date, remarks) VALUES (?, ?, ?, ?)",
-                       (party_name, amount, date, remarks))
-        payment_id = cursor.lastrowid
-
-        conn.commit()
-
-        # After recording payment, we need to recalculate the party's current balance
-        current_party_balance = calculate_current_party_balance(party_name, conn)
-
-
-        return jsonify({"message": "Payment recorded successfully!", "paymentId": payment_id,
-                        "currentPartyBalance": current_party_balance}), 201
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"Error recording payment: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/payments', methods=['GET'])
-def get_all_payments_api():
-    """Fetches payments with optional filtering by party name and/or date range."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-
-    party_name = request.args.get('partyName')
-    start_date = request.args.get('startDate')
-    end_date = request.args.get('endDate')
-
-    base_query = "SELECT id as paymentId, party_name as partyName, amount, date, remarks FROM payments"
-    where_clauses = []
-    params = []
-
-    if party_name:
-        where_clauses.append("partyName = ?")
-        params.append(party_name)
-    if start_date:
-        where_clauses.append("date >= ?")
-        params.append(start_date)
-    if end_date:
-        where_clauses.append("date <= ?")
-        params.append(end_date)
-
-    if where_clauses:
-        base_query += " WHERE " + " AND ".join(where_clauses)
-
-    base_query += " ORDER BY date DESC, paymentId DESC"
-
-    cursor.execute(base_query, params)
-    payments = cursor.fetchall()
-    conn.close()
-    return jsonify([dict(p) for p in payments]), 200
-
-
-@app.route('/api/payments/<int:payment_id>', methods=['DELETE'])
-def delete_payment(payment_id):
-    """Deletes a specific payment by its ID and updates the corresponding party balance."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT party_name, amount FROM payments WHERE id = ?", (payment_id,))
-        payment_to_delete = cursor.fetchone()
-
-        if not payment_to_delete:
-            conn.close()
-            return jsonify({'message': 'Payment to delete not found'}), 404
-
-        party_name = payment_to_delete['party_name']
-        amount = payment_to_delete['amount']
-
-        cursor.execute("DELETE FROM payments WHERE id = ?", (payment_id,))
-
-        conn.commit()
-
-        # After deleting payment, recalculate the party's current balance
-        current_party_balance = calculate_current_party_balance(party_name, conn)
-
-
-        return jsonify({'message': f'Payment ID {payment_id} deleted successfully.',
-                        'partyName': party_name, # Return party name for frontend refresh
-                        'currentPartyBalance': current_party_balance # Return updated balance
-                        })
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"An error occurred during payment deletion: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/stock', methods=['GET'])
-def get_stock_api():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, product_name, batch_no, date, quantity FROM stock ORDER BY product_name, date DESC")
-    stock_rows = cursor.fetchall()
-    conn.close()
-
-    stock_items_camel_case = []
-    for item in stock_rows:
-        stock_items_camel_case.append({
-            "id": item['id'],
-            "productName": item['product_name'],
-            "batchNo": item['batch_no'],
-            "date": item['date'],
-            "quantity": item['quantity']
-        })
-    return jsonify(stock_items_camel_case), 200
-
-
-@app.route('/api/stock/batch-add', methods=['POST'])
-def add_stock_batch_api():
-    data = request.get_json()
-    items_to_add = data.get('items', [])
-    if not items_to_add:
-        return jsonify({"error": "No items provided to add to stock."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        processed_count = 0
-        for item in items_to_add:
-            product_name = item.get('productName')
-            batch_no = item.get('batchNo')
-            date = item.get('date')
-            quantity = float(item.get('quantity', 0))
-            if not all([product_name, date]) or quantity <= 0:
-                continue
-            cursor.execute('''INSERT INTO stock (product_name, batch_no, date, quantity) VALUES (?, ?, ?, ?)''',
-                           (product_name, batch_no, date, quantity))
-            processed_count += 1
-        conn.commit()
-        return jsonify({"message": f"{processed_count} stock item(s) processed successfully."}), 201
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"Database error during batch stock addition: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/stock/deduct', methods=['POST'])
-def deduct_stock_api():
-    data = request.get_json()
-    items_to_deduct = data.get('items', [])
-    if not items_to_deduct:
-        return jsonify({"error": "No items provided for stock deduction."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        errors = []
-        for item in items_to_deduct:
-            product_name = item.get('productName')
-            qty_to_deduct = float(item.get('qty', 0))
-            if not product_name or qty_to_deduct <= 0:
-                continue
-
-            cursor.execute("SELECT SUM(quantity) as total FROM stock WHERE product_name = ?", (product_name,))
-            total_available_row = cursor.fetchone()
-            total_available = total_available_row['total'] if total_available_row and total_available_row[
-                'total'] else 0
-
-            if total_available < qty_to_deduct:
-                errors.append(
-                    f"Not enough stock for '{product_name}'. Available: {total_available}, Required: {qty_to_deduct}")
-                continue
-
-            # FIFO logic: Deduct from oldest batches first
-            cursor.execute(
-                "SELECT id, quantity FROM stock WHERE product_name = ? AND quantity > 0 ORDER BY date ASC, id ASC",
-                (product_name,))
-            available_batches = cursor.fetchall()
-
-            remaining_to_deduct = qty_to_deduct
-            for batch in available_batches:
-                if remaining_to_deduct <= 0:
-                    break
-                deduct_from_this_batch = min(batch['quantity'], remaining_to_deduct)
-                new_quantity = batch['quantity'] - deduct_from_this_batch
-                cursor.execute("UPDATE stock SET quantity = ? WHERE id = ?", (new_quantity, batch['id']))
-                remaining_to_deduct -= deduct_from_this_batch
-
-        if errors:
-            conn.rollback()
-            return jsonify({"error": ". ".join(errors)}), 400
-
-        conn.commit()
-        return jsonify({"message": "Stock deducted successfully."}), 200
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"An error occurred during stock deduction: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-
-@app.route('/api/all-party-ledgers', methods=['GET'])
-def get_all_party_ledgers_api():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT name FROM parties ORDER BY name")
-    all_parties_names = cursor.fetchall()
-
-    all_ledgers_data = []
-    for party_row in all_parties_names:
-        party_name = party_row['name']
-
-        # Calculate current balance for each party using the helper
-        current_balance = calculate_current_party_balance(party_name, conn)
-
-        all_ledgers_data.append({
-            "partyName": party_name,
-            "currentBalance": current_balance
-        })
-
-    conn.close()
-    return jsonify(all_ledgers_data), 200
-
-
-@app.route('/api/admin/delete-all-data', methods=['POST'])
-def delete_all_data_api():
-    print("Received request to DELETE ALL backend data.")
-    try:
-        # Re-initializing the DB clears all data
-        init_db(clear_existing_data=True)
-        return jsonify(
-            {"message": "All backend data has been successfully deleted and the database re-initialized."}), 200
-    except Exception as e:
-        traceback.print_exc()
-        return jsonify(
-            {"error": f"A critical error occurred on the server while attempting to delete data: {str(e)}"}), 500
-
-
-@app.route('/api/invoices/<string:invoice_number_to_delete>', methods=['DELETE'])
-def delete_invoice(invoice_number_to_delete):
-    """Deletes a specific invoice by its number and recalculates subsequent balances."""
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        # Get invoice details before deleting
-        cursor.execute("SELECT id, party_name, date, invoice_number FROM invoices WHERE invoice_number = ?", (invoice_number_to_delete,))
-        invoice_to_delete = cursor.fetchone()
-
-        if not invoice_to_delete:
-            conn.close()
-            return jsonify({'message': f'Invoice {invoice_number_to_delete} not found'}), 404
-
-        invoice_id = invoice_to_delete['id']
-        party_name = invoice_to_delete['party_name']
-        invoice_date = invoice_to_delete['date']
-        invoice_number = invoice_to_delete['invoice_number']
-
-        # Delete invoice items associated with this invoice
-        cursor.execute("DELETE FROM invoice_items WHERE invoice_id = ?", (invoice_id,))
-
-        # Delete the invoice itself
-        cursor.execute("DELETE FROM invoices WHERE id = ?", (invoice_id,))
-
-        # --- IMPORTANT: Recalculate balances for subsequent invoices ---
-        update_subsequent_invoice_balances(party_name, invoice_date, invoice_number, conn)
-
-        conn.commit()
-
-        # After deleting, recalculate the party's current balance
-        current_party_balance = calculate_current_party_balance(party_name, conn)
-
-
-        return jsonify({'message': f'Invoice {invoice_number_to_delete} and related items deleted successfully.',
-                        'partyName': party_name, # Return party name for frontend refresh
-                        'currentPartyBalance': current_party_balance # Return updated balance
-                        }), 200
-
-    except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"An error occurred during invoice deletion: {str(e)}"}), 500
-    finally:
-        conn.close()
-
-@app.route('/api/parties/<string:party_name>/set-prev-balance', methods=['POST'])
-def set_prev_balance(party_name):
-    data = request.get_json()
-    new_initial_balance = data.get('prevBalance') # Renamed to new_initial_balance for clarity
-    reason = data.get('reason', 'No reason provided') # Get the reason from the frontend
-
-    if not party_name or new_initial_balance is None:
-        return jsonify({"error": "Missing required data (partyName, prevBalance)."}), 400
-    try:
-        new_initial_balance = float(new_initial_balance)
-    except ValueError:
-        return jsonify({"error": "Invalid previous balance format."}), 400
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("SELECT id, initial_opening_balance FROM parties WHERE name = ?", (party_name,))
-        party_row = cursor.fetchone()
-
-        old_initial_balance = 0.0
-        party_id = None
-
-        if not party_row:
-            # If party doesn't exist, create it with the new initial opening balance
-            cursor.execute("INSERT INTO parties (name, initial_opening_balance) VALUES (?, ?)", (party_name, new_initial_balance))
-            party_id = cursor.lastrowid
-            # old_initial_balance remains 0.0 as it's a new party
+        url = f"{API_BASE_URL}{endpoint}"
+        
+        if method == 'GET':
+            response = requests.get(url)
+        elif method == 'POST':
+            response = requests.post(url, json=data)
+        elif method == 'PUT':
+            response = requests.put(url, json=data)
+        elif method == 'DELETE':
+            response = requests.delete(url)
+        
+        if response.status_code == 200:
+            return response.json()
         else:
-            # If party exists, get the current initial opening balance (old_initial_balance)
-            party_id = party_row['id']
-            old_initial_balance = party_row['initial_opening_balance'] if party_row['initial_opening_balance'] is not None else 0.0
-
-            # Update the initial opening balance
-            cursor.execute("UPDATE parties SET initial_opening_balance = ? WHERE id = ?", (new_initial_balance, party_id))
-
-        # Record the adjustment in the new table
-        cursor.execute('''
-            INSERT INTO opening_balance_adjustments (party_id, adjustment_date, old_balance, new_balance, reason, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (party_id, datetime.now().strftime('%Y-%m-%d'), old_initial_balance, new_initial_balance, reason, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
-
-        conn.commit()
-
-        # After setting the opening balance, recalculate the party's current balance
-        current_party_balance = calculate_current_party_balance(party_name, conn)
-
-
-        return jsonify({"message": f"Opening balance for '{party_name}' set to {new_initial_balance:.2f} successfully.",
-                        "currentPartyBalance": current_party_balance # Return updated balance
-                        }), 200 if party_row else 201 # Return 200 for update, 201 for create
+            st.error(f"API Error: {response.status_code} - {response.text}")
+            return None
     except Exception as e:
-        conn.rollback()
-        traceback.print_exc()
-        return jsonify({"error": f"An error occurred: {str(e)}"}), 500
-    finally:
-        conn.close()
+        st.error(f"Connection error: {str(e)}")
+        return None
 
-@app.route('/api/parties/<string:party_name>/opening-balance-history', methods=['GET'])
-def get_opening_balance_history(party_name):
-    """Fetches the history of opening balance adjustments for a party."""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
+def initialize_app():
+    """Initialize application data"""
+    if not st.session_state.initialized:
+        # Get next invoice number
+        result = api_call('/api/next-invoice-number')
+        if result:
+            st.session_state.current_invoice_number = result.get('nextInvoiceNumber', '1')
+        
+        # Get parties list
+        result = api_call('/api/parties')
+        if result:
+            st.session_state.parties = [party['name'] for party in result]
+        
+        st.session_state.initialized = True
 
-        party_name_param = unquote(party_name)
+# UI Components
+def render_payment_section():
+    """Payment Received Section"""
+    st.header("Payment Received")
+    
+    with st.form("payment_form"):
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="payment_party")
+        with col2:
+            amount = st.number_input("Amount Received", min_value=0.0, step=0.01, key="payment_amount")
+        with col3:
+            remarks = st.text_input("Remarks", placeholder="e.g., Advance, Bill Clearance", key="payment_remarks")
+        with col4:
+            payment_date = st.date_input("Payment Date", value=date.today(), key="payment_date")
+        
+        submitted = st.form_submit_button("Save Payment")
+        if submitted:
+            if not party_name:
+                st.error("Party name is required")
+                return
+                
+            payment_data = {
+                "partyName": party_name,
+                "amount": amount,
+                "date": payment_date.isoformat(),
+                "remarks": remarks
+            }
+            
+            result = api_call('/api/payments', 'POST', payment_data)
+            if result:
+                st.success("Payment recorded successfully!")
+                st.rerun()
 
-        # Get the party ID
-        cursor.execute("SELECT id FROM parties WHERE name = ?", (party_name_param,))
-        party_row = cursor.fetchone()
+def render_payment_range_section():
+    """Payments Range Download"""
+    st.header("Payments Range Download")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", key="payment_range_start")
+    with col2:
+        end_date = st.date_input("End Date", key="payment_range_end")
+    
+    if st.button("Download Payments PDF"):
+        if start_date and end_date:
+            if start_date <= end_date:
+                st.info("PDF download functionality would be implemented here")
+                # Note: Actual PDF generation would require backend integration
+            else:
+                st.error("Start date must be before end date")
+        else:
+            st.error("Please select both start and end dates")
 
-        if party_row is None:
-            conn.close()
-            return jsonify({"error": "Party not found"}), 404
+def render_delete_payment_section():
+    """Payment Delete Section"""
+    st.header("Payment Delete")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="delete_payment_party")
+    with col2:
+        if st.button("View Payments"):
+            if party_name:
+                payments = api_call(f'/api/payments?partyName={party_name}')
+                if payments:
+                    display_payments_for_deletion(payments, party_name)
+            else:
+                st.error("Please select a party name")
 
-        party_id = party_row['id']
-
-        # Fetch adjustment records for this party, ordered by date and creation time
-        cursor.execute('''
-            SELECT adjustment_date, old_balance, new_balance, reason, created_at
-            FROM opening_balance_adjustments
-            WHERE party_id = ?
-            ORDER BY adjustment_date ASC, created_at ASC
-        ''', (party_id,))
-        history_records = cursor.fetchall()
-
-        conn.close()
-
-        # Format the records for the frontend
-        formatted_history = []
-        for record in history_records:
-            formatted_history.append({
-                "adjustment_date": record['adjustment_date'],
-                "old_balance": record['old_balance'],
-                "new_balance": record['new_balance'],
-                "reason": record['reason'],
-                "created_at": record['created_at']
-            })
-
-        return jsonify(formatted_history), 200
-
-    except Exception as e:
-        print(f"Error fetching opening balance history for {party_name_param}: {e}")
-        traceback.print_exc()
-        return jsonify({"error": f"Error fetching opening balance history: {str(e)}"}), 500
-if __name__ == '__main__':
-    if not os.path.exists(DATABASE_FILE):
-        print(f"Database file '{DATABASE_FILE}' not found. Initializing database.")
-        init_db()
+def display_payments_for_deletion(payments, party_name):
+    """Display payments for deletion"""
+    if payments:
+        df = pd.DataFrame(payments)
+        st.dataframe(df, use_container_width=True)
+        
+        # Delete functionality
+        payment_ids = df.get('paymentId', [])
+        if len(payment_ids) > 0:
+            selected_id = st.selectbox("Select Payment ID to Delete", payment_ids)
+            if st.button("Delete Selected Payment", type="primary"):
+                result = api_call(f'/api/payments/{selected_id}', 'DELETE')
+                if result:
+                    st.success("Payment deleted successfully!")
+                    st.rerun()
     else:
-        # Check tables exist on every startup, but don't clear data unless specified
-        print(f"Database file '{DATABASE_FILE}' found. Checking schema.")
-        init_db(clear_existing_data=False)
-    print(f"Starting Flask server on http://127.0.0.1:5000")
-    print("Ensure your HTML frontend makes API calls to this address.")
-    app.run(debug=True, port=5000)
+        st.info("No payments found for this party")
 
+def render_invoice_range_section():
+    """Invoices Range Download"""
+    st.header("Invoices Range Download")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", key="invoice_range_start")
+    with col2:
+        end_date = st.date_input("End Date", key="invoice_range_end")
+    
+    if st.button("Download Invoices PDF"):
+        if start_date and end_date:
+            if start_date <= end_date:
+                st.info("PDF download functionality would be implemented here")
+            else:
+                st.error("Start date must be before end date")
+        else:
+            st.error("Please select both start and end dates")
+
+def render_bilty_expense_section():
+    """Bilty Expense Report"""
+    st.header("Bilty Expense Report")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", key="bilty_start")
+    with col2:
+        end_date = st.date_input("End Date", key="bilty_end")
+    
+    if st.button("Download Bilty Expense Report PDF"):
+        if start_date and end_date:
+            st.info("Bilty Expense PDF generation would be implemented here")
+
+def render_party_exclude_section():
+    """Party Exclude Report"""
+    st.header("Party Exclude Report")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        parties_to_exclude = st.multiselect("Parties to Exclude", st.session_state.parties)
+    with col2:
+        start_date = st.date_input("Start Date", key="exclude_start")
+    with col3:
+        end_date = st.date_input("End Date", key="exclude_end")
+    
+    if st.button("Download Party Exclude Report PDF"):
+        if parties_to_exclude and start_date and end_date:
+            st.info("Party Exclude PDF generation would be implemented here")
+
+def render_no_bilty_section():
+    """Payments Without Bilty Expense"""
+    st.header("Payments Without Bilty Expense")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", key="no_bilty_start")
+    with col2:
+        end_date = st.date_input("End Date", key="no_bilty_end")
+    
+    if st.button("Download Payments Without Bilty PDF"):
+        if start_date and end_date:
+            st.info("No Bilty Payments PDF generation would be implemented here")
+
+def render_ledger_section():
+    """Feed Mills Ledger Details"""
+    st.header("Feed Mills Ledger Details")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="ledger_party")
+    with col2:
+        if st.button("View Ledger"):
+            if party_name:
+                ledger_data = api_call(f'/api/ledger/{party_name}')
+                if ledger_data:
+                    display_ledger(ledger_data)
+
+def display_ledger(ledger_data):
+    """Display party ledger"""
+    st.subheader(f"Ledger for: {ledger_data.get('partyName', '')}")
+    
+    transactions = ledger_data.get('transactions', [])
+    if transactions:
+        df = pd.DataFrame(transactions)
+        st.dataframe(df, use_container_width=True)
+        
+        # Show opening and current balance
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Opening Balance", f"₹{ledger_data.get('openingBalance', 0):.2f}")
+        with col2:
+            st.metric("Current Balance", f"₹{ledger_data.get('currentBalance', 0):.2f}")
+    else:
+        st.info("No transactions found for this party")
+
+def render_opening_balance_history():
+    """Opening Balance History"""
+    st.header("Opening Balance History")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="history_party")
+    with col2:
+        if st.button("View History"):
+            if party_name:
+                history = api_call(f'/api/parties/{party_name}/opening-balance-history')
+                if history:
+                    display_opening_balance_history(history, party_name)
+
+def display_opening_balance_history(history, party_name):
+    """Display opening balance history"""
+    if history:
+        df = pd.DataFrame(history)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No history found for this party")
+
+def render_product_sales_section():
+    """Product Sales Summary"""
+    st.header("Product Sales Summary with Date Range")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", key="product_sales_start")
+    with col2:
+        end_date = st.date_input("End Date", key="product_sales_end")
+    
+    if st.button("Product Sales Summary PDF"):
+        if start_date and end_date:
+            st.info("Product Sales PDF generation would be implemented here")
+
+def render_party_invoices_section():
+    """Individual Invoices"""
+    st.header("Individual Invoices")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="party_invoices")
+    with col2:
+        start_date = st.date_input("Start Date", key="party_invoices_start")
+    with col3:
+        end_date = st.date_input("End Date", key="party_invoices_end")
+    
+    if st.button("Download Party Invoices"):
+        if party_name and start_date and end_date:
+            st.info("Party Invoices PDF generation would be implemented here")
+
+def render_stock_section():
+    """Stock Management"""
+    st.header("Stock Management")
+    
+    # Add stock form
+    with st.form("stock_form"):
+        st.subheader("Add Stock Item")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            product_name = st.selectbox("Product Name", PRODUCTS, key="stock_product")
+        with col2:
+            batch_no = st.text_input("Batch No.", placeholder="e.g., B-12345")
+        with col3:
+            stock_date = st.date_input("Date", value=date.today(), key="stock_date")
+        with col4:
+            quantity = st.number_input("Quantity", min_value=0, step=1, key="stock_quantity")
+        
+        if st.form_submit_button("Add Stock Item"):
+            if product_name and quantity > 0:
+                new_item = {
+                    "productName": product_name,
+                    "batchNo": batch_no,
+                    "date": stock_date.isoformat(),
+                    "quantity": quantity
+                }
+                st.session_state.stock_items.append(new_item)
+                st.success("Stock item added to list!")
+            else:
+                st.error("Please fill all required fields")
+    
+    # Display current stock items
+    if st.session_state.stock_items:
+        st.subheader("Current Stock Items")
+        stock_df = pd.DataFrame(st.session_state.stock_items)
+        st.dataframe(stock_df, use_container_width=True)
+        
+        if st.button("Save All Stock Items"):
+            result = api_call('/api/stock/batch-add', 'POST', {"items": st.session_state.stock_items})
+            if result:
+                st.success(result.get('message', 'Stock items saved successfully!'))
+                st.session_state.stock_items = []
+                st.rerun()
+    
+    # Available stock
+    st.subheader("Available Stock")
+    if st.button("Refresh Stock"):
+        stock_data = api_call('/api/stock')
+        if stock_data:
+            display_stock_data(stock_data)
+
+def display_stock_data(stock_data):
+    """Display available stock"""
+    if stock_data:
+        df = pd.DataFrame(stock_data)
+        st.dataframe(df, use_container_width=True)
+    else:
+        st.info("No stock data available")
+
+def render_edit_invoice_section():
+    """Invoice Update & Delete"""
+    st.header("Invoice Update & Delete")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        invoice_number = st.text_input("Invoice Number", placeholder="Enter Invoice # to Edit/Delete")
+    with col2:
+        if st.button("Search Invoice"):
+            if invoice_number:
+                invoice_data = api_call(f'/api/invoices/{invoice_number}')
+                if invoice_data:
+                    load_invoice_for_editing(invoice_data)
+    
+    # Edit form will appear here when an invoice is loaded
+    if 'editing_invoice' in st.session_state:
+        render_invoice_edit_form()
+
+def load_invoice_for_editing(invoice_data):
+    """Load invoice data for editing"""
+    st.session_state.editing_invoice = invoice_data
+    st.session_state.invoice_items = invoice_data.get('items', [])
+    st.success(f"Invoice #{invoice_data.get('invoiceNumber')} loaded for editing")
+
+def render_invoice_edit_form():
+    """Render form for editing invoice"""
+    invoice_data = st.session_state.editing_invoice
+    
+    with st.form("edit_invoice_form"):
+        st.subheader(f"Editing Invoice #{invoice_data.get('invoiceNumber')}")
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            party_name = st.text_input("Party Name", value=invoice_data.get('partyName', ''))
+        with col2:
+            invoice_date = st.date_input("Date", 
+                                       value=datetime.strptime(invoice_data.get('date', '2024-01-01'), '%Y-%m-%d').date())
+        with col3:
+            st.text_input("Invoice #", value=invoice_data.get('invoiceNumber', ''), disabled=True)
+        
+        # Invoice items editing would go here
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.form_submit_button("Update Invoice"):
+                st.info("Invoice update functionality would be implemented here")
+        with col2:
+            if st.form_submit_button("Delete Invoice", type="secondary"):
+                result = api_call(f'/api/invoices/{invoice_data.get("invoiceNumber")}', 'DELETE')
+                if result:
+                    st.success("Invoice deleted successfully!")
+                    del st.session_state.editing_invoice
+                    st.rerun()
+
+def render_invoice_creation_section():
+    """Main Invoice Creation Section"""
+    st.header("Create New Invoice")
+    
+    with st.form("invoice_form"):
+        # Party and basic info
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="invoice_party")
+        with col2:
+            invoice_date = st.date_input("Date", value=date.today(), key="invoice_date")
+        with col3:
+            st.text_input("Invoice #", value=st.session_state.current_invoice_number, disabled=True)
+        
+        # Invoice items
+        st.subheader("Invoice Items")
+        render_invoice_items()
+        
+        # Totals
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            gst_percentage = st.number_input("GST %", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
+        with col2:
+            previous_balance = st.number_input("Previous Balance", value=0.0, step=0.01)
+        with col3:
+            subtotal = calculate_subtotal()
+            st.metric("Subtotal", f"₹{subtotal:.2f}")
+        with col4:
+            grand_total = calculate_grand_total(subtotal, gst_percentage, previous_balance)
+            st.metric("Grand Total", f"₹{grand_total:.2f}")
+        
+        # Action buttons
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if st.form_submit_button("Save Invoice"):
+                save_invoice(party_name, invoice_date, gst_percentage, previous_balance)
+        with col2:
+            if st.form_submit_button("Download PDF"):
+                st.info("PDF download would be implemented here")
+        with col3:
+            if st.form_submit_button("Clear Form"):
+                st.session_state.invoice_items = []
+                st.rerun()
+        with col4:
+            if st.form_submit_button("Refresh"):
+                st.rerun()
+
+def render_invoice_items():
+    """Render invoice items with add/remove functionality"""
+    # Add new item row
+    col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 2, 1])
+    with col1:
+        new_product = st.selectbox("Product", [""] + PRODUCTS, key="new_product")
+    with col2:
+        new_qty = st.number_input("Qty", min_value=0.0, step=0.1, key="new_qty")
+    with col3:
+        new_packing = st.selectbox("Packing", PACKING_OPTIONS, key="new_packing")
+    with col4:
+        new_unit_price = st.number_input("Unit Price", min_value=0.0, step=0.01, key="new_unit_price")
+    with col5:
+        new_amount = new_qty * new_unit_price
+        st.text_input("Amount", value=f"{new_amount:.2f}", disabled=True)
+    with col6:
+        if st.button("Add", key="add_item"):
+            if new_product and new_qty > 0:
+                new_item = {
+                    "productName": new_product,
+                    "qty": new_qty,
+                    "packing": new_packing,
+                    "unitPrice": new_unit_price,
+                    "amount": new_amount
+                }
+                st.session_state.invoice_items.append(new_item)
+                st.rerun()
+    
+    # Display current items
+    if st.session_state.invoice_items:
+        st.subheader("Current Items")
+        for i, item in enumerate(st.session_state.invoice_items):
+            col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 2, 1])
+            with col1:
+                st.text(item['productName'])
+            with col2:
+                st.text(str(item['qty']))
+            with col3:
+                st.text(item['packing'])
+            with col4:
+                st.text(f"₹{item['unitPrice']:.2f}")
+            with col5:
+                st.text(f"₹{item['amount']:.2f}")
+            with col6:
+                if st.button("❌", key=f"remove_{i}"):
+                    st.session_state.invoice_items.pop(i)
+                    st.rerun()
+
+def calculate_subtotal():
+    """Calculate invoice subtotal"""
+    return sum(item['amount'] for item in st.session_state.invoice_items)
+
+def calculate_grand_total(subtotal, gst_percentage, previous_balance):
+    """Calculate grand total"""
+    gst_amount = subtotal * (gst_percentage / 100)
+    return subtotal + gst_amount + previous_balance
+
+def save_invoice(party_name, invoice_date, gst_percentage, previous_balance):
+    """Save invoice to backend"""
+    if not party_name:
+        st.error("Party name is required")
+        return
+        
+    if not st.session_state.invoice_items:
+        st.error("Please add at least one invoice item")
+        return
+    
+    invoice_data = {
+        "partyName": party_name,
+        "date": invoice_date.isoformat(),
+        "invoiceNumber": st.session_state.current_invoice_number,
+        "items": st.session_state.invoice_items,
+        "totalAmount": calculate_subtotal(),
+        "gstPercentage": gst_percentage,
+        "previousBalance": previous_balance,
+        "grandTotal": calculate_grand_total(calculate_subtotal(), gst_percentage, previous_balance)
+    }
+    
+    result = api_call('/api/invoices', 'POST', invoice_data)
+    if result:
+        st.success("Invoice saved successfully!")
+        # Update invoice number and clear items
+        st.session_state.current_invoice_number = result.get('nextInvoiceNumber', str(int(st.session_state.current_invoice_number) + 1))
+        st.session_state.invoice_items = []
+        st.rerun()
+
+def render_additional_actions():
+    """Additional actions section"""
+    st.header("Additional Actions")
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("All Party Balances PDF"):
+            st.info("All Party Balances PDF generation would be implemented here")
+    with col2:
+        if st.button("Product Sales with Party"):
+            st.info("Product Sales PDF generation would be implemented here")
+    with col3:
+        if st.button("Refresh Application"):
+            st.session_state.initialized = False
+            st.rerun()
+
+# Main App
+def main():
+    st.set_page_config(
+        page_title="NUTRION - Invoice, Ledger & Stock",
+        page_icon="📊",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Custom CSS
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #FFA500;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .section-header {
+        background-color: #FFA500;
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        margin-top: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.markdown('<h1 class="main-header">NUTRION - Invoice, Ledger & Stock</h1>', unsafe_allow_html=True)
+    
+    # Initialize app
+    initialize_app()
+    
+    # Status indicator
+    if st.session_state.initialized:
+        st.success("✅ Application initialized successfully")
+    else:
+        st.warning("🔄 Initializing application...")
+    
+    # Create tabs for better organization
+    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+        "📄 Invoices", 
+        "💰 Payments", 
+        "📊 Ledger", 
+        "📦 Stock", 
+        "📈 Reports",
+        "🛠️ Tools"
+    ])
+    
+    with tab1:
+        render_invoice_creation_section()
+        st.markdown("---")
+        render_edit_invoice_section()
+    
+    with tab2:
+        render_payment_section()
+        st.markdown("---")
+        render_payment_range_section()
+        st.markdown("---")
+        render_delete_payment_section()
+    
+    with tab3:
+        render_ledger_section()
+        st.markdown("---")
+        render_opening_balance_history()
+    
+    with tab4:
+        render_stock_section()
+    
+    with tab5:
+        render_invoice_range_section()
+        st.markdown("---")
+        render_bilty_expense_section()
+        st.markdown("---")
+        render_party_exclude_section()
+        st.markdown("---")
+        render_no_bilty_section()
+        st.markdown("---")
+        render_product_sales_section()
+        st.markdown("---")
+        render_party_invoices_section()
+    
+    with tab6:
+        render_additional_actions()
+        st.markdown("---")
+        
+        # Data management section
+        st.header("Data Management")
+        if st.button("Refresh Party List", type="secondary"):
+            result = api_call('/api/parties')
+            if result:
+                st.session_state.parties = [party['name'] for party in result]
+                st.success("Party list refreshed!")
+        
+        st.markdown("---")
+        
+        # Danger zone
+        st.header("Danger Zone")
+        if st.button("Delete All Data", type="primary"):
+            if st.checkbox("I understand this will delete ALL data permanently"):
+                if st.button("CONFIRM DELETE ALL DATA", type="secondary"):
+                    result = api_call('/api/admin/delete-all-data', 'POST')
+                    if result:
+                        st.success("All data deleted successfully!")
+                        st.session_state.initialized = False
+                        st.rerun()
+
+if __name__ == "__main__":
+    main()
