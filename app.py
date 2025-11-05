@@ -1674,15 +1674,11 @@ def main():
             st.info(f"Products Available: {len(PRODUCTS)}")
     
     # Footer
-  st.markdown("---")
+st.markdown("---")
 st.markdown(
     """
-    <div style="font-size:16px;">
-        <b><span style="color:black;">Data</span><span style="color:#007BFF;">nex</span> <span style="color:#2E8B57;">Solution</span></b> |
-        For any query please contact 📞 <b>+92 320 7429422</b>
-    </div>
-    """,
-    unsafe_allow_html=True
+    **Datanex Solution** | For any query please contact 📞 +92 320 7429422
+    """
 )
 if __name__ == "__main__":
     main()
