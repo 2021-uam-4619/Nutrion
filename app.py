@@ -1674,20 +1674,6 @@ def main():
             st.info(f"Products Available: {len(PRODUCTS)}")
     
     # Footer
-   st.markdown("---", unsafe_allow_html=True)
-
-st.markdown(
-    """
-    <div style="text-align:center; font-size:16px;">
-        <b>
-            <span style="color:black;">Data</span><span style="color:#007BFF;">nex</span> 
-            <span style="color:#28A745;">Solutions</span>
-        </b>
-        <br>
-        <span style="color:#555;">For any query, please contact 📞 <b>+92 320 7429422</b></span>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+  
 if __name__ == "__main__":
     main()
