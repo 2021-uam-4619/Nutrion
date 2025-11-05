@@ -1,3 +1,5 @@
 streamlit
 reportlab
 sqlite3
+fpdf
+pandas
