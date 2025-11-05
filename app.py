@@ -1,13 +1,12 @@
 # app.py
 import streamlit as st
+import sqlite3
 import pandas as pd
 from datetime import datetime, date
-import io
-from backend import backend
-import base64
-from fpdf import FPDF
 import tempfile
 import os
+import base64
+from fpdf import FPDF
 
 # Initialize session state
 if 'initialized' not in st.session_state:
@@ -31,6 +30,382 @@ PRODUCTS = [
 ]
 
 PACKING_OPTIONS = ["Ltr", "Kg", "25 Ltr", "25 kg"]
+
+class NutritionBackend:
+    def __init__(self, db_path='invoice_app_v4.db'):
+        self.db_path = db_path
+        self.init_db()
+    
+    def init_db(self):
+        """Initialize database connection and create tables if they don't exist"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Create tables if they don't exist
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS parties (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                initial_opening_balance REAL DEFAULT 0.0
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS invoices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_number TEXT UNIQUE NOT NULL,
+                party_name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                total_amount REAL NOT NULL,
+                previous_balance REAL NOT NULL,
+                grand_total REAL NOT NULL
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS invoice_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                invoice_id INTEGER NOT NULL,
+                product_name TEXT NOT NULL,
+                qty REAL NOT NULL,
+                packing TEXT,
+                unit_price REAL NOT NULL,
+                amount REAL NOT NULL,
+                FOREIGN KEY (invoice_id) REFERENCES invoices (id) ON DELETE CASCADE
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                party_name TEXT NOT NULL,
+                amount REAL NOT NULL,
+                date TEXT NOT NULL,
+                remarks TEXT
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS stock (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_name TEXT NOT NULL,
+                batch_no TEXT,
+                date TEXT NOT NULL,
+                quantity REAL NOT NULL DEFAULT 0
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS opening_balance_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                party_name TEXT NOT NULL,
+                adjustment_date TEXT NOT NULL,
+                old_balance REAL NOT NULL,
+                new_balance REAL NOT NULL,
+                reason TEXT,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def get_connection(self):
+        """Get database connection"""
+        return sqlite3.connect(self.db_path)
+    
+    def get_next_invoice_number(self):
+        """Get next invoice number"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT MAX(CAST(invoice_number AS INTEGER)) FROM invoices WHERE invoice_number GLOB '[0-9]*'")
+            result = cursor.fetchone()
+            next_num = result[0] + 1 if result and result[0] is not None else 1
+            return {"nextInvoiceNumber": str(next_num)}
+        except Exception as e:
+            return {"nextInvoiceNumber": "1"}
+        finally:
+            conn.close()
+    
+    def get_parties(self):
+        """Get all parties"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT name FROM parties")
+            parties = [{"name": row[0]} for row in cursor.fetchall()]
+            return parties
+        except Exception as e:
+            return []
+        finally:
+            conn.close()
+    
+    def get_party_balance(self, party_name):
+        """Get party balance information"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get initial balance
+            cursor.execute("SELECT initial_opening_balance FROM parties WHERE name = ?", (party_name,))
+            party_row = cursor.fetchone()
+            initial_balance = party_row[0] if party_row else 0.0
+            
+            # Calculate current balance
+            cursor.execute("SELECT SUM(total_amount) FROM invoices WHERE party_name = ?", (party_name,))
+            total_invoices = cursor.fetchone()[0] or 0.0
+            
+            cursor.execute("SELECT SUM(amount) FROM payments WHERE party_name = ?", (party_name,))
+            total_payments = cursor.fetchone()[0] or 0.0
+            
+            current_balance = initial_balance + total_invoices - total_payments
+            
+            return {
+                "balance": current_balance,
+                "initialOpeningBalance": initial_balance
+            }
+        except Exception as e:
+            return {"balance": 0.0, "initialOpeningBalance": 0.0}
+        finally:
+            conn.close()
+    
+    def create_invoice(self, invoice_data):
+        """Create a new invoice"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Ensure party exists
+            cursor.execute("INSERT OR IGNORE INTO parties (name) VALUES (?)", (invoice_data['partyName'],))
+            
+            # Insert invoice
+            cursor.execute('''
+                INSERT INTO invoices (invoice_number, party_name, date, total_amount, previous_balance, grand_total)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (
+                invoice_data['invoiceNumber'],
+                invoice_data['partyName'],
+                invoice_data['date'],
+                invoice_data['totalAmount'],
+                invoice_data['previousBalance'],
+                invoice_data['grandTotal']
+            ))
+            
+            invoice_id = cursor.lastrowid
+            
+            # Insert items
+            for item in invoice_data['items']:
+                cursor.execute('''
+                    INSERT INTO invoice_items (invoice_id, product_name, qty, packing, unit_price, amount)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (
+                    invoice_id,
+                    item['productName'],
+                    item['qty'],
+                    item['packing'],
+                    item['unitPrice'],
+                    item['amount']
+                ))
+            
+            conn.commit()
+            next_invoice = self.get_next_invoice_number()
+            
+            return {
+                "message": "Invoice created successfully!",
+                "invoiceNumber": invoice_data['invoiceNumber'],
+                "nextInvoiceNumber": next_invoice['nextInvoiceNumber']
+            }
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+    
+    def record_payment(self, payment_data):
+        """Record a payment"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            cursor.execute("INSERT OR IGNORE INTO parties (name) VALUES (?)", (payment_data['partyName'],))
+            
+            cursor.execute('''
+                INSERT INTO payments (party_name, amount, date, remarks)
+                VALUES (?, ?, ?, ?)
+            ''', (
+                payment_data['partyName'],
+                payment_data['amount'],
+                payment_data['date'],
+                payment_data.get('remarks', '')
+            ))
+            
+            payment_id = cursor.lastrowid
+            conn.commit()
+            
+            return {
+                "message": "Payment recorded successfully!",
+                "paymentId": payment_id
+            }
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+    
+    def get_payments(self, party_name=None, start_date=None, end_date=None):
+        """Get payments with optional filters"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            query = "SELECT id, party_name, amount, date, remarks FROM payments WHERE 1=1"
+            params = []
+            
+            if party_name:
+                query += " AND party_name = ?"
+                params.append(party_name)
+            
+            if start_date:
+                query += " AND date >= ?"
+                params.append(start_date)
+            
+            if end_date:
+                query += " AND date <= ?"
+                params.append(end_date)
+            
+            query += " ORDER BY date DESC"
+            
+            cursor.execute(query, params)
+            payments = []
+            for row in cursor.fetchall():
+                payments.append({
+                    "paymentId": row[0],
+                    "partyName": row[1],
+                    "amount": row[2],
+                    "date": row[3],
+                    "remarks": row[4]
+                })
+            
+            return payments
+        except Exception as e:
+            return []
+        finally:
+            conn.close()
+    
+    def get_ledger(self, party_name):
+        """Get party ledger"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Get party balance info
+            balance_info = self.get_party_balance(party_name)
+            
+            # Get invoices and items
+            cursor.execute('''
+                SELECT i.invoice_number, i.date, ii.product_name, ii.qty, ii.packing, ii.unit_price, ii.amount
+                FROM invoices i
+                JOIN invoice_items ii ON i.id = ii.invoice_id
+                WHERE i.party_name = ?
+                ORDER BY i.date, i.invoice_number
+            ''', (party_name,))
+            
+            transactions = []
+            for row in cursor.fetchall():
+                transactions.append({
+                    'type': 'invoice_item',
+                    'date': row[1],
+                    'invoiceNumber': row[0],
+                    'productName': row[2],
+                    'qty': row[3],
+                    'packing': row[4],
+                    'unitPrice': row[5],
+                    'amount': row[6]
+                })
+            
+            # Get payments
+            cursor.execute('''
+                SELECT amount, date, remarks FROM payments 
+                WHERE party_name = ? 
+                ORDER BY date
+            ''', (party_name,))
+            
+            for row in cursor.fetchall():
+                transactions.append({
+                    'type': 'payment',
+                    'date': row[1],
+                    'remarks': row[2],
+                    'amount': row[0]
+                })
+            
+            # Sort by date
+            transactions.sort(key=lambda x: x['date'])
+            
+            return {
+                "partyName": party_name,
+                "openingBalance": balance_info['initialOpeningBalance'],
+                "currentBalance": balance_info['balance'],
+                "transactions": transactions
+            }
+        except Exception as e:
+            return {"partyName": party_name, "openingBalance": 0, "currentBalance": 0, "transactions": []}
+        finally:
+            conn.close()
+    
+    def add_stock(self, stock_data):
+        """Add stock items"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            for item in stock_data['items']:
+                cursor.execute('''
+                    INSERT INTO stock (product_name, batch_no, date, quantity)
+                    VALUES (?, ?, ?, ?)
+                ''', (
+                    item['productName'],
+                    item.get('batchNo', ''),
+                    item['date'],
+                    item['quantity']
+                ))
+            
+            conn.commit()
+            return {"message": f"{len(stock_data['items'])} stock item(s) added successfully!"}
+            
+        except Exception as e:
+            conn.rollback()
+            raise e
+        finally:
+            conn.close()
+    
+    def get_stock(self):
+        """Get all stock items"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT id, product_name, batch_no, date, quantity FROM stock ORDER BY product_name, date DESC")
+            
+            stock_items = []
+            for row in cursor.fetchall():
+                stock_items.append({
+                    "id": row[0],
+                    "productName": row[1],
+                    "batchNo": row[2],
+                    "date": row[3],
+                    "quantity": row[4]
+                })
+            
+            return stock_items
+        except Exception as e:
+            return []
+        finally:
+            conn.close()
+
+# Create backend instance
+backend = NutritionBackend('invoice_app_v4.db')
 
 class PDFGenerator(FPDF):
     def header(self):
@@ -103,14 +478,9 @@ def generate_invoice_pdf(invoice_data):
 
 def get_pdf_download_link(pdf, filename):
     """Generate a download link for PDF"""
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as tmp_file:
-        pdf.output(tmp_file.name)
-        with open(tmp_file.name, "rb") as f:
-            pdf_bytes = f.read()
-        os.unlink(tmp_file.name)
-    
-    b64 = base64.b64encode(pdf_bytes).decode()
-    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download PDF</a>'
+    pdf_output = pdf.output(dest='S').encode('latin1')
+    b64 = base64.b64encode(pdf_output).decode()
+    href = f'<a href="data:application/pdf;base64,{b64}" download="{filename}">Download {filename}</a>'
     return href
 
 def initialize_app():
@@ -128,15 +498,16 @@ def initialize_app():
                 st.session_state.parties = [party['name'] for party in result]
             
             st.session_state.initialized = True
+            st.success("✅ Application initialized successfully with existing database!")
         except Exception as e:
             st.error(f"Initialization error: {str(e)}")
 
 # UI Components
 def render_payment_section():
     """Payment Received Section"""
-    st.header("Payment Received")
+    st.header("💰 Payment Received")
     
-    with st.form("payment_form"):
+    with st.form("payment_form", clear_on_submit=True):
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
@@ -148,10 +519,13 @@ def render_payment_section():
         with col4:
             payment_date = st.date_input("Payment Date", value=date.today(), key="payment_date")
         
-        submitted = st.form_submit_button("Save Payment")
+        submitted = st.form_submit_button("💾 Save Payment")
         if submitted:
             if not party_name:
                 st.error("Party name is required")
+                return
+            if amount <= 0:
+                st.error("Amount must be greater than 0")
                 return
                 
             payment_data = {
@@ -164,7 +538,7 @@ def render_payment_section():
             try:
                 result = backend.record_payment(payment_data)
                 if result:
-                    st.success("Payment recorded successfully!")
+                    st.success("✅ Payment recorded successfully!")
                     # Refresh parties list
                     parties = backend.get_parties()
                     st.session_state.parties = [party['name'] for party in parties]
@@ -173,7 +547,7 @@ def render_payment_section():
 
 def render_payment_range_section():
     """Payments Range Download"""
-    st.header("Payments Range Download")
+    st.header("📥 Payments Range Download")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -181,7 +555,7 @@ def render_payment_range_section():
     with col2:
         end_date = st.date_input("End Date", key="payment_range_end")
     
-    if st.button("Download Payments PDF"):
+    if st.button("📄 Download Payments PDF"):
         if start_date and end_date:
             if start_date <= end_date:
                 try:
@@ -195,16 +569,25 @@ def render_payment_range_section():
                         pdf.ln(10)
                         
                         # Add payments table
+                        pdf.set_fill_color(200, 220, 255)
                         pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
                         pdf.cell(60, 10, 'Party Name', 1, 0, 'C', True)
                         pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
                         pdf.cell(40, 10, 'Amount', 1, 1, 'C', True)
                         
+                        pdf.set_fill_color(255, 255, 255)
+                        total_amount = 0
                         for payment in payments:
                             pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
                             pdf.cell(60, 10, payment['partyName'], 1, 0)
                             pdf.cell(40, 10, payment['date'], 1, 0)
                             pdf.cell(40, 10, f"₹{payment['amount']:.2f}", 1, 1, 'R')
+                            total_amount += payment['amount']
+                        
+                        pdf.ln(10)
+                        pdf.set_font('Arial', 'B', 12)
+                        pdf.cell(120, 10, 'Total Amount:', 0, 0, 'R')
+                        pdf.cell(40, 10, f"₹{total_amount:.2f}", 0, 1, 'R')
                         
                         st.markdown(get_pdf_download_link(pdf, f"payments_{start_date}_{end_date}.pdf"), unsafe_allow_html=True)
                     else:
@@ -218,13 +601,13 @@ def render_payment_range_section():
 
 def render_delete_payment_section():
     """Payment Delete Section"""
-    st.header("Payment Delete")
+    st.header("🗑️ Payment Management")
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="delete_payment_party")
+        party_name = st.selectbox("Select Party", [""] + st.session_state.parties, key="delete_payment_party")
     with col2:
-        if st.button("View Payments"):
+        if st.button("🔍 View Payments"):
             if party_name:
                 try:
                     payments = backend.get_payments(party_name=party_name)
@@ -243,89 +626,30 @@ def display_payments_for_deletion(payments, party_name):
         df = pd.DataFrame(payments)
         st.dataframe(df, use_container_width=True)
         
-        # Simple delete functionality
-        if st.button("Delete All Payments for This Party", type="secondary"):
-            st.warning("This will delete all payments for this party. This action cannot be undone.")
-            if st.button("Confirm Delete"):
-                st.info("Delete functionality would be implemented here")
-                # Note: In a real implementation, you'd add delete methods to the backend
-
-def render_invoice_range_section():
-    """Invoices Range Download"""
-    st.header("Invoices Range Download")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", key="invoice_range_start")
-    with col2:
-        end_date = st.date_input("End Date", key="invoice_range_end")
-    
-    if st.button("Download Invoices PDF"):
-        if start_date and end_date:
-            st.info("Invoice range PDF download functionality")
-        else:
-            st.error("Please select both start and end dates")
-
-def render_bilty_expense_section():
-    """Bilty Expense Report"""
-    st.header("Bilty Expense Report")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", key="bilty_start")
-    with col2:
-        end_date = st.date_input("End Date", key="bilty_end")
-    
-    if st.button("Download Bilty Expense Report PDF"):
-        if start_date and end_date:
-            st.info("Bilty Expense PDF generation")
-
-def render_party_exclude_section():
-    """Party Exclude Report"""
-    st.header("Party Exclude Report")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        parties_to_exclude = st.multiselect("Parties to Exclude", st.session_state.parties)
-    with col2:
-        start_date = st.date_input("Start Date", key="exclude_start")
-    with col3:
-        end_date = st.date_input("End Date", key="exclude_end")
-    
-    if st.button("Download Party Exclude Report PDF"):
-        if parties_to_exclude and start_date and end_date:
-            st.info("Party Exclude PDF generation")
-
-def render_no_bilty_section():
-    """Payments Without Bilty Expense"""
-    st.header("Payments Without Bilty Expense")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", key="no_bilty_start")
-    with col2:
-        end_date = st.date_input("End Date", key="no_bilty_end")
-    
-    if st.button("Download Payments Without Bilty PDF"):
-        if start_date and end_date:
-            st.info("No Bilty Payments PDF generation")
+        # Show summary
+        total_amount = df['amount'].sum()
+        st.metric("Total Payments", f"₹{total_amount:.2f}")
 
 def render_ledger_section():
     """Feed Mills Ledger Details"""
-    st.header("Feed Mills Ledger Details")
+    st.header("📊 Feed Mills Ledger Details")
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="ledger_party")
+        party_name = st.selectbox("Select Party", [""] + st.session_state.parties, key="ledger_party")
     with col2:
-        if st.button("View Ledger"):
+        if st.button("👀 View Ledger"):
             if party_name:
                 try:
                     ledger_data = backend.get_ledger(party_name)
                     if ledger_data:
                         display_ledger(ledger_data)
+                    else:
+                        st.info("No ledger data found for this party")
                 except Exception as e:
                     st.error(f"Error fetching ledger: {str(e)}")
+            else:
+                st.error("Please select a party name")
 
 def display_ledger(ledger_data):
     """Display party ledger"""
@@ -337,68 +661,37 @@ def display_ledger(ledger_data):
         st.dataframe(df, use_container_width=True)
         
         # Show opening and current balance
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Opening Balance", f"₹{ledger_data.get('openingBalance', 0):.2f}")
         with col2:
             st.metric("Current Balance", f"₹{ledger_data.get('currentBalance', 0):.2f}")
+        with col3:
+            total_transactions = len(transactions)
+            st.metric("Total Transactions", total_transactions)
     else:
         st.info("No transactions found for this party")
 
-def render_opening_balance_history():
-    """Opening Balance History"""
-    st.header("Opening Balance History")
-    st.info("Opening balance history functionality would be implemented here")
-
-def render_product_sales_section():
-    """Product Sales Summary"""
-    st.header("Product Sales Summary with Date Range")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", key="product_sales_start")
-    with col2:
-        end_date = st.date_input("End Date", key="product_sales_end")
-    
-    if st.button("Product Sales Summary PDF"):
-        if start_date and end_date:
-            st.info("Product Sales PDF generation")
-
-def render_party_invoices_section():
-    """Individual Invoices"""
-    st.header("Individual Invoices")
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        party_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="party_invoices")
-    with col2:
-        start_date = st.date_input("Start Date", key="party_invoices_start")
-    with col3:
-        end_date = st.date_input("End Date", key="party_invoices_end")
-    
-    if st.button("Download Party Invoices"):
-        if party_name and start_date and end_date:
-            st.info("Party Invoices PDF generation")
-
 def render_stock_section():
     """Stock Management"""
-    st.header("Stock Management")
+    st.header("📦 Stock Management")
     
     # Add stock form
-    with st.form("stock_form"):
+    with st.form("stock_form", clear_on_submit=True):
         st.subheader("Add Stock Item")
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
             product_name = st.selectbox("Product Name", PRODUCTS, key="stock_product")
         with col2:
-            batch_no = st.text_input("Batch No.", placeholder="e.g., B-12345")
+            batch_no = st.text_input("Batch No.", placeholder="e.g., B-12345", key="batch_no")
         with col3:
             stock_date = st.date_input("Date", value=date.today(), key="stock_date")
         with col4:
             quantity = st.number_input("Quantity", min_value=0, step=1, key="stock_quantity")
         
-        if st.form_submit_button("Add Stock Item"):
+        submitted = st.form_submit_button("➕ Add Stock Item")
+        if submitted:
             if product_name and quantity > 0:
                 new_item = {
                     "productName": product_name,
@@ -407,32 +700,40 @@ def render_stock_section():
                     "quantity": quantity
                 }
                 st.session_state.stock_items.append(new_item)
-                st.success("Stock item added to list!")
+                st.success("✅ Stock item added to list!")
             else:
                 st.error("Please fill all required fields")
     
-    # Display current stock items
+    # Display current stock items to be added
     if st.session_state.stock_items:
-        st.subheader("Current Stock Items")
+        st.subheader("📋 Stock Items to be Added")
         stock_df = pd.DataFrame(st.session_state.stock_items)
         st.dataframe(stock_df, use_container_width=True)
         
-        if st.button("Save All Stock Items"):
-            try:
-                result = backend.add_stock({"items": st.session_state.stock_items})
-                if result:
-                    st.success(result.get('message', 'Stock items saved successfully!'))
-                    st.session_state.stock_items = []
-            except Exception as e:
-                st.error(f"Error saving stock: {str(e)}")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("💾 Save All Stock Items"):
+                try:
+                    result = backend.add_stock({"items": st.session_state.stock_items})
+                    if result:
+                        st.success(result.get('message', '✅ Stock items saved successfully!'))
+                        st.session_state.stock_items = []
+                except Exception as e:
+                    st.error(f"Error saving stock: {str(e)}")
+        with col2:
+            if st.button("🗑️ Clear List"):
+                st.session_state.stock_items = []
+                st.rerun()
     
     # Available stock
-    st.subheader("Available Stock")
-    if st.button("Refresh Stock"):
+    st.subheader("📊 Available Stock")
+    if st.button("🔄 Refresh Stock"):
         try:
             stock_data = backend.get_stock()
             if stock_data:
                 display_stock_data(stock_data)
+            else:
+                st.info("No stock data available")
         except Exception as e:
             st.error(f"Error fetching stock: {str(e)}")
 
@@ -441,12 +742,25 @@ def display_stock_data(stock_data):
     if stock_data:
         df = pd.DataFrame(stock_data)
         st.dataframe(df, use_container_width=True)
+        
+        # Show stock summary
+        total_items = len(stock_data)
+        total_quantity = sum(item['quantity'] for item in stock_data)
+        unique_products = len(set(item['productName'] for item in stock_data))
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Products", unique_products)
+        with col2:
+            st.metric("Total Stock Items", total_items)
+        with col3:
+            st.metric("Total Quantity", total_quantity)
     else:
         st.info("No stock data available")
 
 def render_invoice_creation_section():
     """Main Invoice Creation Section"""
-    st.header("Create New Invoice")
+    st.header("📄 Create New Invoice")
     
     # Party and basic info
     col1, col2, col3 = st.columns(3)
@@ -455,40 +769,46 @@ def render_invoice_creation_section():
     with col2:
         invoice_date = st.date_input("Date", value=date.today(), key="invoice_date")
     with col3:
-        st.text_input("Invoice #", value=st.session_state.current_invoice_number, disabled=True)
+        st.text_input("Invoice #", value=st.session_state.current_invoice_number, disabled=True, key="invoice_number")
     
-    # Invoice items
-    st.subheader("Invoice Items")
+    # Invoice items section
+    st.subheader("🛒 Invoice Items")
     render_invoice_items()
     
-    # Totals
+    # Calculate totals
+    subtotal = calculate_subtotal()
+    
+    # Get previous balance for the party
+    previous_balance = 0.0
+    if party_name:
+        try:
+            balance_info = backend.get_party_balance(party_name)
+            previous_balance = balance_info['balance']
+        except:
+            pass
+    
+    gst_percentage = st.number_input("GST %", min_value=0.0, max_value=100.0, value=0.0, step=0.1, key="gst_percentage")
+    grand_total = calculate_grand_total(subtotal, gst_percentage, previous_balance)
+    
+    # Display totals
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        gst_percentage = st.number_input("GST %", min_value=0.0, max_value=100.0, value=0.0, step=0.1)
-    with col2:
-        # Get previous balance for the party
-        previous_balance = 0.0
-        if party_name:
-            try:
-                balance_info = backend.get_party_balance(party_name)
-                previous_balance = balance_info['balance']
-            except:
-                pass
-        st.number_input("Previous Balance", value=previous_balance, step=0.01, disabled=True)
-    with col3:
-        subtotal = calculate_subtotal()
         st.metric("Subtotal", f"₹{subtotal:.2f}")
+    with col2:
+        st.metric("Previous Balance", f"₹{previous_balance:.2f}")
+    with col3:
+        gst_amount = subtotal * (gst_percentage / 100)
+        st.metric("GST Amount", f"₹{gst_amount:.2f}")
     with col4:
-        grand_total = calculate_grand_total(subtotal, gst_percentage, previous_balance)
-        st.metric("Grand Total", f"₹{grand_total:.2f}")
+        st.metric("Grand Total", f"₹{grand_total:.2f}", delta=f"₹{grand_total - subtotal - previous_balance:.2f}")
     
     # Action buttons
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("Save Invoice", type="primary"):
-            save_invoice(party_name, invoice_date, gst_percentage, previous_balance)
+        if st.button("💾 Save Invoice", type="primary", use_container_width=True):
+            save_invoice(party_name, invoice_date, gst_percentage, previous_balance, grand_total)
     with col2:
-        if st.button("Download PDF"):
+        if st.button("📄 Download PDF", use_container_width=True):
             if st.session_state.invoice_items and party_name:
                 invoice_data = {
                     "partyName": party_name,
@@ -504,16 +824,17 @@ def render_invoice_creation_section():
             else:
                 st.error("Please add items and select a party first")
     with col3:
-        if st.button("Clear Form"):
+        if st.button("🗑️ Clear Form", use_container_width=True):
             st.session_state.invoice_items = []
             st.rerun()
     with col4:
-        if st.button("Refresh"):
+        if st.button("🔄 Refresh", use_container_width=True):
             st.rerun()
 
 def render_invoice_items():
     """Render invoice items with add/remove functionality"""
-    # Add new item row
+    # Add new item controls
+    st.write("### Add New Item")
     col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 2, 1])
     
     with col1:
@@ -526,12 +847,13 @@ def render_invoice_items():
         new_unit_price = st.number_input("Unit Price", min_value=0.0, step=0.01, key="new_unit_price")
     with col5:
         new_amount = new_qty * new_unit_price
-        st.text_input("Amount", value=f"{new_amount:.2f}", disabled=True, key="new_amount")
+        st.text_input("Amount", value=f"{new_amount:.2f}", disabled=True, key="new_amount_display")
     
-    # Add button outside any form
+    # Add button
     with col6:
-        if st.button("Add", key="add_item"):
-            if new_product and new_qty > 0:
+        st.write("")  # Spacer
+        if st.button("➕ Add", key="add_item", use_container_width=True):
+            if new_product and new_qty > 0 and new_unit_price > 0:
                 new_item = {
                     "productName": new_product,
                     "qty": new_qty,
@@ -541,10 +863,12 @@ def render_invoice_items():
                 }
                 st.session_state.invoice_items.append(new_item)
                 st.rerun()
+            else:
+                st.error("Please fill all item fields correctly")
     
     # Display current items
     if st.session_state.invoice_items:
-        st.subheader("Current Items")
+        st.write("### Current Items")
         for i, item in enumerate(st.session_state.invoice_items):
             col1, col2, col3, col4, col5, col6 = st.columns([3, 2, 2, 2, 2, 1])
             with col1:
@@ -571,7 +895,7 @@ def calculate_grand_total(subtotal, gst_percentage, previous_balance):
     gst_amount = subtotal * (gst_percentage / 100)
     return subtotal + gst_amount + previous_balance
 
-def save_invoice(party_name, invoice_date, gst_percentage, previous_balance):
+def save_invoice(party_name, invoice_date, gst_percentage, previous_balance, grand_total):
     """Save invoice to backend"""
     if not party_name:
         st.error("Party name is required")
@@ -588,13 +912,13 @@ def save_invoice(party_name, invoice_date, gst_percentage, previous_balance):
         "items": st.session_state.invoice_items,
         "totalAmount": calculate_subtotal(),
         "previousBalance": previous_balance,
-        "grandTotal": calculate_grand_total(calculate_subtotal(), gst_percentage, previous_balance)
+        "grandTotal": grand_total
     }
     
     try:
         result = backend.create_invoice(invoice_data)
         if result:
-            st.success("Invoice saved successfully!")
+            st.success("✅ Invoice saved successfully!")
             # Update invoice number and clear items
             st.session_state.current_invoice_number = result.get('nextInvoiceNumber', str(int(st.session_state.current_invoice_number) + 1))
             st.session_state.invoice_items = []
@@ -604,23 +928,45 @@ def save_invoice(party_name, invoice_date, gst_percentage, previous_balance):
     except Exception as e:
         st.error(f"Error saving invoice: {str(e)}")
 
-def render_additional_actions():
-    """Additional actions section"""
-    st.header("Additional Actions")
+def render_reports_section():
+    """Reports Section"""
+    st.header("📈 Reports")
     
+    # Invoice range report
+    st.subheader("Invoice Range Report")
+    col1, col2 = st.columns(2)
+    with col1:
+        inv_start_date = st.date_input("Start Date", key="invoice_range_start")
+    with col2:
+        inv_end_date = st.date_input("End Date", key="invoice_range_end")
+    
+    if st.button("Download Invoices PDF"):
+        st.info("Invoice range report functionality")
+    
+    # Product sales report
+    st.subheader("Product Sales Summary")
+    col1, col2 = st.columns(2)
+    with col1:
+        ps_start_date = st.date_input("Start Date", key="product_sales_start")
+    with col2:
+        ps_end_date = st.date_input("End Date", key="product_sales_end")
+    
+    if st.button("Product Sales Summary PDF"):
+        st.info("Product sales report functionality")
+    
+    # Party invoices
+    st.subheader("Party Invoices")
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("All Party Balances PDF"):
-            st.info("All Party Balances PDF generation")
+        party_inv_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="party_invoices")
     with col2:
-        if st.button("Product Sales with Party"):
-            st.info("Product Sales PDF generation")
+        pi_start_date = st.date_input("Start Date", key="party_invoices_start")
     with col3:
-        if st.button("Refresh Application"):
-            st.session_state.initialized = False
-            st.rerun()
+        pi_end_date = st.date_input("End Date", key="party_invoices_end")
+    
+    if st.button("Download Party Invoices"):
+        st.info("Party invoices report functionality")
 
-# Main App
 def main():
     st.set_page_config(
         page_title="NUTRION - Invoice, Ledger & Stock",
@@ -637,6 +983,9 @@ def main():
         color: #FFA500;
         text-align: center;
         margin-bottom: 2rem;
+        padding: 1rem;
+        background-color: #f0f2f6;
+        border-radius: 10px;
     }
     .section-header {
         background-color: #FFA500;
@@ -648,25 +997,18 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
-    st.markdown('<h1 class="main-header">NUTRION - Invoice, Ledger & Stock</h1>', unsafe_allow_html=True)
+    st.markdown('<h1 class="main-header">NUTRION - Invoice, Ledger & Stock Management</h1>', unsafe_allow_html=True)
     
     # Initialize app
     initialize_app()
     
-    # Status indicator
-    if st.session_state.initialized:
-        st.success("✅ Application initialized successfully")
-    else:
-        st.warning("🔄 Initializing application...")
-    
     # Create tabs for better organization
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📄 Invoices", 
         "💰 Payments", 
         "📊 Ledger", 
         "📦 Stock", 
-        "📈 Reports",
-        "🛠️ Tools"
+        "📈 Reports"
     ])
     
     with tab1:
@@ -681,38 +1023,16 @@ def main():
     
     with tab3:
         render_ledger_section()
-        st.markdown("---")
-        render_opening_balance_history()
     
     with tab4:
         render_stock_section()
     
     with tab5:
-        render_invoice_range_section()
-        st.markdown("---")
-        render_bilty_expense_section()
-        st.markdown("---")
-        render_party_exclude_section()
-        st.markdown("---")
-        render_no_bilty_section()
-        st.markdown("---")
-        render_product_sales_section()
-        st.markdown("---")
-        render_party_invoices_section()
+        render_reports_section()
     
-    with tab6:
-        render_additional_actions()
-        st.markdown("---")
-        
-        # Data management section
-        st.header("Data Management")
-        if st.button("Refresh Party List", type="secondary"):
-            try:
-                parties = backend.get_parties()
-                st.session_state.parties = [party['name'] for party in parties]
-                st.success("Party list refreshed!")
-            except Exception as e:
-                st.error(f"Error refreshing party list: {str(e)}")
+    # Footer
+    st.markdown("---")
+    st.markdown("**NUTRION** - Complete Business Management System")
 
 if __name__ == "__main__":
     main()
