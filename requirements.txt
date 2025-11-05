@@ -1,11 +1,9 @@
 streamlit
 pandas
-reportlab
-FPDF
 numpy
 Pillow
 matplotlib
 scikit-learn
 openpyxl
+reportlab
 fpdf
-
