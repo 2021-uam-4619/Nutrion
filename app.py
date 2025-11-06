@@ -87,7 +87,7 @@ def format_number_indian(value):
         return f"-{formatted}" if is_negative else formatted
 
     except (ValueError, TypeError):
-        return "0"-
+        return "0"
 def convert_to_words(num):
     """Convert number to words (Indian numbering system)"""
     if num == 0:
