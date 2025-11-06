@@ -2022,7 +2022,7 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
     pdf.cell(15, 10, 'ID', 1, 0, 'C', True)
     pdf.cell(80, 25, 'Party Name', 1, 0, 'C', True)
     pdf.cell(35, 10, 'Date', 1, 0, 'C', True)
-    pdf.cell(100, 25, 'Amount', 1, 1, 'C', True)
+    pdf.cell(50, 25, 'Amount', 1, 1, 'C', True)
     
     pdf.set_fill_color(255, 255, 255)
     total_amount = 0
@@ -2030,7 +2030,7 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
         pdf.cell(15, 10, str(payment['paymentId']), 1, 0)
         pdf.cell(80, 10, payment['partyName'], 1, 0)
         pdf.cell(35, 10, payment['date'], 1, 0)
-        pdf.cell(100, 10, f"{format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(50, 10, f"{format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
