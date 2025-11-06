@@ -1984,7 +1984,7 @@ def generate_all_party_balances_pdf(ledgers):
     pdf = PDFGenerator()
     pdf.add_page()
     
-    pdf.set_font('Arial', 'B', 16)
+    pdf.set_font('Arial', '', 16)
     pdf.cell(0, 10, 'All Party Balances', 0, 1, 'C')
     pdf.ln(10)
     
@@ -1997,13 +1997,13 @@ def generate_all_party_balances_pdf(ledgers):
     total_balance = 0
     for ledger in ledgers:
         pdf.cell(120, 10, ledger['partyName'], 1, 0)
-        pdf.cell(60, 10, f"PKR {format_currency_indian(ledger['currentBalance'])}", 1, 1, 'R')
+        pdf.cell(60, 10, f"Rs {format_currency_indian(ledger['currentBalance'])}", 1, 1, 'R')
         total_balance += ledger['currentBalance']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(120, 10, 'Total Outstanding:', 0, 0, 'R')
-    pdf.cell(60, 10, f"PKR {format_currency_indian(total_balance)}", 0, 1, 'R')
+    pdf.cell(60, 10, f"Rs {format_currency_indian(total_balance)}", 0, 1, 'R')
     
     return pdf
 
