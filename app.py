@@ -173,7 +173,7 @@ def convert_to_words(num):
     return result + ' Only'
 
 class NutritionBackend:
-    def __init__(self, db_path='invoice_app.db'):
+    def __init__(self, db_path='invoice_app_v4.db'):
         self.db_path = db_path
         self.init_db()
     
@@ -924,7 +924,7 @@ class NutritionBackend:
             conn.close()
 
 # Create backend instance
-backend = NutritionBackend('invoice_app.db')
+backend = NutritionBackend('invoice_app_v4.db')
 
 class PDFGenerator(FPDF):
     def __init__(self):
