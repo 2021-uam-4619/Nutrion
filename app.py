@@ -2143,21 +2143,28 @@ def update_invoice(invoice_number):
             st.session_state.invoice_items = []
     except Exception as e:
         st.error(f"Error updating invoice: {str(e)}")
-
 def delete_invoice(invoice_number):
-    """Delete invoice"""
-    if st.checkbox("Confirm deletion - this action cannot be undone"):
-        try:
-            result = backend.delete_invoice(invoice_number)
-            if result:
-                st.success("✅ Invoice deleted successfully!")
-                st.session_state.editing_invoice = None
-                st.session_state.invoice_items = []
-                # Refresh parties list
-                parties = backend.get_parties()
-                st.session_state.parties = [party['name'] for party in parties]
-        except Exception as e:
-            st.error(f"Error deleting invoice: {str(e)}")
+    st.warning("This action is permanent. Deleted invoices cannot be recovered.")
+    
+    confirm = st.checkbox("I understand and want to delete this invoice")
+
+    if confirm:
+        if st.button("Delete Invoice"):
+            try:
+                result = backend.delete_invoice(invoice_number)
+                if result:
+                    st.success("Invoice deleted successfully.")
+                    st.session_state.editing_invoice = None
+                    st.session_state.invoice_items = []
+                    
+                    # Refresh parties list
+                    parties = backend.get_parties()
+                    st.session_state.parties = [p['name'] for p in parties]
+                else:
+                    st.error("Deletion failed. The backend did not confirm success.")
+            except Exception as e:
+                st.error(f"Error deleting invoice: {str(e)}")
+
 
 def render_party_exclude_section():
     """Party Exclude Report Section - FIXED: Overlapping issue"""
