@@ -2015,24 +2015,19 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
     """Generate bilty expense report PDF"""
     pdf = PDFGenerator()
     pdf.add_page()
-    
-   pdf.set_font('Arial', 'B', 16)
+    pdf.set_font('Arial', 'B', 16)
 pdf.cell(0, 10, 'Bilty Expense Report', 0, 1, 'C')
 pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
 pdf.ln(10)
 
 # Payments table
 pdf.set_fill_color(200, 220, 255)
-
-# Increased column widths
 pdf.cell(30, 10, 'ID', 1, 0, 'C', True)
-pdf.cell(70, 10, 'Party Name', 1, 0, 'C', True)
-pdf.cell(45, 10, 'Date', 1, 0, 'C', True)
-pdf.cell(80, 10, 'Remarks', 1, 0, 'C', True)
-pdf.cell(35, 10, 'Amount', 1, 1, 'C', True)
+pdf.cell(100, 10, 'Party Name', 1, 0, 'C', True)
+pdf.cell(50, 10, 'Date', 1, 0, 'C', True)
+pdf.cell(90, 10, 'Remarks', 1, 0, 'C', True)
+pdf.cell(40, 10, 'Amount', 1, 1, 'C', True)
 
-    
-    pdf.set_fill_color(255, 255, 255)
     total_amount = 0
     for payment in payments:
         pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
