@@ -45,76 +45,39 @@ PRODUCT_PACKING_MAP = {
     "Super Ener Emusifier": "Kg", "Antioxdant": "Kg", "Toxin Binder Weilituo": "Kg", 
     "Toxin Clean": "Kg", "GutPro 60 (Tributyrin)": "Kg", "InduceAcid Liquid": "Ltr"
 }
-
-# Utility functions for number formatting
-def format_currency_indian(value):
-    """Format currency in Indian numbering system"""
+def format_currency_pak(value):
+    """Format currency using standard Pakistani banking format (1,234,567.89)"""
     try:
         value = float(value)
-        if value == 0:
-            return "0"
-        
         is_negative = value < 0
         value = abs(value)
-        
-        # Check if it's a whole number
+
+        # Whole numbers vs decimals
         if value.is_integer():
-            formatted = "{:,.0f}".format(int(value))
+            formatted = "{:,.0f}".format(value)
         else:
             formatted = "{:,.2f}".format(value)
-        
-        # Indian numbering system
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        
-        if len(integer_part) > 3:
-            last_three = integer_part[-3:]
-            other = integer_part[:-3]
-            if other:
-                formatted_integer = other + "," + last_three
-            else:
-                formatted_integer = last_three
-        else:
-            formatted_integer = integer_part
-        
-        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
-        return f"-{result}" if is_negative else result
+
+        return f"-{formatted}" if is_negative else formatted
     except (ValueError, TypeError):
         return "0"
 
-def format_number_indian(value):
-    """Format numbers in Indian numbering system"""
+
+def format_number_pak(value):
+    """Format general numbers using standard Pakistani format (1,234,567.89)"""
     try:
         value = float(value)
-        if value == 0:
-            return "0"
-        
         is_negative = value < 0
         value = abs(value)
-        
+
         if value.is_integer():
-            formatted = "{:,.0f}".format(int(value))
+            formatted = "{:,.0f}".format(value)
         else:
             formatted = "{:,.2f}".format(value)
-        
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        
-        if len(integer_part) > 3:
-            last_three = integer_part[-3:]
-            other = integer_part[:-3]
-            if other:
-                formatted_integer = other + "," + last_three
-            else:
-                formatted_integer = last_three
-        else:
-            formatted_integer = integer_part
-        
-        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
-        return f"-{result}" if is_negative else result
+
+        return f"-{formatted}" if is_negative else formatted
     except (ValueError, TypeError):
         return "0"
-
 def convert_to_words(num):
     """Convert number to words (Indian numbering system)"""
     if num == 0:
@@ -150,7 +113,7 @@ def convert_to_words(num):
         # Lakh
         if n >= 100000:
             lakh = n // 100000
-            result += convert_below_thousand(lakh) + ' Lakh '
+            result += convert_below_thousand(lakh) + ' Lac '
             n %= 100000
         
         # Thousand
