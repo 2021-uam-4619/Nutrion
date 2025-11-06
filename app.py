@@ -2453,7 +2453,7 @@ def main():
     st.markdown("---")
     st.markdown(
         """
-        **NUTRION - Feed Mills Management System** | Developed by: DATANEX SOLUTION| For any query :+92-3207429422
+        **NUTRION - Feed Mills Management System** | Developed by: **DATANEX SOLUTION**| For any query :+92-3207429422
         """
     )
 
