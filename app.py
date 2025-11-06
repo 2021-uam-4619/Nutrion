@@ -47,8 +47,10 @@ PRODUCT_PACKING_MAP = {
 }
 
 # Utility functions for number formatting
+
+# Utility functions for number formatting
 def format_currency_indian(value):
-    """Format currency in Indian numbering system with comma separation"""
+    """Format currency in Pakistani bank number system (international format)"""
     try:
         value = float(value)
         if value == 0:
@@ -56,66 +58,37 @@ def format_currency_indian(value):
         
         is_negative = value < 0
         value = abs(value)
-        
-        # Check if it's a whole number
+
+        # Format with thousand separator (international system)
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-        
-        # Indian numbering system uses different comma placement
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        
-        # For Indian system: 1,00,000 instead of 100,000
-        if len(integer_part) > 3:
-            last_three = integer_part[-3:]
-            other = integer_part[:-3]
-            if other:
-                formatted_integer = other + "," + last_three
-            else:
-                formatted_integer = last_three
-        else:
-            formatted_integer = integer_part
-        
-        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
-        return f"-{result}" if is_negative else result
+
+        return f"-{formatted}" if is_negative else formatted
+
     except (ValueError, TypeError):
         return "0"
 
+
 def format_number_indian(value):
-    """Format numbers in Indian numbering system with comma separation"""
+    """Format numbers in Pakistani bank number system (international format)"""
     try:
         value = float(value)
         if value == 0:
             return "0"
-        
+
         is_negative = value < 0
         value = abs(value)
-        
-        # Check if it's a whole number
+
+        # Format with thousand separator (international system)
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-        
-        # Indian numbering system uses different comma placement
-        parts = formatted.split(".")
-        integer_part = parts[0]
-        
-        # For Indian system: 1,00,000 instead of 100,000
-        if len(integer_part) > 3:
-            last_three = integer_part[-3:]
-            other = integer_part[:-3]
-            if other:
-                formatted_integer = other + "," + last_three
-            else:
-                formatted_integer = last_three
-        else:
-            formatted_integer = integer_part
-        
-        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
-        return f"-{result}" if is_negative else result
+
+        return f"-{formatted}" if is_negative else formatted
+
     except (ValueError, TypeError):
         return "0"
 
