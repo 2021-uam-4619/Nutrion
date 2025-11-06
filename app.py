@@ -1951,7 +1951,7 @@ def generate_product_sales_pdf(sales_summary, start_date, end_date):
     pdf = PDFGenerator()
     pdf.add_page()
     
-    pdf.set_font('Arial', 'B', 16)
+    pdf.set_font('Arial', '', 16)
     pdf.cell(0, 10, 'Product Sales Summary', 0, 1, 'C')
     pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
     pdf.ln(10)
@@ -1975,7 +1975,7 @@ def generate_product_sales_pdf(sales_summary, start_date, end_date):
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(150, 10, 'Total Revenue:', 0, 0, 'R')
-    pdf.cell(40, 10, f"PKR {format_currency_indian(total_revenue)}", 0, 1, 'R')
+    pdf.cell(40, 10, f"Rs {format_currency_indian(total_revenue)}", 0, 1, 'R')
     
     return pdf
 
@@ -2030,7 +2030,7 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
         pdf.cell(15, 10, str(payment['paymentId']), 1, 0)
         pdf.cell(80, 10, payment['partyName'], 1, 0)
         pdf.cell(35, 10, payment['date'], 1, 0)
-        pdf.cell(50, 10, f"{format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(50, 10, f"Rs{format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
@@ -2195,7 +2195,7 @@ def generate_party_exclude_pdf(payments, excluded_parties, start_date, end_date)
     pdf = PDFGenerator()
     pdf.add_page()
     
-    pdf.set_font('Arial', 'B', 16)
+    pdf.set_font('Arial', '', 16)
     pdf.cell(0, 10, 'Party Exclude Report', 0, 1, 'C')
     pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
     pdf.ln(5)
@@ -2233,7 +2233,7 @@ def generate_party_exclude_pdf(payments, excluded_parties, start_date, end_date)
         pdf.cell(col_widths[1], 10, party_name, 1, 0)
         pdf.cell(col_widths[2], 10, payment['date'], 1, 0)
         pdf.cell(col_widths[3], 10, remarks, 1, 0)
-        pdf.cell(col_widths[4], 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(col_widths[4], 10, f"Rs {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
@@ -2298,13 +2298,13 @@ def generate_no_bilty_pdf(payments, start_date, end_date):
         pdf.cell(50, 10, payment['partyName'], 1, 0)
         pdf.cell(40, 10, payment['date'], 1, 0)
         pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)
-        pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(30, 10, f"Rs {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(160, 10, 'Total Amount (No Bilty):', 0, 0, 'R')
-    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
+    pdf.cell(30, 10, f"Rs {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
@@ -2444,7 +2444,7 @@ def main():
             st.success("✅ PDF Export for All Documents")
             st.success("✅ Indian Number Formatting")
             st.success("✅ GST Calculation")
-            
+        
             st.subheader("Database")
             st.info(f"Using: invoice_app_v4.db")
             st.info("All data is saved to your existing database")
@@ -2453,7 +2453,7 @@ def main():
     st.markdown("---")
     st.markdown(
         """
-        **NUTRION - Feed Mills Management System** | Developed with ❤️ using Streamlit | Database: invoice_app_v4.db
+        **NUTRION - Feed Mills Management System** | Developed by: DATANEX SOLUTION| For any query :+92-3207429422
         """
     )
 
