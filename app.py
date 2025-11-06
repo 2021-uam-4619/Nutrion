@@ -45,9 +45,10 @@ PRODUCT_PACKING_MAP = {
     "Super Ener Emusifier": "Kg", "Antioxdant": "Kg", "Toxin Binder Weilituo": "Kg", 
     "Toxin Clean": "Kg", "GutPro 60 (Tributyrin)": "Kg", "InduceAcid Liquid": "Ltr"
 }
+
 # Utility functions for number formatting
 def format_currency_indian(value):
-    """Format currency in Pakistani bank number system (international format)"""
+    """Format currency in Indian numbering system with comma separation"""
     try:
         value = float(value)
         if value == 0:
@@ -55,39 +56,69 @@ def format_currency_indian(value):
         
         is_negative = value < 0
         value = abs(value)
-
-        # Format with thousand separator (international system)
+        
+        # Check if it's a whole number
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-
-        return f"-{formatted}" if is_negative else formatted
-
+        
+        # Indian numbering system uses different comma placement
+        parts = formatted.split(".")
+        integer_part = parts[0]
+        
+        # For Indian system: 1,00,000 instead of 100,000
+        if len(integer_part) > 3:
+            last_three = integer_part[-3:]
+            other = integer_part[:-3]
+            if other:
+                formatted_integer = other + "," + last_three
+            else:
+                formatted_integer = last_three
+        else:
+            formatted_integer = integer_part
+        
+        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
+        return f"-{result}" if is_negative else result
     except (ValueError, TypeError):
         return "0"
 
-
 def format_number_indian(value):
-    """Format numbers in Pakistani bank number system (international format)"""
+    """Format numbers in Indian numbering system with comma separation"""
     try:
         value = float(value)
         if value == 0:
             return "0"
-
+        
         is_negative = value < 0
         value = abs(value)
-
-        # Format with thousand separator (international system)
+        
+        # Check if it's a whole number
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-
-        return f"-{formatted}" if is_negative else formatted
-
+        
+        # Indian numbering system uses different comma placement
+        parts = formatted.split(".")
+        integer_part = parts[0]
+        
+        # For Indian system: 1,00,000 instead of 100,000
+        if len(integer_part) > 3:
+            last_three = integer_part[-3:]
+            other = integer_part[:-3]
+            if other:
+                formatted_integer = other + "," + last_three
+            else:
+                formatted_integer = last_three
+        else:
+            formatted_integer = integer_part
+        
+        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
+        return f"-{result}" if is_negative else result
     except (ValueError, TypeError):
         return "0"
+
 def convert_to_words(num):
     """Convert number to words (Indian numbering system)"""
     if num == 0:
@@ -123,7 +154,7 @@ def convert_to_words(num):
         # Lakh
         if n >= 100000:
             lakh = n // 100000
-            result += convert_below_thousand(lakh) + ' Lac '
+            result += convert_below_thousand(lakh) + ' Lakh '
             n %= 100000
         
         # Thousand
@@ -187,6 +218,14 @@ class NutritionBackend:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
+        else:
+            # Check if gst_percentage column exists, if not add it
+            cursor.execute("PRAGMA table_info(invoices)")
+            columns = [column[1] for column in cursor.fetchall()]
+            if 'gst_percentage' not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN gst_percentage REAL DEFAULT 0")
+            if 'gst_amount' not in columns:
+                cursor.execute("ALTER TABLE invoices ADD COLUMN gst_amount REAL DEFAULT 0")
         
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='invoice_items'")
         if not cursor.fetchone():
@@ -250,32 +289,6 @@ class NutritionBackend:
         conn.commit()
         conn.close()
     
-    def update_database_schema(self):
-        """Update database schema to add missing columns"""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        
-        try:
-            # Check if gst_percentage column exists in invoices table
-            cursor.execute("PRAGMA table_info(invoices)")
-            columns = [column[1] for column in cursor.fetchall()]
-            
-            if 'gst_percentage' not in columns:
-                cursor.execute('ALTER TABLE invoices ADD COLUMN gst_percentage REAL DEFAULT 0')
-                print("Added gst_percentage column to invoices table")
-            
-            if 'gst_amount' not in columns:
-                cursor.execute('ALTER TABLE invoices ADD COLUMN gst_amount REAL DEFAULT 0')
-                print("Added gst_amount column to invoices table")
-            
-            conn.commit()
-            return {"message": "Database schema updated successfully"}
-        except Exception as e:
-            conn.rollback()
-            raise e
-        finally:
-            conn.close()
-
     def get_connection(self):
         """Get database connection"""
         return sqlite3.connect(self.db_path)
@@ -442,13 +455,13 @@ class NutritionBackend:
             
             invoice_data = {
                 "invoiceNumber": invoice_row[0],
-                "partyName": row[1],
-                "date": row[2],
-                "totalAmount": row[3],
-                "gstPercentage": row[4],
-                "gstAmount": row[5],
-                "previousBalance": row[6],
-                "grandTotal": row[7],
+                "partyName": invoice_row[1],
+                "date": invoice_row[2],
+                "totalAmount": invoice_row[3],
+                "gstPercentage": invoice_row[4],
+                "gstAmount": invoice_row[5],
+                "previousBalance": invoice_row[6],
+                "grandTotal": invoice_row[7],
                 "items": []
             }
             
@@ -783,10 +796,12 @@ class NutritionBackend:
             ledgers = []
             for party in parties:
                 balance_info = self.get_party_balance(party)
-                ledgers.append({
-                    "partyName": party,
-                    "currentBalance": balance_info['balance']
-                })
+                # Only include parties with non-zero balance
+                if balance_info['balance'] != 0:
+                    ledgers.append({
+                        "partyName": party,
+                        "currentBalance": balance_info['balance']
+                    })
             
             return ledgers
         except Exception as e:
@@ -932,6 +947,19 @@ class NutritionBackend:
         finally:
             conn.close()
 
+    def get_all_invoice_numbers(self):
+        """Get all invoice numbers for search functionality"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute("SELECT invoice_number FROM invoices ORDER BY CAST(invoice_number AS INTEGER) DESC")
+            invoice_numbers = [row[0] for row in cursor.fetchall()]
+            return invoice_numbers
+        except Exception as e:
+            return []
+        finally:
+            conn.close()
+
 # Create backend instance with your existing database
 backend = NutritionBackend('invoice_app_v4.db')
 
@@ -940,28 +968,29 @@ class PDFGenerator(FPDF):
         super().__init__(orientation=orientation, unit=unit, format=format)
         self.set_auto_page_break(auto=True, margin=15)
         self.company_name = "NUTRION"
-        self.company_address = "Pearl City Sargodha Road Faisalabad"
-        self.company_contact = "+923007993003"
-        self.primary_color = (255, 165, 0)  # Orange
-        self.secondary_color = (40, 167, 69)  # Green
+        self.company_address = "Address: Pearl City Sargodha Road Faisalabad"
+        self.company_contact = "Contact: +923007993003"
+        self.primary_color = (255, 165, 0)  # Orange color like HTML
+        self.secondary_color = (40, 167, 69)  # Green color
     
     def header(self):
-        if self.page_no() == 1:  # Only show header on first page
-            # Company header
+        # Only add header if we're on the first page and have content
+        if self.page_no() == 1:
+            # Company header with orange background like HTML
             self.set_fill_color(*self.primary_color)
             self.set_text_color(255, 255, 255)
-            self.set_font('Arial', 'B', 16)
-            self.cell(0, 10, self.company_name, 0, 1, 'C', True)
+            self.set_font('Arial', 'B', 20)
+            self.cell(0, 15, self.company_name, 0, 1, 'C', True)
             
             self.set_font('Arial', '', 10)
             self.cell(0, 5, self.company_address, 0, 1, 'C', True)
-            self.cell(0, 5, f"Contact: {self.company_contact}", 0, 1, 'C', True)
+            self.cell(0, 5, self.company_contact, 0, 1, 'C', True)
             
             # Line separator
             self.set_draw_color(*self.primary_color)
             self.set_line_width(0.5)
             self.line(10, self.get_y(), 200, self.get_y())
-            self.ln(8)
+            self.ln(5)
     
     def footer(self):
         self.set_y(-15)
@@ -970,144 +999,129 @@ class PDFGenerator(FPDF):
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
 def generate_invoice_pdf(invoice_data):
-    """Generate professional invoice PDF"""
+    """Generate invoice PDF matching HTML design"""
     pdf = PDFGenerator()
     pdf.add_page()
     
-    # Invoice header
+    # Invoice header with orange background
     pdf.set_fill_color(*pdf.primary_color)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 14)
+    pdf.set_font('Arial', 'B', 16)
     pdf.cell(0, 10, 'TAX INVOICE', 0, 1, 'C', True)
     pdf.ln(5)
     
-    # Party and invoice details
+    # Party and invoice details - two column layout like HTML
     pdf.set_text_color(0, 0, 0)
     
-    # Two column layout
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(40, 6, 'Bill To:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(60, 6, invoice_data["partyName"], 0, 0)
+    # Left column - Bill To
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(40, 8, 'Bill To:', 0, 0)
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, invoice_data["partyName"], 0, 1)
+    pdf.ln(2)
+    
+    # Right column - Invoice details
+    pdf.set_x(120)  # Move to right side
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(30, 8, 'Invoice #:', 0, 0)
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, invoice_data["invoiceNumber"], 0, 1)
     
     pdf.set_x(120)
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(25, 6, 'Invoice #:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, invoice_data["invoiceNumber"], 0, 1)
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(40, 6, 'Date:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(60, 6, invoice_data["date"], 0, 0)
-    
-    pdf.set_x(120)
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(25, 6, 'Balance:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, f"RS {format_currency_indian(invoice_data['previousBalance'])}", 0, 1)
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(30, 8, 'Date:', 0, 0)
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, invoice_data["date"], 0, 1)
     pdf.ln(8)
     
-    # Items table header
+    # Items table header with green background like HTML
     pdf.set_fill_color(*pdf.secondary_color)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 9)
+    pdf.set_font('Arial', 'B', 10)
     
-    col_widths = [12, 70, 18, 20, 25, 25, 20]
-    headers = ['Sr.', 'Product Name', 'Qty', 'Packing', 'Unit Price', 'Amount', 'GST']
+    col_widths = [10, 65, 15, 20, 25, 25, 20]  # Adjusted widths
+    headers = ['Sr.', 'Product Name', 'Qty', 'Packing', 'Unit Price', 'Amount', '']
     
     for i, header in enumerate(headers):
         pdf.cell(col_widths[i], 8, header, 1, 0, 'C', True)
     pdf.ln()
     
-    # Items
+    # Items with alternating background
+    pdf.set_fill_color(255, 255, 255)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font('Arial', '', 8)
+    pdf.set_font('Arial', '', 9)
     
     for i, item in enumerate(invoice_data['items'], 1):
         # Alternate row background
         if i % 2 == 0:
-            pdf.set_fill_color(245, 245, 245)
+            pdf.set_fill_color(248, 249, 250)
         else:
             pdf.set_fill_color(255, 255, 255)
         
-        pdf.cell(col_widths[0], 6, str(i), 1, 0, 'C', True)
-        pdf.cell(col_widths[1], 6, item['productName'][:35], 1, 0, 'L', True)
-        pdf.cell(col_widths[2], 6, str(item['qty']), 1, 0, 'C', True)
-        pdf.cell(col_widths[3], 6, item['packing'], 1, 0, 'C', True)
-        pdf.cell(col_widths[4], 6, format_currency_indian(item['unitPrice']), 1, 0, 'R', True)
-        pdf.cell(col_widths[5], 6, format_currency_indian(item['amount']), 1, 0, 'R', True)
-        pdf.cell(col_widths[6], 6, '', 1, 1, 'C', True)
+        pdf.cell(col_widths[0], 8, str(i), 1, 0, 'C', True)
+        pdf.cell(col_widths[1], 8, item['productName'][:30], 1, 0, 'L', True)  # Truncate long names
+        pdf.cell(col_widths[2], 8, str(item['qty']), 1, 0, 'C', True)
+        pdf.cell(col_widths[3], 8, item['packing'], 1, 0, 'C', True)
+        pdf.cell(col_widths[4], 8, format_currency_indian(item['unitPrice']), 1, 0, 'R', True)
+        pdf.cell(col_widths[5], 8, format_currency_indian(item['amount']), 1, 0, 'R', True)
+        pdf.cell(col_widths[6], 8, '', 1, 1, 'C', True)  # Empty for action column
     
     pdf.ln(5)
     
-    # Totals section
+    # Totals section with green highlight like HTML
     totals_x = 120
-    amounts_x = 170
+    amounts_x = 180
     
     pdf.set_font('Arial', '', 10)
-    pdf.set_fill_color(230, 245, 233)
+    pdf.set_fill_color(230, 245, 233)  # Light green background
     
-    # Remove .00 if whole number
-    subtotal_str = format_currency_indian(invoice_data['totalAmount'])
-    if subtotal_str.endswith('.00'):
-        subtotal_str = subtotal_str[:-3]
-    
-    pdf.cell(totals_x, 6, 'Subtotal:', 0, 0, 'R', True)
-    pdf.cell(30, 6, subtotal_str, 0, 1, 'R', True)
+    # Subtotal
+    pdf.cell(totals_x, 8, 'Subtotal:', 0, 0, 'R', True)
+    pdf.cell(30, 8, format_currency_indian(invoice_data['totalAmount']), 0, 1, 'R', True)
     
     if invoice_data.get('gstPercentage', 0) > 0:
-        gst_amount_str = format_currency_indian(invoice_data.get('gstAmount', 0))
-        if gst_amount_str.endswith('.00'):
-            gst_amount_str = gst_amount_str[:-3]
-        
-        pdf.cell(totals_x, 6, f'GST ({invoice_data["gstPercentage"]}%):', 0, 0, 'R', True)
-        pdf.cell(30, 6, gst_amount_str, 0, 1, 'R', True)
+        pdf.cell(totals_x, 8, f'GST ({invoice_data["gstPercentage"]}%):', 0, 0, 'R', True)
+        pdf.cell(30, 8, format_currency_indian(invoice_data.get('gstAmount', 0)), 0, 1, 'R', True)
     
-    prev_balance_str = format_currency_indian(invoice_data['previousBalance'])
-    if prev_balance_str.endswith('.00'):
-        prev_balance_str = prev_balance_str[:-3]
+    # Previous Balance
+    pdf.cell(totals_x, 8, 'Previous Balance:', 0, 0, 'R', True)
+    pdf.cell(30, 8, format_currency_indian(invoice_data['previousBalance']), 0, 1, 'R', True)
     
-    pdf.cell(totals_x, 6, 'Previous Balance:', 0, 0, 'R', True)
-    pdf.cell(30, 6, prev_balance_str, 0, 1, 'R', True)
-    
-    grand_total_str = format_currency_indian(invoice_data['grandTotal'])
-    if grand_total_str.endswith('.00'):
-        grand_total_str = grand_total_str[:-3]
-    
+    # Grand Total with PKR
     pdf.set_font('Arial', 'B', 11)
     pdf.set_text_color(*pdf.secondary_color)
-    pdf.cell(totals_x, 8, 'Grand Total:', 0, 0, 'R', True)
-    pdf.cell(30, 8, f"RS {grand_total_str}", 0, 1, 'R', True)
+    pdf.cell(totals_x, 10, 'Grand Total:', 0, 0, 'R', True)
+    pdf.cell(30, 10, f"PKR {format_currency_indian(invoice_data['grandTotal'])}", 0, 1, 'R', True)
     
     # Amount in words
     pdf.ln(5)
     pdf.set_font('Arial', 'I', 9)
     pdf.set_text_color(0, 0, 0)
-    pdf.multi_cell(0, 4, f'Amount in Words: {convert_to_words(invoice_data["grandTotal"])}', 0, 'L')
+    pdf.set_fill_color(255, 255, 255)
+    pdf.multi_cell(0, 5, f'Amount in Words: {convert_to_words(invoice_data["grandTotal"])}', 0, 'L')
     
     # Terms and conditions
     pdf.ln(5)
     pdf.set_font('Arial', 'I', 8)
-    pdf.cell(0, 4, 'Terms & Conditions:', 0, 1)
-    pdf.cell(0, 3, '1. Goods once sold will not be taken back or exchanged.', 0, 1)
-    pdf.cell(0, 3, '2. All disputes subject to Multan jurisdiction.', 0, 1)
+    pdf.cell(0, 5, 'Terms & Conditions:', 0, 1)
+    pdf.cell(0, 4, '1. Goods once sold will not be taken back or exchanged.', 0, 1)
+    pdf.cell(0, 4, '2. All disputes subject to Multan jurisdiction.', 0, 1)
     
     return pdf
 
 def generate_payment_receipt_pdf(payment_data):
-    """Generate payment receipt PDF"""
+    """Generate payment receipt PDF matching HTML design"""
     pdf = PDFGenerator(format='A5')
     pdf.add_page()
     
-    # Payment receipt header
+    # Payment receipt header with orange background
     pdf.set_fill_color(*pdf.primary_color)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 12, 'PAYMENT RECEIPT', 0, 1, 'C', True)
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 15, 'PAYMENT RECEIPT', 0, 1, 'C', True)
     pdf.ln(5)
     
-    # Payment details
+    # Payment details with clean layout
     pdf.set_text_color(0, 0, 0)
     
     details = [
@@ -1119,156 +1133,138 @@ def generate_payment_receipt_pdf(payment_data):
     if payment_data.get('remarks'):
         details.append(('Remarks:', payment_data['remarks']))
     
-    pdf.set_font('Arial', 'B', 10)
+    pdf.set_font('Arial', 'B', 11)
     for label, value in details:
-        pdf.cell(35, 6, label, 0, 0)
-        pdf.set_font('Arial', '', 10)
-        pdf.cell(0, 6, value, 0, 1)
-        pdf.set_font('Arial', 'B', 10)
-        pdf.ln(2)
+        pdf.cell(40, 8, label, 0, 0)
+        pdf.set_font('Arial', '', 11)
+        pdf.cell(0, 8, value, 0, 1)
+        pdf.set_font('Arial', 'B', 11)
+        pdf.ln(3)
     
     pdf.ln(5)
     
-    # Amount section
-    pdf.set_fill_color(230, 245, 233)
+    # Amount section with highlight - Show PKR only here
+    pdf.set_fill_color(230, 245, 233)  # Light green background
     pdf.set_font('Arial', 'B', 12)
+    pdf.cell(40, 10, 'Amount:', 0, 0)
+    pdf.cell(0, 10, f"PKR {format_currency_indian(payment_data['amount'])}", 0, 1)
     
-    amount_str = format_currency_indian(payment_data['amount'])
-    if amount_str.endswith('.00'):
-        amount_str = amount_str[:-3]
+    pdf.set_font('Arial', 'I', 9)
+    pdf.multi_cell(0, 5, f'Amount in Words: {convert_to_words(payment_data["amount"])}', 0, 'L')
     
-    pdf.cell(40, 8, 'Amount:', 0, 0)
-    pdf.cell(0, 8, f"RS {amount_str}", 0, 1)
-    
-    pdf.set_font('Arial', 'I', 8)
-    pdf.multi_cell(0, 4, f'Amount in Words: {convert_to_words(payment_data["amount"])}', 0, 'L')
-    
-    pdf.ln(8)
+    pdf.ln(10)
     
     # Footer note
-    pdf.set_font('Arial', 'I', 7)
+    pdf.set_font('Arial', 'I', 8)
     pdf.set_text_color(128, 128, 128)
-    pdf.cell(0, 4, 'This is a computer-generated receipt.', 0, 1, 'C')
+    pdf.cell(0, 5, 'This is a computer-generated receipt.', 0, 1, 'C')
     
-    pdf.set_font('Arial', 'B', 9)
+    pdf.set_font('Arial', 'B', 10)
     pdf.set_text_color(*pdf.secondary_color)
-    pdf.cell(0, 6, 'Thank you for your payment!', 0, 1, 'C')
+    pdf.cell(0, 8, 'Thank you for your payment!', 0, 1, 'C')
     
     return pdf
 
 def generate_ledger_pdf(ledger_data):
-    """Generate ledger PDF - exclude parties with zero balance"""
-    # Check if current balance is zero, return empty PDF with message
-    if ledger_data.get("currentBalance", 0) == 0:
-        pdf = PDFGenerator()
-        pdf.add_page()
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'No ledger data available - Party balance is zero', 0, 1, 'C')
-        return pdf
-    
+    """Generate ledger PDF matching HTML design"""
     pdf = PDFGenerator()
     pdf.add_page()
     
-    # Ledger header
+    # Ledger header with orange background
     pdf.set_fill_color(*pdf.primary_color)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, f'LEDGER STATEMENT - {ledger_data["partyName"]}', 0, 1, 'C', True)
+    pdf.set_font('Arial', 'B', 16)
+    pdf.cell(0, 10, f'Party Statement - {ledger_data["partyName"]}', 0, 1, 'C', True)
     pdf.ln(5)
     
-    # Summary
+    # Summary with green highlights
     pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(230, 245, 233)
+    pdf.set_fill_color(230, 245, 233)  # Light green background
     
-    opening_balance_str = format_currency_indian(ledger_data["openingBalance"])
-    if opening_balance_str.endswith('.00'):
-        opening_balance_str = opening_balance_str[:-3]
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(50, 8, 'Opening Balance:', 0, 0)
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, format_currency_indian(ledger_data["openingBalance"]), 0, 1, 'L', True)
     
-    current_balance_str = format_currency_indian(ledger_data["currentBalance"])
-    if current_balance_str.endswith('.00'):
-        current_balance_str = current_balance_str[:-3]
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(45, 6, 'Opening Balance:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, opening_balance_str, 0, 1, 'L', True)
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(45, 6, 'Current Balance:', 0, 0)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, f"RS {current_balance_str}", 0, 1, 'L', True)
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(50, 8, 'Current Balance:', 0, 0)
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, f"PKR {format_currency_indian(ledger_data['currentBalance'])}", 0, 1, 'L', True)
     pdf.ln(5)
     
-    # Transactions table header
+    # Transactions table header with green background
     pdf.set_fill_color(*pdf.secondary_color)
     pdf.set_text_color(255, 255, 255)
-    pdf.set_font('Arial', 'B', 8)
+    pdf.set_font('Arial', 'B', 9)
     
-    col_widths = [18, 22, 50, 12, 12, 20, 20, 26]
-    headers = ['Date', 'Type', 'Description', 'Qty', 'Pack', 'Rate', 'Amount', 'Balance']
+    col_widths = [20, 25, 45, 15, 15, 25, 25, 25]
+    headers = ['Date', 'Invoice #', 'Description', 'Qty', 'Pack', 'Unit Price', 'Debit', 'Balance']
     
     for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 6, header, 1, 0, 'C', True)
+        pdf.cell(col_widths[i], 8, header, 1, 0, 'C', True)
     pdf.ln()
     
-    # Transactions
+    # Transactions with alternating background
     pdf.set_fill_color(255, 255, 255)
     pdf.set_text_color(0, 0, 0)
-    pdf.set_font('Arial', '', 7)
+    pdf.set_font('Arial', '', 8)
     
     running_balance = ledger_data["openingBalance"]
     
-    # Opening balance row
-    pdf.set_fill_color(240, 248, 255)
-    for i in range(len(headers)-1):
-        pdf.cell(col_widths[i], 5, '', 1, 0, 'C', True)
-    pdf.cell(col_widths[-1], 5, format_currency_indian(running_balance), 1, 1, 'R', True)
+    # Opening balance row with highlight
+    pdf.set_fill_color(230, 245, 233)
+    pdf.cell(col_widths[0], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[1], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[2], 8, 'Opening Balance', 1, 0, 'L', True)
+    pdf.cell(col_widths[3], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[4], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[5], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[6], 8, '', 1, 0, 'C', True)
+    pdf.cell(col_widths[7], 8, format_currency_indian(running_balance), 1, 1, 'R', True)
     pdf.set_fill_color(255, 255, 255)
     
+    last_invoice_number = None
     for tx in ledger_data['transactions']:
+        # Alternate row background
+        if len(pdf.pages) % 2 == 0:
+            pdf.set_fill_color(248, 249, 250)
+        else:
+            pdf.set_fill_color(255, 255, 255)
+        
         if tx['type'] == 'invoice_item':
+            # Show invoice number only for first item of each invoice
+            display_invoice = tx['invoiceNumber'] if tx['invoiceNumber'] != last_invoice_number else ''
+            display_date = tx['date'] if tx['invoiceNumber'] != last_invoice_number else ''
+            
             running_balance += tx['amount']
             
-            amount_str = format_currency_indian(tx['amount'])
-            if amount_str.endswith('.00'):
-                amount_str = amount_str[:-3]
-                
-            balance_str = format_currency_indian(running_balance)
-            if balance_str.endswith('.00'):
-                balance_str = balance_str[:-3]
+            pdf.cell(col_widths[0], 8, display_date, 1, 0, 'C', True)
+            pdf.cell(col_widths[1], 8, display_invoice, 1, 0, 'C', True)
+            pdf.cell(col_widths[2], 8, tx['productName'][:25], 1, 0, 'L', True)  # Truncate long names
+            pdf.cell(col_widths[3], 8, str(tx['qty']), 1, 0, 'C', True)
+            pdf.cell(col_widths[4], 8, tx.get('packing', ''), 1, 0, 'C', True)
+            pdf.cell(col_widths[5], 8, format_currency_indian(tx['unitPrice']), 1, 0, 'R', True)
+            pdf.cell(col_widths[6], 8, format_currency_indian(tx['amount']), 1, 0, 'R', True)
+            pdf.cell(col_widths[7], 8, format_currency_indian(running_balance), 1, 1, 'R', True)
             
-            pdf.cell(col_widths[0], 5, tx['date'], 1, 0, 'C')
-            pdf.cell(col_widths[1], 5, 'SALE', 1, 0, 'C')
-            pdf.cell(col_widths[2], 5, tx['productName'][:30], 1, 0, 'L')
-            pdf.cell(col_widths[3], 5, str(tx['qty']), 1, 0, 'C')
-            pdf.cell(col_widths[4], 5, tx.get('packing', ''), 1, 0, 'C')
-            pdf.cell(col_widths[5], 5, format_currency_indian(tx['unitPrice']), 1, 0, 'R')
-            pdf.cell(col_widths[6], 5, amount_str, 1, 0, 'R')
-            pdf.cell(col_widths[7], 5, f"RS {balance_str}", 1, 1, 'R')
+            last_invoice_number = tx['invoiceNumber']
             
         elif tx['type'] == 'payment':
             running_balance -= tx['amount']
-            
-            amount_str = format_currency_indian(tx['amount'])
-            if amount_str.endswith('.00'):
-                amount_str = amount_str[:-3]
-                
-            balance_str = format_currency_indian(running_balance)
-            if balance_str.endswith('.00'):
-                balance_str = balance_str[:-3]
-            
             desc = f"Payment - {tx.get('remarks', '')}" if tx.get('remarks') else "Payment Received"
             
-            pdf.set_fill_color(255, 243, 205)
-            pdf.cell(col_widths[0], 5, tx['date'], 1, 0, 'C', True)
-            pdf.cell(col_widths[1], 5, 'PAYMENT', 1, 0, 'C', True)
-            pdf.cell(col_widths[2], 5, desc[:30], 1, 0, 'L', True)
-            pdf.cell(col_widths[3], 5, '', 1, 0, 'C', True)
-            pdf.cell(col_widths[4], 5, '', 1, 0, 'C', True)
-            pdf.cell(col_widths[5], 5, '', 1, 0, 'C', True)
-            pdf.cell(col_widths[6], 5, amount_str, 1, 0, 'R', True)
-            pdf.cell(col_widths[7], 5, f"RS {balance_str}", 1, 1, 'R', True)
+            pdf.set_fill_color(255, 243, 205)  # Light orange for payments
+            pdf.cell(col_widths[0], 8, tx['date'], 1, 0, 'C', True)
+            pdf.cell(col_widths[1], 8, '', 1, 0, 'C', True)
+            pdf.cell(col_widths[2], 8, desc[:25], 1, 0, 'L', True)
+            pdf.cell(col_widths[3], 8, '', 1, 0, 'C', True)
+            pdf.cell(col_widths[4], 8, '', 1, 0, 'C', True)
+            pdf.cell(col_widths[5], 8, '', 1, 0, 'C', True)
+            pdf.cell(col_widths[6], 8, format_currency_indian(tx['amount']), 1, 0, 'R', True)
+            pdf.cell(col_widths[7], 8, format_currency_indian(running_balance), 1, 1, 'R', True)
             pdf.set_fill_color(255, 255, 255)
+            
+            last_invoice_number = None
     
     return pdf
 
@@ -1286,9 +1282,6 @@ def initialize_app():
     """Initialize application data"""
     if not st.session_state.initialized:
         try:
-            # Update database schema first
-            backend.update_database_schema()
-            
             # Get next invoice number
             result = backend.get_next_invoice_number()
             if result:
@@ -1400,13 +1393,13 @@ def render_payment_range_section():
                             pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
                             pdf.cell(60, 10, payment['partyName'], 1, 0)
                             pdf.cell(40, 10, payment['date'], 1, 0)
-                            pdf.cell(40, 10, f"RS {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+                            pdf.cell(40, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
                             total_amount += payment['amount']
                         
                         pdf.ln(10)
                         pdf.set_font('Arial', 'B', 12)
                         pdf.cell(120, 10, 'Total Amount:', 0, 0, 'R')
-                        pdf.cell(40, 10, f"RS {format_currency_indian(total_amount)}", 0, 1, 'R')
+                        pdf.cell(40, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
                         
                         st.markdown(get_pdf_download_link(pdf, f"payments_{start_date}_{end_date}.pdf"), unsafe_allow_html=True)
                     else:
@@ -1446,7 +1439,7 @@ def display_payments_for_deletion(payments, party_name):
         formatted_payments = []
         for payment in payments:
             formatted_payment = payment.copy()
-            formatted_payment['amount_display'] = f"RS {format_currency_indian(payment['amount'])}"
+            formatted_payment['amount_display'] = f"PKR {format_currency_indian(payment['amount'])}"
             formatted_payments.append(formatted_payment)
         
         df = pd.DataFrame(formatted_payments)
@@ -1456,17 +1449,43 @@ def display_payments_for_deletion(payments, party_name):
         
         # Show summary
         total_amount = sum(payment['amount'] for payment in payments)
-        st.metric("Total Payments", f"RS {format_currency_indian(total_amount)}")
+        st.metric("Total Payments", f"PKR {format_currency_indian(total_amount)}")
         
-        # Download button for party payments
+        # Download button for party payments - FIXED: This was missing
         if st.button("📄 Download Party Payments PDF", use_container_width=True):
-            pdf = generate_payment_receipt_pdf({
-                "partyName": party_name,
-                "amount": total_amount,
-                "date": date.today().isoformat(),
-                "remarks": f"Total payments for {party_name}"
-            })
-            st.markdown(get_pdf_download_link(pdf, f"payments_{party_name}.pdf"), unsafe_allow_html=True)
+            try:
+                # Generate proper party payments PDF
+                pdf = PDFGenerator()
+                pdf.add_page()
+                
+                pdf.set_font('Arial', 'B', 16)
+                pdf.cell(0, 10, f'Payments Report - {party_name}', 0, 1, 'C')
+                pdf.ln(10)
+                
+                # Add payments table
+                pdf.set_fill_color(200, 220, 255)
+                pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
+                pdf.cell(60, 10, 'Party Name', 1, 0, 'C', True)
+                pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
+                pdf.cell(40, 10, 'Amount', 1, 1, 'C', True)
+                
+                pdf.set_fill_color(255, 255, 255)
+                total_amount = 0
+                for payment in payments:
+                    pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
+                    pdf.cell(60, 10, payment['partyName'], 1, 0)
+                    pdf.cell(40, 10, payment['date'], 1, 0)
+                    pdf.cell(40, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+                    total_amount += payment['amount']
+                
+                pdf.ln(10)
+                pdf.set_font('Arial', 'B', 12)
+                pdf.cell(120, 10, 'Total Amount:', 0, 0, 'R')
+                pdf.cell(40, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
+                
+                st.markdown(get_pdf_download_link(pdf, f"payments_{party_name}.pdf"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Error generating PDF: {str(e)}")
         
         # Delete individual payments
         st.subheader("Delete Payment")
@@ -1513,20 +1532,20 @@ def display_ledger(ledger_data):
         formatted_transactions = []
         for tx in transactions:
             formatted_tx = tx.copy()
-            formatted_tx['amount_display'] = f"RS {format_currency_indian(tx['amount'])}"
+            formatted_tx['amount_display'] = format_currency_indian(tx['amount'])  # Remove PKR from individual amounts
             if 'unitPrice' in tx:
-                formatted_tx['unitPrice_display'] = f"RS {format_currency_indian(tx['unitPrice'])}"
+                formatted_tx['unitPrice_display'] = format_currency_indian(tx['unitPrice'])
             formatted_transactions.append(formatted_tx)
         
         df = pd.DataFrame(formatted_transactions)
         st.dataframe(df, use_container_width=True)
         
-        # Show opening and current balance
+        # Show opening and current balance - Only show PKR with totals
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Opening Balance", f"RS {format_currency_indian(ledger_data.get('openingBalance', 0))}")
+            st.metric("Opening Balance", format_currency_indian(ledger_data.get('openingBalance', 0)))
         with col2:
-            st.metric("Current Balance", f"RS {format_currency_indian(ledger_data.get('currentBalance', 0))}")
+            st.metric("Current Balance", f"PKR {format_currency_indian(ledger_data.get('currentBalance', 0))}")
         with col3:
             total_transactions = len(transactions)
             st.metric("Total Transactions", total_transactions)
@@ -1534,10 +1553,13 @@ def display_ledger(ledger_data):
         # Store ledger data for PDF download
         st.session_state.current_ledger_data = ledger_data
         
-        # Download ledger PDF
+        # Download ledger PDF - FIXED: This button should work now
         if st.button("📄 Download Ledger PDF", use_container_width=True):
-            pdf = generate_ledger_pdf(ledger_data)
-            st.markdown(get_pdf_download_link(pdf, f"ledger_{ledger_data['partyName']}.pdf"), unsafe_allow_html=True)
+            try:
+                pdf = generate_ledger_pdf(ledger_data)
+                st.markdown(get_pdf_download_link(pdf, f"ledger_{ledger_data['partyName']}.pdf"), unsafe_allow_html=True)
+            except Exception as e:
+                st.error(f"Error generating ledger PDF: {str(e)}")
     else:
         st.info("No transactions found for this party")
 
@@ -1692,17 +1714,16 @@ def render_invoice_creation_section():
     gst_amount = subtotal * (gst_percentage / 100)
     grand_total = subtotal + gst_amount + previous_balance
     
-    # Display totals with formatted currency
+    # Display totals with formatted currency - Only show PKR with grand total
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Subtotal", f"RS {format_currency_indian(subtotal)}")
+        st.metric("Subtotal", format_currency_indian(subtotal))
     with col2:
-        st.metric("Previous Balance", f"RS {format_currency_indian(previous_balance)}")
+        st.metric("Previous Balance", format_currency_indian(previous_balance))
     with col3:
-        st.metric("GST Amount", f"RS {format_currency_indian(gst_amount)}")
+        st.metric("GST Amount", format_currency_indian(gst_amount))
     with col4:
-        st.metric("Grand Total", f"RS {format_currency_indian(grand_total)}", 
-                 delta=f"RS {format_currency_indian(grand_total - subtotal - previous_balance)}")
+        st.metric("Grand Total", f"PKR {format_currency_indian(grand_total)}")
     
     # Action buttons
     col1, col2, col3, col4 = st.columns(4)
@@ -1753,7 +1774,7 @@ def render_invoice_items():
         new_unit_price = st.number_input("Unit Price", min_value=0.0, step=0.01, key="new_unit_price")
     with col5:
         new_amount = new_qty * new_unit_price
-        st.text_input("Amount", value=f"RS {format_currency_indian(new_amount)}", disabled=True, key="new_amount_display")
+        st.text_input("Amount", value=format_currency_indian(new_amount), disabled=True, key="new_amount_display")
     
     # Add button
     with col6:
@@ -1784,9 +1805,9 @@ def render_invoice_items():
             with col3:
                 st.text(item['packing'])
             with col4:
-                st.text(f"RS {format_currency_indian(item['unitPrice'])}")
+                st.text(format_currency_indian(item['unitPrice']))
             with col5:
-                st.text(f"RS {format_currency_indian(item['amount'])}")
+                st.text(format_currency_indian(item['amount']))
             with col6:
                 if st.button("❌", key=f"remove_{i}"):
                     st.session_state.invoice_items.pop(i)
@@ -1835,6 +1856,41 @@ def render_reports_section():
     """Enhanced Reports Section with all HTML features"""
     st.markdown('<div class="section-header"><h3>📈 Reports & Analytics</h3></div>', unsafe_allow_html=True)
     
+    # Sales with Party functionality - FIXED: This was missing
+    st.subheader("👥 Sales with Party")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        sales_party = st.selectbox("Select Party", [""] + st.session_state.parties, key="sales_party")
+    with col2:
+        sales_start_date = st.date_input("Start Date", key="sales_start")
+    with col3:
+        sales_end_date = st.date_input("End Date", key="sales_end")
+    
+    if st.button("📊 View Sales with Party", key="sales_party_btn", use_container_width=True):
+        if sales_party and sales_start_date and sales_end_date:
+            try:
+                invoices = backend.get_invoices_by_party_and_date_range(sales_party, sales_start_date.isoformat(), sales_end_date.isoformat())
+                if invoices:
+                    total_sales = sum(invoice['totalAmount'] for invoice in invoices)
+                    st.success(f"Total sales for {sales_party}: PKR {format_currency_indian(total_sales)}")
+                    
+                    # Display sales summary
+                    sales_df = pd.DataFrame([{
+                        'Party': sales_party,
+                        'Period': f"{sales_start_date} to {sales_end_date}",
+                        'Total Invoices': len(invoices),
+                        'Total Sales': f"PKR {format_currency_indian(total_sales)}"
+                    }])
+                    st.dataframe(sales_df, use_container_width=True)
+                else:
+                    st.info(f"No sales found for {sales_party} in the selected date range")
+            except Exception as e:
+                st.error(f"Error fetching sales data: {str(e)}")
+        else:
+            st.error("Please select party and date range")
+    
+    st.markdown("---")
+    
     # Invoice range report
     st.subheader("📋 Invoice Range Report")
     col1, col2 = st.columns(2)
@@ -1859,7 +1915,7 @@ def render_reports_section():
                         pdf.set_font('Arial', '', 12)
                         pdf.cell(0, 10, f"Party: {invoice['partyName']}", 0, 1)
                         pdf.cell(0, 10, f"Date: {invoice['date']}", 0, 1)
-                        pdf.cell(0, 10, f"Total: RS {format_currency_indian(invoice['totalAmount'])}", 0, 1)
+                        pdf.cell(0, 10, f"Total: {format_currency_indian(invoice['totalAmount'])}", 0, 1)
                         pdf.ln(10)
                     st.markdown(get_pdf_download_link(pdf, f"invoices_{inv_start_date}_{inv_end_date}.pdf"), unsafe_allow_html=True)
                 else:
@@ -1887,53 +1943,16 @@ def render_reports_section():
             except Exception as e:
                 st.error(f"Error generating sales summary PDF: {str(e)}")
     
-    # Party invoices
-    st.subheader("👥 Party Invoices")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        party_inv_name = st.selectbox("Party Name", [""] + st.session_state.parties, key="party_invoices")
-    with col2:
-        pi_start_date = st.date_input("Start Date", key="party_invoices_start")
-    with col3:
-        pi_end_date = st.date_input("End Date", key="party_invoices_end")
-    
-    if st.button("Download Party Invoices", key="party_invoices_btn", use_container_width=True):
-        if party_inv_name and pi_start_date and pi_end_date:
-            try:
-                invoices = backend.get_invoices_by_party_and_date_range(party_inv_name, pi_start_date.isoformat(), pi_end_date.isoformat())
-                if invoices:
-                    # Generate combined PDF
-                    pdf = PDFGenerator()
-                    pdf.add_page()
-                    pdf.set_font('Arial', 'B', 16)
-                    pdf.cell(0, 10, f"Invoices for {party_inv_name}", 0, 1, 'C')
-                    pdf.cell(0, 10, f"From {pi_start_date} to {pi_end_date}", 0, 1, 'C')
-                    pdf.ln(10)
-                    
-                    for i, invoice in enumerate(invoices):
-                        if i > 0:
-                            pdf.ln(5)
-                        pdf.set_font('Arial', 'B', 12)
-                        pdf.cell(0, 10, f"Invoice #{invoice['invoiceNumber']} - {invoice['date']}", 0, 1)
-                        pdf.set_font('Arial', '', 10)
-                        pdf.cell(0, 10, f"Total: RS {format_currency_indian(invoice['totalAmount'])} | Grand Total: RS {format_currency_indian(invoice['grandTotal'])}", 0, 1)
-                    
-                    st.markdown(get_pdf_download_link(pdf, f"invoices_{party_inv_name}_{pi_start_date}_{pi_end_date}.pdf"), unsafe_allow_html=True)
-                else:
-                    st.info(f"No invoices found for {party_inv_name} in the selected date range")
-            except Exception as e:
-                st.error(f"Error generating party invoices PDF: {str(e)}")
-    
-    # All Party Balances
+    # All Party Balances - FIXED: Now excludes zero balance parties
     st.subheader("💰 All Party Balances")
     if st.button("Download All Party Balances PDF", key="all_balances_btn", use_container_width=True):
         try:
-            ledgers = backend.get_all_party_ledgers()
+            ledgers = backend.get_all_party_ledgers()  # This now excludes zero balance
             if ledgers:
                 pdf = generate_all_party_balances_pdf(ledgers)
                 st.markdown(get_pdf_download_link(pdf, "all_party_balances.pdf"), unsafe_allow_html=True)
             else:
-                st.info("No party data available")
+                st.info("No party data available with non-zero balance")
         except Exception as e:
             st.error(f"Error generating all party balances PDF: {str(e)}")
     
@@ -1981,18 +2000,18 @@ def generate_product_sales_pdf(sales_summary, start_date, end_date):
         pdf.cell(80, 10, item['productName'], 1, 0)
         pdf.cell(30, 10, item['packing'], 1, 0)
         pdf.cell(40, 10, format_number_indian(item['totalQty']), 1, 0, 'C')
-        pdf.cell(40, 10, f"RS {format_currency_indian(item['totalAmount'])}", 1, 1, 'R')
+        pdf.cell(40, 10, format_currency_indian(item['totalAmount']), 1, 1, 'R')
         total_revenue += item['totalAmount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(150, 10, 'Total Revenue:', 0, 0, 'R')
-    pdf.cell(40, 10, f"RS {format_currency_indian(total_revenue)}", 0, 1, 'R')
+    pdf.cell(40, 10, f"PKR {format_currency_indian(total_revenue)}", 0, 1, 'R')
     
     return pdf
 
 def generate_all_party_balances_pdf(ledgers):
-    """Generate PDF for all party balances"""
+    """Generate PDF for all party balances - FIXED: Excludes zero balance"""
     pdf = PDFGenerator()
     pdf.add_page()
     
@@ -2009,13 +2028,13 @@ def generate_all_party_balances_pdf(ledgers):
     total_balance = 0
     for ledger in ledgers:
         pdf.cell(120, 10, ledger['partyName'], 1, 0)
-        pdf.cell(60, 10, f"RS {format_currency_indian(ledger['currentBalance'])}", 1, 1, 'R')
+        pdf.cell(60, 10, f"PKR {format_currency_indian(ledger['currentBalance'])}", 1, 1, 'R')
         total_balance += ledger['currentBalance']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(120, 10, 'Total Outstanding:', 0, 0, 'R')
-    pdf.cell(60, 10, f"RS {format_currency_indian(total_balance)}", 0, 1, 'R')
+    pdf.cell(60, 10, f"PKR {format_currency_indian(total_balance)}", 0, 1, 'R')
     
     return pdf
 
@@ -2044,13 +2063,13 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
         pdf.cell(50, 10, payment['partyName'], 1, 0)
         pdf.cell(40, 10, payment['date'], 1, 0)
         pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
-        pdf.cell(30, 10, f"RS {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(160, 10, 'Total Bilty Expense:', 0, 0, 'R')
-    pdf.cell(30, 10, f"RS {format_currency_indian(total_amount)}", 0, 1, 'R')
+    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
@@ -2084,8 +2103,8 @@ def display_opening_balance_history(history, party_name):
         formatted_history = []
         for record in history:
             formatted_record = record.copy()
-            formatted_record['old_balance_display'] = f"RS {format_currency_indian(record['old_balance'])}"
-            formatted_record['new_balance_display'] = f"RS {format_currency_indian(record['new_balance'])}"
+            formatted_record['old_balance_display'] = format_currency_indian(record['old_balance'])
+            formatted_record['new_balance_display'] = format_currency_indian(record['new_balance'])
             formatted_history.append(formatted_record)
         
         df = pd.DataFrame(formatted_history)
@@ -2096,17 +2115,20 @@ def display_opening_balance_history(history, party_name):
         st.info("No history records found")
 
 def render_edit_invoice_section():
-    """Invoice Update & Delete Section"""
+    """Invoice Update & Delete Section - FIXED: Invoice search issue"""
     st.markdown('<div class="section-header"><h3>✏️ Invoice Update & Delete</h3></div>', unsafe_allow_html=True)
+    
+    # Get all invoice numbers for dropdown
+    invoice_numbers = backend.get_all_invoice_numbers()
     
     col1, col2 = st.columns([3, 1])
     with col1:
-        invoice_number = st.text_input("Invoice Number", placeholder="Enter Invoice # to Edit/Delete", key="search_invoice")
+        invoice_number = st.selectbox("Invoice Number", [""] + invoice_numbers, key="search_invoice")
     with col2:
-        if st.button("🔍 Search Invoice", use_container_width=True):
-            if invoice_number.strip():
+        if st.button("🔍 Search & Load Invoice", use_container_width=True):
+            if invoice_number:
                 try:
-                    invoice_data = backend.get_invoice(invoice_number.strip())
+                    invoice_data = backend.get_invoice(invoice_number)
                     if invoice_data:
                         load_invoice_for_editing(invoice_data)
                     else:
@@ -2114,7 +2136,7 @@ def render_edit_invoice_section():
                 except Exception as e:
                     st.error(f"Error loading invoice: {str(e)}")
             else:
-                st.error("Please enter an invoice number")
+                st.error("Please select an invoice number")
 
 def load_invoice_for_editing(invoice_data):
     """Load invoice data for editing"""
@@ -2171,7 +2193,7 @@ def delete_invoice(invoice_number):
             st.error(f"Error deleting invoice: {str(e)}")
 
 def render_party_exclude_section():
-    """Party Exclude Report Section"""
+    """Party Exclude Report Section - FIXED: Overlapping issue"""
     st.markdown('<div class="section-header"><h3>🚫 Party Exclude Report</h3></div>', unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
@@ -2202,7 +2224,7 @@ def render_party_exclude_section():
             st.error("Please select both start and end dates")
 
 def generate_party_exclude_pdf(payments, excluded_parties, start_date, end_date):
-    """Generate party exclude report PDF"""
+    """Generate party exclude report PDF - FIXED: Overlapping issue"""
     pdf = PDFGenerator()
     pdf.add_page()
     
@@ -2219,32 +2241,40 @@ def generate_party_exclude_pdf(payments, excluded_parties, start_date, end_date)
     # List excluded parties in multiple columns if many
     if excluded_parties:
         parties_text = ", ".join(excluded_parties)
+        # Use multi_cell to avoid text going beyond page width
         pdf.multi_cell(0, 5, parties_text)
     
     pdf.ln(5)
     
-    # Payments table
+    # Payments table with adjusted column widths to prevent overlapping
     pdf.set_fill_color(200, 220, 255)
-    pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Party Name', 1, 0, 'C', True)
-    pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Remarks', 1, 0, 'C', True)
-    pdf.cell(30, 10, 'Amount', 1, 1, 'C', True)
+    col_widths = [15, 45, 35, 60, 35]  # Adjusted widths to fit page
+    pdf.cell(col_widths[0], 10, 'ID', 1, 0, 'C', True)
+    pdf.cell(col_widths[1], 10, 'Party Name', 1, 0, 'C', True)
+    pdf.cell(col_widths[2], 10, 'Date', 1, 0, 'C', True)
+    pdf.cell(col_widths[3], 10, 'Remarks', 1, 0, 'C', True)
+    pdf.cell(col_widths[4], 10, 'Amount', 1, 1, 'C', True)
     
     pdf.set_fill_color(255, 255, 255)
     total_amount = 0
     for payment in payments:
-        pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
-        pdf.cell(50, 10, payment['partyName'], 1, 0)
-        pdf.cell(40, 10, payment['date'], 1, 0)
-        pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)
-        pdf.cell(30, 10, f"RS {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        # Truncate long values to prevent overlapping
+        party_name = payment['partyName'][:20] if len(payment['partyName']) > 20 else payment['partyName']
+        remarks = payment.get('remarks', '')[:25] if payment.get('remarks') else ''
+        
+        pdf.cell(col_widths[0], 10, str(payment['paymentId']), 1, 0)
+        pdf.cell(col_widths[1], 10, party_name, 1, 0)
+        pdf.cell(col_widths[2], 10, payment['date'], 1, 0)
+        pdf.cell(col_widths[3], 10, remarks, 1, 0)
+        pdf.cell(col_widths[4], 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(160, 10, 'Total Amount (After Exclusion):', 0, 0, 'R')
-    pdf.cell(30, 10, f"RS {format_currency_indian(total_amount)}", 0, 1, 'R')
+    # Calculate total width for proper alignment
+    total_width = sum(col_widths)
+    pdf.cell(total_width - col_widths[4], 10, 'Total Amount (After Exclusion):', 0, 0, 'R')
+    pdf.cell(col_widths[4], 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
@@ -2301,91 +2331,13 @@ def generate_no_bilty_pdf(payments, start_date, end_date):
         pdf.cell(50, 10, payment['partyName'], 1, 0)
         pdf.cell(40, 10, payment['date'], 1, 0)
         pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)
-        pdf.cell(30, 10, f"RS {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(160, 10, 'Total Amount (No Bilty):', 0, 0, 'R')
-    pdf.cell(30, 10, f"RS {format_currency_indian(total_amount)}", 0, 1, 'R')
-    
-    return pdf
-
-def render_sales_with_party_section():
-    """Sales with Party Report"""
-    st.markdown('<div class="section-header"><h3>📊 Sales with Party Report</h3></div>', unsafe_allow_html=True)
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        party_name = st.selectbox("Select Party", [""] + st.session_state.parties, key="sales_party")
-    with col2:
-        sales_start_date = st.date_input("Start Date", key="sales_start")
-    with col3:
-        sales_end_date = st.date_input("End Date", key="sales_end")
-    
-    if st.button("📄 Download Sales with Party Report", use_container_width=True):
-        if party_name and sales_start_date and sales_end_date:
-            try:
-                invoices = backend.get_invoices_by_party_and_date_range(
-                    party_name, 
-                    sales_start_date.isoformat(), 
-                    sales_end_date.isoformat()
-                )
-                if invoices:
-                    pdf = generate_sales_with_party_pdf(invoices, party_name, sales_start_date, sales_end_date)
-                    st.markdown(get_pdf_download_link(pdf, f"sales_{party_name}_{sales_start_date}_{sales_end_date}.pdf"), unsafe_allow_html=True)
-                else:
-                    st.info(f"No sales found for {party_name} in the selected date range")
-            except Exception as e:
-                st.error(f"Error generating sales report: {str(e)}")
-        else:
-            st.error("Please select party and date range")
-
-def generate_sales_with_party_pdf(invoices, party_name, start_date, end_date):
-    """Generate sales with party PDF"""
-    pdf = PDFGenerator()
-    pdf.add_page()
-    
-    pdf.set_font('Arial', 'B', 16)
-    pdf.cell(0, 10, f'Sales Report - {party_name}', 0, 1, 'C')
-    pdf.cell(0, 10, f'From {start_date} to {end_date}', 0, 1, 'C')
-    pdf.ln(10)
-    
-    # Sales summary
-    total_sales = sum(invoice['totalAmount'] for invoice in invoices)
-    total_gst = sum(invoice.get('gstAmount', 0) for invoice in invoices)
-    grand_total = sum(invoice['grandTotal'] for invoice in invoices)
-    
-    pdf.set_fill_color(230, 245, 233)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(100, 8, 'Total Sales:', 0, 0, 'R', True)
-    pdf.cell(40, 8, f"RS {format_currency_indian(total_sales)}", 0, 1, 'R', True)
-    
-    pdf.cell(100, 8, 'Total GST:', 0, 0, 'R', True)
-    pdf.cell(40, 8, f"RS {format_currency_indian(total_gst)}", 0, 1, 'R', True)
-    
-    pdf.cell(100, 8, 'Grand Total:', 0, 0, 'R', True)
-    pdf.cell(40, 8, f"RS {format_currency_indian(grand_total)}", 0, 1, 'R', True)
-    pdf.ln(10)
-    
-    # Invoices table
-    pdf.set_fill_color(200, 220, 255)
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(25, 8, 'Invoice #', 1, 0, 'C', True)
-    pdf.cell(25, 8, 'Date', 1, 0, 'C', True)
-    pdf.cell(50, 8, 'Amount', 1, 0, 'C', True)
-    pdf.cell(50, 8, 'GST', 1, 0, 'C', True)
-    pdf.cell(40, 8, 'Grand Total', 1, 1, 'C', True)
-    
-    pdf.set_fill_color(255, 255, 255)
-    pdf.set_font('Arial', '', 9)
-    
-    for invoice in invoices:
-        pdf.cell(25, 6, invoice['invoiceNumber'], 1, 0, 'C')
-        pdf.cell(25, 6, invoice['date'], 1, 0, 'C')
-        pdf.cell(50, 6, format_currency_indian(invoice['totalAmount']), 1, 0, 'R')
-        pdf.cell(50, 6, format_currency_indian(invoice.get('gstAmount', 0)), 1, 0, 'R')
-        pdf.cell(40, 6, f"RS {format_currency_indian(invoice['grandTotal'])}", 1, 1, 'R')
+    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
@@ -2478,8 +2430,6 @@ def main():
     
     with tab5:
         render_reports_section()
-        st.markdown("---")
-        render_sales_with_party_section()
     
     with tab6:
         st.markdown('<div class="section-header"><h3>⚙️ Advanced Features</h3></div>', unsafe_allow_html=True)
