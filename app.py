@@ -2008,7 +2008,7 @@ def generate_all_party_balances_pdf(ledgers):
     pdf.cell(60, 10, f"PKR {format_currency_indian(total_balance)}", 0, 1, 'R')
     
     return pdf
-   def generate_bilty_expense_pdf(payments, start_date, end_date):
+   def generate_bilty_expense_pdf(payments, start_date, end_date)
     """Generate bilty expense report PDF"""
     pdf = PDFGenerator()
     pdf.add_page()
