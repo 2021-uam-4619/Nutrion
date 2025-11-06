@@ -47,9 +47,8 @@ PRODUCT_PACKING_MAP = {
 }
 
 # Utility functions for number formatting
-# Utility functions for number formatting
 def format_currency_indian(value):
-    """Format currency in Pakistani bank number system (international format)"""
+    """Format currency in Indian numbering system with comma separation"""
     try:
         value = float(value)
         if value == 0:
@@ -57,39 +56,69 @@ def format_currency_indian(value):
         
         is_negative = value < 0
         value = abs(value)
-
-        # Format with thousand separator (international system)
+        
+        # Check if it's a whole number
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-
-        return f"-{formatted}" if is_negative else formatted
-
+        
+        # Indian numbering system uses different comma placement
+        parts = formatted.split(".")
+        integer_part = parts[0]
+        
+        # For Indian system: 1,00,000 instead of 100,000
+        if len(integer_part) > 3:
+            last_three = integer_part[-3:]
+            other = integer_part[:-3]
+            if other:
+                formatted_integer = other + "," + last_three
+            else:
+                formatted_integer = last_three
+        else:
+            formatted_integer = integer_part
+        
+        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
+        return f"-{result}" if is_negative else result
     except (ValueError, TypeError):
         return "0"
 
-
 def format_number_indian(value):
-    """Format numbers in Pakistani bank number system (international format)"""
+    """Format numbers in Indian numbering system with comma separation"""
     try:
         value = float(value)
         if value == 0:
             return "0"
-
+        
         is_negative = value < 0
         value = abs(value)
-
-        # Format with thousand separator (international system)
+        
+        # Check if it's a whole number
         if value.is_integer():
             formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
-
-        return f"-{formatted}" if is_negative else formatted
-
+        
+        # Indian numbering system uses different comma placement
+        parts = formatted.split(".")
+        integer_part = parts[0]
+        
+        # For Indian system: 1,00,000 instead of 100,000
+        if len(integer_part) > 3:
+            last_three = integer_part[-3:]
+            other = integer_part[:-3]
+            if other:
+                formatted_integer = other + "," + last_three
+            else:
+                formatted_integer = last_three
+        else:
+            formatted_integer = integer_part
+        
+        result = formatted_integer + "." + parts[1] if len(parts) > 1 else formatted_integer
+        return f"-{result}" if is_negative else result
     except (ValueError, TypeError):
         return "0"
+
 def convert_to_words(num):
     """Convert number to words (Indian numbering system)"""
     if num == 0:
@@ -2008,7 +2037,8 @@ def generate_all_party_balances_pdf(ledgers):
     pdf.cell(60, 10, f"PKR {format_currency_indian(total_balance)}", 0, 1, 'R')
     
     return pdf
-   def generate_bilty_expense_pdf(payments, start_date, end_date)
+
+def generate_bilty_expense_pdf(payments, start_date, end_date):
     """Generate bilty expense report PDF"""
     pdf = PDFGenerator()
     pdf.add_page()
@@ -2018,28 +2048,28 @@ def generate_all_party_balances_pdf(ledgers):
     pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
     pdf.ln(10)
     
-    # Payments table (Updated widths only)
+    # Payments table
     pdf.set_fill_color(200, 220, 255)
     pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
-    pdf.cell(60, 10, 'Party Name', 1, 0, 'C', True)   # was 50 → now 60
-    pdf.cell(45, 10, 'Date', 1, 0, 'C', True)         # was 40 → now 45
-    pdf.cell(65, 10, 'Remarks', 1, 0, 'C', True)      # was 50 → now 65
-    pdf.cell(35, 10, 'Amount', 1, 1, 'C', True)       # was 30 → now 35
+    pdf.cell(50, 10, 'Party Name', 1, 0, 'C', True)
+    pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
+    pdf.cell(50, 10, 'Remarks', 1, 0, 'C', True)
+    pdf.cell(30, 10, 'Amount', 1, 1, 'C', True)
     
     pdf.set_fill_color(255, 255, 255)
     total_amount = 0
     for payment in payments:
         pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
-        pdf.cell(60, 10, payment['partyName'], 1, 0)
-        pdf.cell(45, 10, payment['date'], 1, 0)
-        pdf.cell(65, 10, payment.get('remarks', '')[:40], 1, 0)  # allow wider text
-        pdf.cell(35, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(50, 10, payment['partyName'], 1, 0)
+        pdf.cell(40, 10, payment['date'], 1, 0)
+        pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
+        pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(190, 10, 'Total Bilty Expense:', 0, 0, 'R')
-    pdf.cell(35, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
+    pdf.cell(160, 10, 'Total Bilty Expense:', 0, 0, 'R')
+    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
