@@ -45,39 +45,49 @@ PRODUCT_PACKING_MAP = {
     "Super Ener Emusifier": "Kg", "Antioxdant": "Kg", "Toxin Binder Weilituo": "Kg", 
     "Toxin Clean": "Kg", "GutPro 60 (Tributyrin)": "Kg", "InduceAcid Liquid": "Ltr"
 }
-def format_currency_pak(value):
-    """Format currency using standard Pakistani banking format (1,234,567.89)"""
+# Utility functions for number formatting
+def format_currency_indian(value):
+    """Format currency in Pakistani bank number system (international format)"""
     try:
         value = float(value)
+        if value == 0:
+            return "0"
+        
         is_negative = value < 0
         value = abs(value)
 
-        # Whole numbers vs decimals
+        # Format with thousand separator (international system)
         if value.is_integer():
-            formatted = "{:,.0f}".format(value)
+            formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
 
         return f"-{formatted}" if is_negative else formatted
+
     except (ValueError, TypeError):
         return "0"
 
 
-def format_number_pak(value):
-    """Format general numbers using standard Pakistani format (1,234,567.89)"""
+def format_number_indian(value):
+    """Format numbers in Pakistani bank number system (international format)"""
     try:
         value = float(value)
+        if value == 0:
+            return "0"
+
         is_negative = value < 0
         value = abs(value)
 
+        # Format with thousand separator (international system)
         if value.is_integer():
-            formatted = "{:,.0f}".format(value)
+            formatted = "{:,.0f}".format(int(value))
         else:
             formatted = "{:,.2f}".format(value)
 
         return f"-{formatted}" if is_negative else formatted
+
     except (ValueError, TypeError):
-        return "0"
+        return "0"-
 def convert_to_words(num):
     """Convert number to words (Indian numbering system)"""
     if num == 0:
