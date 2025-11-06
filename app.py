@@ -2035,7 +2035,7 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
         pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
         pdf.cell(50, 10, payment['partyName'], 1, 0)
         pdf.cell(40, 10, payment['date'], 1, 0)
-        pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
+        #pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
         pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
