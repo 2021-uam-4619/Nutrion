@@ -2012,7 +2012,7 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
     pdf = PDFGenerator()
     pdf.add_page()
     
-    pdf.set_font('Arial', 'B', 16)
+    pdf.set_font('Arial', '', 16)
     pdf.cell(0, 10, 'Bilty Expense Report', 0, 1, 'C')
     pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
     pdf.ln(10)
@@ -2032,13 +2032,13 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
         pdf.cell(50, 10, payment['partyName'], 1, 0)
         pdf.cell(40, 10, payment['date'], 1, 0)
         pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
-        pdf.cell(30, 10, f" {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        pdf.cell(30, 10, f"{format_currency_indian(payment['amount'])}", 1, 1, 'R')
         total_amount += payment['amount']
     
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 12)
     pdf.cell(160, 10, 'Total Bilty Expense:', 0, 0, 'R')
-    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
+    pdf.cell(30, 10, f"{format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
 
