@@ -2008,8 +2008,7 @@ def generate_all_party_balances_pdf(ledgers):
     pdf.cell(60, 10, f"PKR {format_currency_indian(total_balance)}", 0, 1, 'R')
     
     return pdf
-
-def generate_bilty_expense_pdf(payments, start_date, end_date):
+    def generate_bilty_expense_pdf(payments, start_date, end_date):
     """Generate bilty expense report PDF"""
     pdf = PDFGenerator()
     pdf.add_page()
@@ -2018,32 +2017,52 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
     pdf.cell(0, 10, 'Bilty Expense Report', 0, 1, 'C')
     pdf.cell(0, 10, f'{start_date} to {end_date}', 0, 1, 'C')
     pdf.ln(10)
-    
-    # Payments table
+
+    # Column widths (increased to avoid overlap)
+    col_id = 18
+    col_party = 55
+    col_date = 32
+    col_remarks = 65
+    col_amount = 35
+
+    # Header row
+    pdf.set_font('Arial', 'B', 11)
     pdf.set_fill_color(200, 220, 255)
-    pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Party Name', 1, 0, 'C', True)
-    pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Remarks', 1, 0, 'C', True)
-    pdf.cell(30, 10, 'Amount', 1, 1, 'C', True)
-    
-    pdf.set_fill_color(255, 255, 255)
+    pdf.cell(col_id, 10, 'ID', 1, 0, 'C', True)
+    pdf.cell(col_party, 10, 'Party Name', 1, 0, 'C', True)
+    pdf.cell(col_date, 10, 'Date', 1, 0, 'C', True)
+    pdf.cell(col_remarks, 10, 'Remarks', 1, 0, 'C', True)
+    pdf.cell(col_amount, 10, 'Amount', 1, 1, 'C', True)
+
     total_amount = 0
+    pdf.set_font('Arial', '', 10)
+
     for payment in payments:
-        pdf.cell(20, 10, str(payment['paymentId']), 1, 0)
-        pdf.cell(50, 10, payment['partyName'], 1, 0)
-        pdf.cell(40, 10, payment['date'], 1, 0)
-        pdf.cell(50, 10, payment.get('remarks', '')[:25], 1, 0)  # Truncate long remarks
-        pdf.cell(30, 10, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+        y_before = pdf.get_y()
+
+        # Remarks wrapped using multi_cell
+        pdf.set_xy(pdf.get_x() + col_id + col_party + col_date, y_before)
+        pdf.multi_cell(col_remarks, 6, payment.get('remarks', ''), border=1)
+
+        # Get height of remarks cell
+        remarks_height = pdf.get_y() - y_before
+
+        # Print other columns with same row height
+        pdf.set_xy(10, y_before)
+        pdf.cell(col_id, remarks_height, str(payment['paymentId']), 1)
+        pdf.cell(col_party, remarks_height, payment['partyName'], 1)
+        pdf.cell(col_date, remarks_height, payment['date'], 1)
+        pdf.set_xy(10 + col_id + col_party + col_date + col_remarks, y_before)
+        pdf.cell(col_amount, remarks_height, f"PKR {format_currency_indian(payment['amount'])}", 1, 1, 'R')
+
         total_amount += payment['amount']
-    
-    pdf.ln(10)
+
+    pdf.ln(8)
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(160, 10, 'Total Bilty Expense:', 0, 0, 'R')
-    pdf.cell(30, 10, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
+    pdf.cell(col_id + col_party + col_date + col_remarks, 8, 'Total Bilty Expense:', 0, 0, 'R')
+    pdf.cell(col_amount, 8, f"PKR {format_currency_indian(total_amount)}", 0, 1, 'R')
     
     return pdf
-
 def render_opening_balance_history():
     """Opening Balance History Section"""
     st.markdown('<div class="section-header"><h3>📜 Opening Balance History</h3></div>', unsafe_allow_html=True)
