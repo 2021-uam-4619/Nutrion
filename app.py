@@ -2019,10 +2019,10 @@ def generate_bilty_expense_pdf(payments, start_date, end_date):
     
     # Payments table
     pdf.set_fill_color(200, 220, 255)
-    pdf.cell(20, 10, 'ID', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Party Name', 1, 0, 'C', True)
+    pdf.cell(15, 10, 'ID', 1, 0, 'C', True)
+    pdf.cell(80, 10, 'Party Name', 1, 0, 'C', True)
     pdf.cell(40, 10, 'Date', 1, 0, 'C', True)
-    pdf.cell(50, 10, 'Remarks', 1, 0, 'C', True)
+    pdf.cell(80, 10, 'Remarks', 1, 0, 'C', True)
     pdf.cell(30, 10, 'Amount', 1, 1, 'C', True)
     
     pdf.set_fill_color(255, 255, 255)
