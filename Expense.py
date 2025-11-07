@@ -3,6 +3,8 @@ import sqlite3
 import pandas as pd
 from fpdf import FPDF
 from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
+import io
 
 # --- CONFIGURATION ---
 # Define the expense categories from your list
@@ -28,13 +30,15 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Employee Table
+    # Employee Table - UPDATED with structured bank details
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS employees (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         designation TEXT,
-        bank_details TEXT,
+        bank_name TEXT,
+        account_title TEXT,
+        account_number TEXT,
         salary REAL DEFAULT 0
     );
     """)
@@ -52,18 +56,35 @@ def init_db():
     );
     """)
     
+    # Check if bank_details column exists from old version, and if so, migrate
+    try:
+        cursor.execute("SELECT bank_details FROM employees LIMIT 1")
+        # If we are here, the old column exists. Let's migrate/drop it.
+        # For simplicity in this context, we'll just add new columns if they don't exist
+        # A full migration is complex, so we'll assume new columns are added.
+        # Let's add new columns if they don't exist
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN bank_name TEXT")
+        except: pass # Column already exists
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_title TEXT")
+        except: pass # Column already exists
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_number TEXT")
+        except: pass # Column already exists
+    except sqlite3.OperationalError:
+        # 'bank_details' column doesn't exist, which is fine (new setup)
+        pass
+
     conn.commit()
     conn.close()
 
 # --- EMPLOYEE CRUD FUNCTIONS ---
 
-def add_employee(name, designation, bank_details, salary):
+def add_employee(name, designation, bank_name, account_title, account_number, salary):
     """Adds a new employee to the database."""
     try:
         conn = get_db_connection()
         conn.execute(
-            "INSERT INTO employees (name, designation, bank_details, salary) VALUES (?, ?, ?, ?)",
-            (name, designation, bank_details, salary)
+            "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, designation, bank_name, account_title, account_number, salary)
         )
         conn.commit()
         conn.close()
@@ -74,17 +95,21 @@ def add_employee(name, designation, bank_details, salary):
 def get_employees():
     """Fetches all employees as a Pandas DataFrame."""
     conn = get_db_connection()
-    df = pd.read_sql_query("SELECT * FROM employees", conn)
+    # Ensure all columns are selected, even if old 'bank_details' exists
+    df = pd.read_sql_query("SELECT id, name, designation, bank_name, account_title, account_number, salary FROM employees", conn)
     conn.close()
     return df
 
-def update_employee(emp_id, name, designation, bank_details, salary):
+def update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary):
     """Updates an existing employee's details."""
     try:
         conn = get_db_connection()
         conn.execute(
-            "UPDATE employees SET name = ?, designation = ?, bank_details = ?, salary = ? WHERE id = ?",
-            (name, designation, bank_details, salary, emp_id)
+            """UPDATE employees SET 
+               name = ?, designation = ?, bank_name = ?, 
+               account_title = ?, account_number = ?, salary = ? 
+               WHERE id = ?""",
+            (name, designation, bank_name, account_title, account_number, salary, emp_id)
         )
         conn.commit()
         conn.close()
@@ -142,6 +167,19 @@ def get_expenses(start_date, end_date):
     conn.close()
     return df
 
+def get_expenses_for_employee(employee_id, start_date, end_date):
+    """Fetches all expenses for a specific employee in a date range."""
+    conn = get_db_connection()
+    query = """
+    SELECT expense_date, category, description, amount
+    FROM expenses
+    WHERE employee_id = ? AND expense_date BETWEEN ? AND ?
+    ORDER BY expense_date ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(employee_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
+    conn.close()
+    return df
+
 def delete_expense(expense_id):
     """Deletes an expense from the database."""
     try:
@@ -160,45 +198,94 @@ class PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 12)
         self.cell(0, 10, self.title, 0, 1, 'C')
-        self.ln(10)
+        self.ln(5)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
         self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
 
-def create_salary_slip_pdf(employee, report_month_year):
-    """Generates a salary slip PDF for an employee."""
+def create_employee_report_pdf(employee, report_month_year, ledger_df):
+    """Generates a salary slip PDF with ledger for an employee."""
     pdf = PDF()
-    pdf.title = f'Salary Slip for {report_month_year}'
+    pdf.title = f'Employee Monthly Report - {report_month_year}'
     pdf.add_page()
     pdf.set_font('Arial', '', 12)
     
-    pdf.cell(50, 10, 'Employee Name:', 0, 0)
-    pdf.cell(0, 10, employee['name'], 0, 1)
+    # --- Employee Details ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Employee Details', 0, 1, 'L')
+    pdf.set_font('Arial', '', 12)
     
-    pdf.cell(50, 10, 'Designation:', 0, 0)
-    pdf.cell(0, 10, employee['designation'], 0, 1)
+    col_width_label = 50
+    col_width_value = 0
+
+    pdf.cell(col_width_label, 8, 'Employee Name:', 0, 0)
+    pdf.cell(col_width_value, 8, employee['name'], 0, 1)
     
-    pdf.cell(50, 10, 'Bank Details:', 0, 0)
-    pdf.cell(0, 10, employee['bank_details'], 0, 1)
+    pdf.cell(col_width_label, 8, 'Designation:', 0, 0)
+    pdf.cell(col_width_value, 8, employee['designation'], 0, 1)
+    
+    pdf.cell(col_width_label, 8, 'Bank Name:', 0, 0)
+    pdf.cell(col_width_value, 8, str(employee['bank_name']), 0, 1)
+    
+    pdf.cell(col_width_label, 8, 'Account Title:', 0, 0)
+    pdf.cell(col_width_value, 8, str(employee['account_title']), 0, 1)
+    
+    pdf.cell(col_width_label, 8, 'Account Number:', 0, 0)
+    pdf.cell(col_width_value, 8, str(employee['account_number']), 0, 1)
     
     pdf.ln(10)
-    pdf.set_font('Arial', 'B', 12)
     
-    pdf.cell(50, 10, 'Description', 1, 0)
+    # --- Salary Summary ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Salary Summary', 0, 1, 'L')
+    
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(130, 10, 'Description', 1, 0, 'L')
     pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'R')
     
     pdf.set_font('Arial', '', 12)
-    pdf.cell(50, 10, 'Monthly Salary', 1, 0)
+    pdf.cell(130, 10, 'Base Salary', 1, 0)
     pdf.cell(0, 10, f"{employee['salary']:,.2f}", 1, 1, 'R')
     
-    # You can add deductions or bonuses here
+    total_deductions = ledger_df['amount'].sum()
+    net_salary = employee['salary'] - total_deductions
+    
+    pdf.cell(130, 10, 'Total Deductions (from Ledger)', 1, 0)
+    pdf.cell(0, 10, f"({total_deductions:,.2f})", 1, 1, 'R')
     
     pdf.set_font('Arial', 'B', 12)
-    pdf.cell(50, 10, 'Total Salary', 1, 0)
-    pdf.cell(0, 10, f"{employee['salary']:,.2f}", 1, 1, 'R')
+    pdf.cell(130, 10, 'Net Salary Payable', 1, 0)
+    pdf.cell(0, 10, f"{net_salary:,.2f}", 1, 1, 'R')
     
+    pdf.ln(10)
+
+    # --- Monthly Ledger (Deductions/Advances) ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Monthly Ledger (Deductions / Advances)', 0, 1, 'L')
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(30, 10, 'Date', 1, 0, 'C')
+    pdf.cell(45, 10, 'Category', 1, 0, 'C')
+    pdf.cell(75, 10, 'Description', 1, 0, 'C')
+    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C')
+    
+    pdf.set_font('Arial', '', 9)
+    if ledger_df.empty:
+        pdf.cell(0, 10, 'No deductions or advances recorded for this month.', 1, 1, 'C')
+    else:
+        for _, row in ledger_df.iterrows():
+            pdf.cell(30, 10, row['expense_date'], 1, 0)
+            pdf.cell(45, 10, row['category'], 1, 0)
+            pdf.cell(75, 10, str(row['description'])[:40], 1, 0) # Truncate description
+            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
+            
+    # Total
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(150, 10, 'Total Deductions:', 1, 0, 'R')
+    pdf.cell(0, 10, f'PKR {total_deductions:,.2f}', 1, 1, 'R')
+
     # Return as bytes for download
     return pdf.output(dest='S').encode('latin-1')
 
@@ -282,12 +369,18 @@ def page_employee_management():
     with st.form("add_employee_form", clear_on_submit=True):
         name = st.text_input("Name", placeholder="e.g., Muhammad Asim Iqbal")
         designation = st.text_input("Designation", placeholder="e.g., Manager")
-        bank_details = st.text_input("Bank Details", placeholder="e.g., Bank Al-Falah, 0123-...")
+        
+        st.subheader("Bank Details")
+        bank_name = st.text_input("Bank Name", placeholder="e.g., Bank Al-Falah")
+        account_title = st.text_input("Account Title", placeholder="e.g., Muhammad Asim Iqbal")
+        account_number = st.text_input("Account Number", placeholder="e.g., 0123-1004567890")
+        
+        st.subheader("Salary")
         salary = st.number_input("Monthly Salary (PKR)", min_value=0.0, step=1000.0)
         
         submitted = st.form_submit_button("Add Employee")
         if submitted and name:
-            add_employee(name, designation, bank_details, salary)
+            add_employee(name, designation, bank_name, account_title, account_number, salary)
         elif submitted:
             st.warning("Please provide an employee name.")
             
@@ -300,8 +393,13 @@ def page_employee_management():
     if employees_df.empty:
         st.info("No employees found. Add one using the form above.")
         return
+    
+    # Display dataframe, ensuring new columns are present
+    display_cols = ['id', 'name', 'designation', 'bank_name', 'account_title', 'account_number', 'salary']
+    # Filter df to only columns that exist, in case of old db schema
+    existing_cols = [col for col in display_cols if col in employees_df.columns]
+    st.dataframe(employees_df[existing_cols], use_container_width=True)
 
-    st.dataframe(employees_df, use_container_width=True)
 
     # --- Edit / Delete Section ---
     employee_list = employees_df['name'].tolist()
@@ -319,13 +417,19 @@ def page_employee_management():
             with st.form(f"edit_form_{emp_id}"):
                 # Pre-fill form with existing data
                 name = st.text_input("Name", value=selected_emp['name'])
-                designation = st.text_input("Designation", value=selected_emp['designation'])
-                bank_details = st.text_input("Bank Details", value=selected_emp['bank_details'])
+                designation = st.text_input("Designation", value=selected_emp.get('designation', ''))
+                
+                st.subheader("Bank Details")
+                bank_name = st.text_input("Bank Name", value=selected_emp.get('bank_name', ''))
+                account_title = st.text_input("Account Title", value=selected_emp.get('account_title', ''))
+                account_number = st.text_input("Account Number", value=selected_emp.get('account_number', ''))
+                
+                st.subheader("Salary")
                 salary = st.number_input("Monthly Salary (PKR)", value=float(selected_emp['salary']), min_value=0.0, step=1000.0)
                 
                 updated = st.form_submit_button("Update Employee")
                 if updated:
-                    update_employee(emp_id, name, designation, bank_details, salary)
+                    update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary)
                     st.rerun() # Refresh the page to show changes
 
         with col2:
@@ -356,7 +460,7 @@ def page_expense_management():
         
         # Use format_func to display names, but pass ID as the value
         selected_employee = st.selectbox(
-            "Link to Employee (Optional)", 
+            "Link to Employee (Optional - for Advances/Deductions)", 
             options=[opt[0] for opt in emp_options], # Pass IDs
             format_func=lambda x: dict(emp_options).get(x, "N/A") # Show names
         )
@@ -425,8 +529,8 @@ def page_reports_and_ledgers():
     st.divider()
 
     # --- Employee Ledger / Salary Slip ---
-    st.header("Generate Salary Slip")
-    st.write("Generate a professional PDF salary slip for an employee.")
+    st.header("Generate Employee Monthly Report & Ledger")
+    st.write("Generate a professional PDF report, including salary and a ledger of deductions/advances.")
     
     emp_names_dict = get_employee_names()
     if not emp_names_dict:
@@ -440,21 +544,30 @@ def page_reports_and_ledgers():
         format_func=lambda x: emp_names_dict.get(x)
     )
     
-    report_month = st.date_input("Select Month/Year for Report", value=datetime.today())
-    report_month_year = report_month.strftime("%B %Y")
+    report_month_date = st.date_input("Select Month for Report", value=datetime.today())
+    report_month_year = report_month_date.strftime("%B %Y")
     
-    if st.button("Generate Salary Slip"):
+    if st.button("Generate Employee Report"):
         # Fetch the selected employee's full details
         conn = get_db_connection()
         employee_data = conn.execute("SELECT * FROM employees WHERE id = ?", (selected_emp_id,)).fetchone()
         conn.close()
         
         if employee_data:
-            pdf_data = create_salary_slip_pdf(employee_data, report_month_year)
+            # Get start and end of the selected month
+            month_start_date = report_month_date.replace(day=1)
+            month_end_date = month_start_date + relativedelta(months=1, days=-1)
+            
+            # Fetch the ledger (expenses) for this employee for the month
+            ledger_df = get_expenses_for_employee(selected_emp_id, month_start_date, month_end_date)
+            
+            # Generate PDF
+            pdf_data = create_employee_report_pdf(employee_data, report_month_year, ledger_df)
+            
             st.download_button(
-                label="Download Salary Slip",
+                label="Download Employee Report (PDF)",
                 data=pdf_data,
-                file_name=f"Salary_Slip_{employee_data['name']}_{report_month.strftime('%Y_%m')}.pdf",
+                file_name=f"Employee_Report_{employee_data['name']}_{report_month_date.strftime('%Y_%m')}.pdf",
                 mime="application/pdf"
             )
         else:
@@ -464,14 +577,39 @@ def page_data_import():
     """Page for importing data from CSV/Excel."""
     st.title("📥 Data Import")
 
+    # --- Create Template Files in Memory ---
+    @st.cache_data
+    def get_employee_template():
+        df = pd.DataFrame(columns=["name", "designation", "bank_name", "account_title", "account_number", "salary"])
+        output = io.BytesIO()
+        df.to_csv(output, index=False, encoding='utf-8-sig')
+        return output.getvalue()
+
+    @st.cache_data
+    def get_expense_template():
+        df = pd.DataFrame(columns=["expense_date", "category", "amount", "description", "employee_id"])
+        output = io.BytesIO()
+        df.to_csv(output, index=False, encoding='utf-8-sig')
+        return output.getvalue()
+
     # --- Import Employees ---
     st.header("Import Employees")
-    st.write("Upload a CSV or Excel file with employee data.")
+    st.write("Upload a CSV or Excel file with employee data. Download the template to see the required format.")
+    
+    st.download_button(
+        label="Download Employee Template (CSV)",
+        data=get_employee_template(),
+        file_name="employee_template.csv",
+        mime="text/csv"
+    )
+    
     st.info("""
     **Required Format:**
     - `name` (text)
     - `designation` (text)
-    - `bank_details` (text)
+    - `bank_name` (text, optional)
+    - `account_title` (text, optional)
+    - `account_number` (text, optional)
     - `salary` (number)
     """)
     
@@ -492,8 +630,10 @@ def page_data_import():
                 with st.spinner("Importing..."):
                     for _, row in df.iterrows():
                         conn.execute(
-                            "INSERT INTO employees (name, designation, bank_details, salary) VALUES (?, ?, ?, ?)",
-                            (row['name'], row['designation'], row['bank_details'], row['salary'])
+                            "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
+                            (row['name'], row['designation'], 
+                             row.get('bank_name'), row.get('account_title'), row.get('account_number'), 
+                             row['salary'])
                         )
                     conn.commit()
                 conn.close()
@@ -502,9 +642,19 @@ def page_data_import():
         except Exception as e:
             st.error(f"An error occurred during import: {e}")
 
+    st.divider()
+
     # --- Import Expenses (Similar logic) ---
     st.header("Import Expenses")
-    st.write("Upload a CSV or Excel file with expense data.")
+    st.write("Upload a CSV or Excel file with expense data. Download the template to see the required format.")
+    
+    st.download_button(
+        label="Download Expense Template (CSV)",
+        data=get_expense_template(),
+        file_name="expense_template.csv",
+        mime="text/csv"
+    )
+
     st.info("""
     **Required Format:**
     - `expense_date` (YYYY-MM-DD)
