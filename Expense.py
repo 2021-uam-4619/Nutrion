@@ -515,7 +515,7 @@ def page_employee_management():
                 if updated:
                     update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary)
                     st.session_state.emp_select_box = "" # Reset select box
-                    st.rerun() # Refresh the page to show changes
+                    # REMOVED: st.rerun() - This line caused the error.
 
         with col2:
             st.subheader(f"Delete {selected_name}")
@@ -523,7 +523,7 @@ def page_employee_management():
             if st.button("Delete Employee", type="primary", key=f"delete_{emp_id}"):
                 delete_employee(emp_id)
                 st.session_state.emp_select_box = "" # Reset select box
-                st.rerun() # Refresh the page
+                # REMOVED: st.rerun() - This line also caused the error.
 
 
 def page_expense_management():
@@ -587,7 +587,7 @@ def page_expense_management():
             if st.button("Delete Selected Expense", type="primary", key=f"delete_exp_{selected_id}"):
                 delete_expense(selected_id)
                 st.session_state.exp_select_box = "" # Reset select box
-                st.rerun()
+                # REMOVED: st.rerun() - This line also caused the error.
     else:
         st.info("No expenses found for the selected period.")
 
