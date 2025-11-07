@@ -5,6 +5,7 @@ from fpdf import FPDF
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import io
+import time # We might not need this if form handles rerun, but good to have
 
 # --- CONFIGURATION ---
 # Define the expense categories from your list
@@ -13,7 +14,8 @@ EXPENSE_CATEGORIES = [
     "Muhammad Asim Iqbal Salary", "Import Export", "Office Electricity", "FBR", 
     "Abdul Manan Sb Salary", "Office Entertainment", "PSID", "Advance", 
     "Commission", "Office Stationery Expense", "Employee Expenses", "Other Expense", 
-    "Company Expense", "Muhammad Abdullah Salary"
+    "Company Expense", "Muhammad Abdullah Salary",
+    "Fine", "Other Deduction" # ADDED NEW CATEGORIES
 ]
 DB_NAME = "enterprise_data.db"
 
@@ -655,6 +657,43 @@ def page_reports_and_ledgers():
     report_month_date = st.date_input("Select Month for Report", value=datetime.today())
     report_month_year = report_month_date.strftime("%B %Y")
     
+    # --- NEW FEATURE: Show current deductions and add new ones ---
+    if selected_emp_id:
+        # 1. Calculate and display current deductions
+        month_start = report_month_date.replace(day=1)
+        month_end = month_start + relativedelta(months=1, days=-1)
+        
+        current_ledger_df = get_expenses_for_employee(selected_emp_id, month_start, month_end)
+        current_total_deductions = current_ledger_df['amount'].sum()
+        
+        st.metric("Current Deductions This Month", f"PKR {current_total_deductions:,.2f}")
+
+        # 2. Add an expander with a form to add new deductions
+        with st.expander("Add New Deduction / Advance"):
+            with st.form(f"new_deduction_form_{selected_emp_id}", clear_on_submit=True):
+                st.info(f"This will be added to the ledger for {report_month_year}.")
+                
+                # Use the 1st of the selected month as the date for the new deduction
+                ded_date = report_month_date.replace(day=1)
+                
+                # Use a specific list for this form
+                ded_category = st.selectbox("Category", ["Advance", "Fine", "Other Deduction", "Employee Expenses"])
+                ded_amount = st.number_input("Amount", min_value=0.01, step=10.0)
+                ded_desc = st.text_input("Description (e.g., 'Mess bill' or 'Broken item fine')")
+                
+                submitted_ded = st.form_submit_button("Add Deduction")
+                if submitted_ded and ded_amount > 0:
+                    add_expense(
+                        expense_date=ded_date,
+                        category=ded_category,
+                        amount=ded_amount,
+                        description=ded_desc,
+                        employee_id=selected_emp_id
+                    )
+                    # The page will rerun automatically on form submit, refreshing the metric
+                    
+    # --- End of new feature ---
+
     if st.button("Generate Employee Report"):
         # Fetch the selected employee's full details
         conn = get_db_connection()
@@ -667,6 +706,7 @@ def page_reports_and_ledgers():
             month_end_date = month_start_date + relativedelta(months=1, days=-1)
             
             # Fetch the ledger (expenses) for this employee for the month
+            # This will now include any deductions just added
             ledger_df = get_expenses_for_employee(selected_emp_id, month_start_date, month_end_date)
             
             # Generate PDF
