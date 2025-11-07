@@ -15,7 +15,8 @@ EXPENSE_CATEGORIES = [
     "Abdul Manan Sb Salary", "Office Entertainment", "PSID", "Advance", 
     "Commission", "Office Stationery Expense", "Employee Expenses", "Other Expense", 
     "Company Expense", "Muhammad Abdullah Salary",
-    "Fine", "Other Deduction" # ADDED NEW CATEGORIES
+    "Fine", "Other Deduction", # ADDED NEW CATEGORIES
+    "Employee Expense Claim", "Employee Expense Payment" # NEW: For employee reimbursement ledger
 ]
 DB_NAME = "enterprise_data.db"
 
@@ -175,12 +176,16 @@ def get_expenses(start_date, end_date):
     return df
 
 def get_expenses_for_employee(employee_id, start_date, end_date):
-    """Fetches all expenses for a specific employee in a date range."""
+    """
+    Fetches all SALARY DEDUCTIONS (like advances, fines) for a specific employee.
+    This EXCLUDES expense claims/payments, which are handled separately.
+    """
     conn = get_db_connection()
     query = """
     SELECT expense_date, category, description, amount
     FROM expenses
     WHERE employee_id = ? AND expense_date BETWEEN ? AND ?
+    AND category NOT IN ('Employee Expense Claim', 'Employee Expense Payment')
     ORDER BY expense_date ASC
     """
     df = pd.read_sql_query(query, conn, params=(employee_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
@@ -197,6 +202,22 @@ def delete_expense(expense_id):
         st.success("Successfully deleted expense.")
     except Exception as e:
         st.error(f"Error deleting expense: {e}")
+
+# NEW FUNCTION for Employee Expense Claims
+def get_employee_expense_ledger(employee_id, start_date, end_date):
+    """Fetches claims and payments for an employee's expense ledger."""
+    conn = get_db_connection()
+    query = """
+    SELECT id, expense_date, category, description, amount
+    FROM expenses
+    WHERE employee_id = ? 
+      AND (category = 'Employee Expense Claim' OR category = 'Employee Expense Payment')
+      AND expense_date BETWEEN ? AND ?
+    ORDER BY expense_date ASC
+    """
+    df = pd.read_sql_query(query, conn, params=(employee_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
+    conn.close()
+    return df
 
 # --- PDF REPORTING FUNCTIONS ---
 
@@ -720,6 +741,77 @@ def page_reports_and_ledgers():
             )
         else:
             st.error("Could not find employee data.")
+    
+    st.divider()
+
+    # --- NEW: Employee Expense Claim Ledger ---
+    st.header("Employee Kharchay Ka Ledger (Expense Claim Ledger)")
+    st.write("Employees ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record rakhein.")
+    
+    # Re-use the employee selection from above
+    if not emp_names_dict:
+        # This check is already done above, but we repeat it for safety
+        st.warning("Pehle 'Employee Management' page per ja kar employee add karein.")
+        return
+        
+    claim_emp_id = st.selectbox(
+        "Ledger Ke Liye Employee Select Karein", 
+        options=[opt[0] for opt in emp_options],
+        format_func=lambda x: emp_names_dict.get(x),
+        key="claim_emp_select"
+    )
+    
+    col1_claim, col2_claim = st.columns(2)
+    with col1_claim:
+        claim_start_date = st.date_input("Start Date", value=start_of_month, key="claim_start")
+    with col2_claim:
+        claim_end_date = st.date_input("End Date", value=today, key="claim_end")
+    
+    if claim_emp_id:
+        # Get the ledger data
+        ledger_df = get_employee_expense_ledger(claim_emp_id, claim_start_date, claim_end_date)
+        
+        claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
+        payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
+        
+        total_claims = claims_df['amount'].sum()
+        total_payments = payments_df['amount'].sum()
+        net_balance = total_claims - total_payments
+        
+        # Display metrics
+        st.subheader("Ledger Summary")
+        mcol1, mcol2, mcol3 = st.columns(3)
+        mcol1.metric("Total Claims (Kharchay)", f"PKR {total_claims:,.2f}")
+        mcol2.metric("Total Adaigi (Payments)", f"PKR {total_payments:,.2f}")
+        mcol3.metric("Baqaya (Jo Company Ne Dena Hai)", f"PKR {net_balance:,.2f}", delta_color="off")
+
+        # Add a form to add new entries
+        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {emp_names_dict.get(claim_emp_id)})"):
+            with st.form(f"new_claim_payment_form_{claim_emp_id}", clear_on_submit=True):
+                
+                entry_date = st.date_input("Date", value=datetime.today())
+                entry_type = st.selectbox("Entry Ki Qisam (Type)", 
+                                          ["Employee Expense Claim", "Employee Expense Payment"])
+                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0)
+                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'")
+                
+                submitted_entry = st.form_submit_button("Add Entry")
+                if submitted_entry:
+                    add_expense(
+                        expense_date=entry_date,
+                        category=entry_type,
+                        amount=entry_amount,
+                        description=entry_desc,
+                        employee_id=claim_emp_id
+                    )
+                    # The page will rerun automatically on form submit
+        
+        # Display the ledger details
+        st.subheader("Claims (Kharchay) Ki Tafseel")
+        st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True)
+        
+        st.subheader("Adaigiyon (Payments) Ki Tafseel")
+        st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True)
 
 def page_data_import():
     """Page for importing data from CSV/Excel."""
