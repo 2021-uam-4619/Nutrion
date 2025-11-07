@@ -362,7 +362,7 @@ def create_expense_report_pdf(start_date, end_date):
     
     return pdf.output(dest='S').encode('latin-1')
 
-# NEW FUNCTION: Payroll Report for all employees
+# UPDATED FUNCTION: Payroll Report with Bank Details
 def create_payroll_report_pdf(report_month_date):
     """Generates a summary payroll report for all employees for a given month."""
     report_month_year = report_month_date.strftime("%B %Y")
@@ -387,7 +387,11 @@ def create_payroll_report_pdf(report_month_date):
             'designation': employee.get('designation', ''),
             'salary': employee['salary'],
             'deductions': deductions,
-            'net_salary': net_salary
+            'net_salary': net_salary,
+            # ADDED: Bank details
+            'bank_name': employee.get('bank_name', ''),
+            'account_title': employee.get('account_title', ''),
+            'account_number': employee.get('account_number', '') # Already a string
         })
         
         total_salary += employee['salary']
@@ -400,34 +404,132 @@ def create_payroll_report_pdf(report_month_date):
     pdf.set_font('Arial', '', 10)
     
     # Table Header
-    col_widths = [15, 60, 50, 40, 40, 40]
-    headers = ['ID', 'Name', 'Designation', 'Base Salary', 'Deductions', 'Net Salary']
+    # UPDATED: Added new columns for bank details
+    col_widths = [10, 40, 30, 30, 40, 40, 25, 25, 25] # Total 265
+    headers = ['ID', 'Name', 'Designation', 'Bank', 'Acct. Title', 'Acct. Number', 'Salary', 'Deduct', 'Net Pay']
     
-    pdf.set_font('Arial', 'B', 10)
+    pdf.set_font('Arial', 'B', 9) # Made font smaller to fit
     pdf.set_fill_color(230, 230, 230) # Set fill color for header
     for i, header in enumerate(headers):
         pdf.cell(col_widths[i], 10, header, 1, 0, 'C', fill=True)
     pdf.ln()
 
     # Table Rows
-    pdf.set_font('Arial', '', 9)
+    pdf.set_font('Arial', '', 8) # Made font smaller to fit
     if not payroll_data:
         pdf.cell(sum(col_widths), 10, 'No employees found.', 1, 1, 'C')
     else:
         for row in payroll_data:
             pdf.cell(col_widths[0], 10, str(row['id']), 1, 0)
-            pdf.cell(col_widths[1], 10, str(row['name'])[:35], 1, 0) # Truncate name
-            pdf.cell(col_widths[2], 10, str(row['designation'])[:30], 1, 0) # Truncate designation
-            pdf.cell(col_widths[3], 10, f"{row['salary']:,.2f}", 1, 0, 'R')
-            pdf.cell(col_widths[4], 10, f"{row['deductions']:,.2f}", 1, 0, 'R')
-            pdf.cell(col_widths[5], 10, f"{row['net_salary']:,.2f}", 1, 1, 'R')
+            pdf.cell(col_widths[1], 10, str(row['name'])[:25], 1, 0) # Truncate name
+            pdf.cell(col_widths[2], 10, str(row['designation'])[:18], 1, 0) # Truncate designation
+            # ADDED: Bank detail cells
+            pdf.cell(col_widths[3], 10, str(row['bank_name'])[:18], 1, 0)
+            pdf.cell(col_widths[4], 10, str(row['account_title'])[:25], 1, 0)
+            pdf.cell(col_widths[5], 10, str(row['account_number'])[:25], 1, 0)
+            # Existing cells
+            pdf.cell(col_widths[6], 10, f"{row['salary']:,.2f}", 1, 0, 'R')
+            pdf.cell(col_widths[7], 10, f"{row['deductions']:,.2f}", 1, 0, 'R')
+            pdf.cell(col_widths[8], 10, f"{row['net_salary']:,.2f}", 1, 1, 'R')
     
     # Total Row
     pdf.set_font('Arial', 'B', 10)
-    pdf.cell(sum(col_widths[:3]), 10, 'Totals:', 1, 0, 'R')
-    pdf.cell(col_widths[3], 10, f'PKR {total_salary:,.2f}', 1, 0, 'R')
-    pdf.cell(col_widths[4], 10, f'PKR {total_deductions:,.2f}', 1, 0, 'R')
-    pdf.cell(col_widths[5], 10, f'PKR {total_net:,.2f}', 1, 1, 'R')
+    # UPDATED: Adjusted span for new columns
+    pdf.cell(sum(col_widths[:6]), 10, 'Totals:', 1, 0, 'R')
+    pdf.cell(col_widths[6], 10, f'PKR {total_salary:,.2f}', 1, 0, 'R')
+    pdf.cell(col_widths[7], 10, f'PKR {total_deductions:,.2f}', 1, 0, 'R')
+    pdf.cell(col_widths[8], 10, f'PKR {total_net:,.2f}', 1, 1, 'R')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
+# NEW FUNCTION: PDF for Employee Expense Claim Ledger
+def create_employee_expense_ledger_pdf(employee, ledger_df, start_date, end_date, summary_data):
+    """Generates a PDF report for an employee's expense claims and payments."""
+    
+    pdf = PDF()
+    pdf.title = f"Employee Expense Ledger - {employee['name']}"
+    pdf.add_page()
+    pdf.set_font('Arial', '', 12)
+    
+    # --- Report Details ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Employee Expense Ledger', 0, 1, 'L')
+    pdf.set_font('Arial', '', 12)
+    pdf.cell(40, 8, 'Employee Name:', 0, 0)
+    pdf.cell(0, 8, employee['name'], 0, 1)
+    pdf.cell(40, 8, 'Report Period:', 0, 0)
+    pdf.cell(0, 8, f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}", 0, 1)
+    pdf.ln(5)
+
+    # --- Summary Box ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, 'Ledger Summary', 0, 1, 'L')
+    
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(230, 230, 230) # Set fill color
+    pdf.cell(130, 10, 'Description', 1, 0, 'L', fill=True)
+    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'R', fill=True)
+    
+    pdf.set_font('Arial', '', 12)
+    pdf.cell(130, 10, 'Total Claims (Kharchay)', 1, 0)
+    pdf.cell(0, 10, f"{summary_data['total_claims']:,.2f}", 1, 1, 'R')
+    
+    pdf.cell(130, 10, 'Total Adaigi (Payments)', 1, 0)
+    pdf.cell(0, 10, f"({summary_data['total_payments']:,.2f})", 1, 1, 'R')
+    
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(130, 10, 'Baqaya (Balance Payable by Company)', 1, 0)
+    pdf.cell(0, 10, f"{summary_data['net_balance']:,.2f}", 1, 1, 'R')
+    pdf.ln(10)
+
+    # --- Claims Details Table ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, "Claims (Kharchay) Ki Tafseel", 0, 1, 'L')
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(30, 10, 'Date', 1, 0, 'C', fill=True)
+    pdf.cell(120, 10, 'Description', 1, 0, 'C', fill=True)
+    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', fill=True)
+    
+    pdf.set_font('Arial', '', 9)
+    claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
+    if claims_df.empty:
+        pdf.cell(0, 10, 'No claims found for this period.', 1, 1, 'C')
+    else:
+        for _, row in claims_df.iterrows():
+            pdf.cell(30, 10, row['expense_date'], 1, 0)
+            pdf.cell(120, 10, str(row['description'])[:70], 1, 0) # Truncate
+            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(150, 10, 'Total Claims:', 1, 0, 'R')
+    pdf.cell(0, 10, f"PKR {summary_data['total_claims']:,.2f}", 1, 1, 'R')
+    pdf.ln(10)
+
+    # --- Payments Details Table ---
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, "Adaigiyon (Payments) Ki Tafseel", 0, 1, 'L')
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.set_fill_color(230, 230, 230)
+    pdf.cell(30, 10, 'Date', 1, 0, 'C', fill=True)
+    pdf.cell(120, 10, 'Description', 1, 0, 'C', fill=True)
+    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', fill=True)
+    
+    pdf.set_font('Arial', '', 9)
+    payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
+    if payments_df.empty:
+        pdf.cell(0, 10, 'No payments found for this period.', 1, 1, 'C')
+    else:
+        for _, row in payments_df.iterrows():
+            pdf.cell(30, 10, row['expense_date'], 1, 0)
+            pdf.cell(120, 10, str(row['description'])[:70], 1, 0) # Truncate
+            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
+            
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(150, 10, 'Total Payments:', 1, 0, 'R')
+    pdf.cell(0, 10, f"PKR {summary_data['total_payments']:,.2f}", 1, 1, 'R')
     
     return pdf.output(dest='S').encode('latin-1')
 
@@ -516,9 +618,9 @@ def page_employee_management():
         selected_emp = employees_df[employees_df['name'] == selected_name].iloc[0]
         emp_id = int(selected_emp['id']) # Ensure ID is Python int
 
-        col1, col2 = st.columns([2, 1])
+        col1_edit, col2_del = st.columns([2, 1])
 
-        with col1:
+        with col1_edit:
             st.subheader(f"Edit {selected_name}")
             with st.form(f"edit_form_{emp_id}"):
                 # Pre-fill form with existing data
@@ -538,15 +640,96 @@ def page_employee_management():
                 if updated:
                     update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary)
                     st.session_state.emp_select_box = "" # Reset select box
-                    # REMOVED: st.rerun() - This line caused the error.
+                    st.rerun() # <-- FIX: Add rerun back
 
-        with col2:
+        with col2_del:
             st.subheader(f"Delete {selected_name}")
             st.warning("This action is permanent.")
             if st.button("Delete Employee", type="primary", key=f"delete_{emp_id}"):
                 delete_employee(emp_id)
                 st.session_state.emp_select_box = "" # Reset select box
-                # REMOVED: st.rerun() - This line also caused the error.
+                st.rerun() # <-- FIX: Add rerun back
+        
+        st.divider()
+
+        # --- NEW: Employee Expense Claim Ledger (Moved here) ---
+        st.subheader(f"Employee Expense Ledger (Kharchay) - {selected_name}")
+        st.write("Iss employee ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record.")
+        
+        today = datetime.today()
+        start_of_month = today.replace(day=1)
+        
+        col1_claim, col2_claim = st.columns(2)
+        with col1_claim:
+            claim_start_date = st.date_input("Ledger Start Date", value=start_of_month, key=f"claim_start_{emp_id}")
+        with col2_claim:
+            claim_end_date = st.date_input("Ledger End Date", value=today, key=f"claim_end_{emp_id}")
+        
+        # Get the ledger data
+        ledger_df = get_employee_expense_ledger(emp_id, claim_start_date, claim_end_date)
+        
+        claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
+        payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
+        
+        total_claims = claims_df['amount'].sum()
+        total_payments = payments_df['amount'].sum()
+        net_balance = total_claims - total_payments
+        
+        # Display metrics
+        st.subheader("Ledger Summary")
+        mcol1, mcol2, mcol3 = st.columns(3)
+        mcol1.metric("Total Claims (Kharchay)", f"PKR {total_claims:,.2f}")
+        mcol2.metric("Total Adaigi (Payments)", f"PKR {total_payments:,.2f}")
+        mcol3.metric("Baqaya (Jo Company Ne Dena Hai)", f"PKR {net_balance:,.2f}", delta_color="off")
+
+        # ADDED: Download Button for this ledger
+        if st.button("Download Expense Ledger (PDF)", key=f"download_claim_ledger_{emp_id}"):
+            summary_data = {
+                'total_claims': total_claims,
+                'total_payments': total_payments,
+                'net_balance': net_balance
+            }
+            pdf_data = create_employee_expense_ledger_pdf(
+                selected_emp, ledger_df, claim_start_date, claim_end_date, summary_data
+            )
+            
+            # The download button needs to be unique, but the data is generated on click
+            st.download_button(
+                label="Click to Download PDF",
+                data=pdf_data,
+                file_name=f"Expense_Ledger_{selected_name}_{claim_start_date}_to_{claim_end_date}.pdf",
+                mime="application/pdf",
+                key=f"download_btn_{emp_id}" # Unique key for the button itself
+            )
+
+        # Add a form to add new entries
+        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {selected_name})"):
+            with st.form(f"new_claim_payment_form_{emp_id}", clear_on_submit=True):
+                
+                entry_date = st.date_input("Date", value=datetime.today(), key=f"claim_date_{emp_id}")
+                entry_type = st.selectbox("Entry Ki Qisam (Type)", 
+                                          ["Employee Expense Claim", "Employee Expense Payment"], 
+                                          key=f"claim_type_{emp_id}")
+                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key=f"claim_amt_{emp_id}")
+                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'", key=f"claim_desc_{emp_id}")
+                
+                submitted_entry = st.form_submit_button("Add Entry")
+                if submitted_entry:
+                    add_expense(
+                        expense_date=entry_date,
+                        category=entry_type,
+                        amount=entry_amount,
+                        description=entry_desc,
+                        employee_id=emp_id
+                    )
+                    # The page will rerun automatically on form submit & refresh ledger
+        
+        # Display the ledger details
+        st.subheader("Claims (Kharchay) Ki Tafseel")
+        st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True)
+        
+        st.subheader("Adaigiyon (Payments) Ki Tafseel")
+        st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True)
 
 
 def page_expense_management():
@@ -610,7 +793,7 @@ def page_expense_management():
             if st.button("Delete Selected Expense", type="primary", key=f"delete_exp_{selected_id}"):
                 delete_expense(selected_id)
                 st.session_state.exp_select_box = "" # Reset select box
-                # REMOVED: st.rerun() - This line also caused the error.
+                st.rerun() # <-- FIX: Add rerun back (This was the line in the traceback)
     else:
         st.info("No expenses found for the selected period.")
 
@@ -744,74 +927,10 @@ def page_reports_and_ledgers():
     
     st.divider()
 
-    # --- NEW: Employee Expense Claim Ledger ---
-    st.header("Employee Kharchay Ka Ledger (Expense Claim Ledger)")
-    st.write("Employees ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record rakhein.")
+    # --- REMOVED ---
+    # The "Employee Kharchay Ka Ledger" was here, but has been
+    # moved to the 'page_employee_management' page as requested.
     
-    # Re-use the employee selection from above
-    if not emp_names_dict:
-        # This check is already done above, but we repeat it for safety
-        st.warning("Pehle 'Employee Management' page per ja kar employee add karein.")
-        return
-        
-    claim_emp_id = st.selectbox(
-        "Ledger Ke Liye Employee Select Karein", 
-        options=[opt[0] for opt in emp_options],
-        format_func=lambda x: emp_names_dict.get(x),
-        key="claim_emp_select"
-    )
-    
-    col1_claim, col2_claim = st.columns(2)
-    with col1_claim:
-        claim_start_date = st.date_input("Start Date", value=start_of_month, key="claim_start")
-    with col2_claim:
-        claim_end_date = st.date_input("End Date", value=today, key="claim_end")
-    
-    if claim_emp_id:
-        # Get the ledger data
-        ledger_df = get_employee_expense_ledger(claim_emp_id, claim_start_date, claim_end_date)
-        
-        claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
-        payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
-        
-        total_claims = claims_df['amount'].sum()
-        total_payments = payments_df['amount'].sum()
-        net_balance = total_claims - total_payments
-        
-        # Display metrics
-        st.subheader("Ledger Summary")
-        mcol1, mcol2, mcol3 = st.columns(3)
-        mcol1.metric("Total Claims (Kharchay)", f"PKR {total_claims:,.2f}")
-        mcol2.metric("Total Adaigi (Payments)", f"PKR {total_payments:,.2f}")
-        mcol3.metric("Baqaya (Jo Company Ne Dena Hai)", f"PKR {net_balance:,.2f}", delta_color="off")
-
-        # Add a form to add new entries
-        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {emp_names_dict.get(claim_emp_id)})"):
-            with st.form(f"new_claim_payment_form_{claim_emp_id}", clear_on_submit=True):
-                
-                entry_date = st.date_input("Date", value=datetime.today())
-                entry_type = st.selectbox("Entry Ki Qisam (Type)", 
-                                          ["Employee Expense Claim", "Employee Expense Payment"])
-                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0)
-                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'")
-                
-                submitted_entry = st.form_submit_button("Add Entry")
-                if submitted_entry:
-                    add_expense(
-                        expense_date=entry_date,
-                        category=entry_type,
-                        amount=entry_amount,
-                        description=entry_desc,
-                        employee_id=claim_emp_id
-                    )
-                    # The page will rerun automatically on form submit
-        
-        # Display the ledger details
-        st.subheader("Claims (Kharchay) Ki Tafseel")
-        st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True)
-        
-        st.subheader("Adaigiyon (Payments) Ki Tafseel")
-        st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True)
 
 def page_data_import():
     """Page for importing data from CSV/Excel."""
