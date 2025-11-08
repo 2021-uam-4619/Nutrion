@@ -1,3 +1,4 @@
+#Streamlit 
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -87,8 +88,10 @@ def add_employee(name, designation, bank_name, account_title, account_number, sa
         conn.commit()
         conn.close()
         st.success(f"Successfully added employee: {name}")
+        return True
     except Exception as e:
         st.error(f"Error adding employee: {e}")
+        return False
 
 def get_employees():
     """Fetches all employees as a Pandas DataFrame."""
@@ -102,6 +105,16 @@ def get_employees():
         df['account_number'] = df['account_number'].astype(str).fillna('')
         
     return df
+
+def get_employee_by_id(emp_id):
+    """Fetches a single employee by ID."""
+    conn = get_db_connection()
+    employee = conn.execute(
+        "SELECT id, name, designation, bank_name, account_title, account_number, salary FROM employees WHERE id = ?", 
+        (emp_id,)
+    ).fetchone()
+    conn.close()
+    return employee
 
 def update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary):
     """Updates an existing employee's details."""
@@ -117,20 +130,28 @@ def update_employee(emp_id, name, designation, bank_name, account_title, account
         conn.commit()
         conn.close()
         st.success(f"Successfully updated employee: {name}")
+        return True
     except Exception as e:
         st.error(f"Error updating employee: {e}")
+        return False
 
 def delete_employee(emp_id):
     """Deletes an employee from the database."""
     try:
         conn = get_db_connection()
+        # Get employee name before deletion for confirmation message
+        employee = get_employee_by_id(emp_id)
+        employee_name = employee['name'] if employee else "Unknown"
+        
         # The ON DELETE SET NULL constraint in the expenses table will handle related records
         conn.execute("DELETE FROM employees WHERE id = ?", (emp_id,))
         conn.commit()
         conn.close()
-        st.success("Successfully deleted employee.")
+        st.success(f"Successfully deleted employee: {employee_name}")
+        return True
     except Exception as e:
         st.error(f"Error deleting employee: {e}")
+        return False
 
 def get_employee_names():
     """Gets a list of employee names and their IDs."""
@@ -153,8 +174,10 @@ def add_expense(expense_date, category, amount, description, employee_id):
         conn.commit()
         conn.close()
         st.success("Successfully added expense.")
+        return True
     except Exception as e:
         st.error(f"Error adding expense: {e}")
+        return False
 
 def get_expenses(start_date, end_date):
     """Fetches all expenses within a date range as a DataFrame."""
@@ -170,6 +193,51 @@ def get_expenses(start_date, end_date):
     df = pd.read_sql_query(query, conn, params=(start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
     conn.close()
     return df
+
+def get_expense_by_id(expense_id):
+    """Fetches a single expense by ID."""
+    conn = get_db_connection()
+    expense = conn.execute(
+        """SELECT e.id, e.expense_date, e.category, e.amount, e.description, e.employee_id,
+           IFNULL(emp.name, 'N/A') as employee_name
+        FROM expenses e
+        LEFT JOIN employees emp ON e.employee_id = emp.id
+        WHERE e.id = ?""", 
+        (expense_id,)
+    ).fetchone()
+    conn.close()
+    return expense
+
+def update_expense(expense_id, expense_date, category, amount, description, employee_id):
+    """Updates an existing expense record."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            """UPDATE expenses SET 
+               expense_date = ?, category = ?, amount = ?, description = ?, employee_id = ?
+               WHERE id = ?""",
+            (expense_date.strftime('%Y-%m-%d'), category, amount, description, employee_id, expense_id)
+        )
+        conn.commit()
+        conn.close()
+        st.success("Successfully updated expense.")
+        return True
+    except Exception as e:
+        st.error(f"Error updating expense: {e}")
+        return False
+
+def delete_expense(expense_id):
+    """Deletes an expense from the database."""
+    try:
+        conn = get_db_connection()
+        conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
+        conn.commit()
+        conn.close()
+        st.success("Successfully deleted expense.")
+        return True
+    except Exception as e:
+        st.error(f"Error deleting expense: {e}")
+        return False
 
 def get_expenses_for_employee(employee_id, start_date, end_date):
     """
@@ -187,17 +255,6 @@ def get_expenses_for_employee(employee_id, start_date, end_date):
     df = pd.read_sql_query(query, conn, params=(employee_id, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')))
     conn.close()
     return df
-
-def delete_expense(expense_id):
-    """Deletes an expense from the database."""
-    try:
-        conn = get_db_connection()
-        conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
-        conn.commit()
-        conn.close()
-        st.success("Successfully deleted expense.")
-    except Exception as e:
-        st.error(f"Error deleting expense: {e}")
 
 # NEW FUNCTION for Employee Expense Claims
 def get_employee_expense_ledger(employee_id, start_date, end_date):
@@ -565,28 +622,32 @@ def page_employee_management():
     """Page for managing employees (CRUD)."""
     st.title("🧑‍💼 Employee Management")
     
-    # --- Initialize session state for select boxes ---
-    if "emp_select_box" not in st.session_state:
-        st.session_state.emp_select_box = ""
+    # Initialize session state for managing employee operations
+    if "employee_edit_mode" not in st.session_state:
+        st.session_state.employee_edit_mode = False
+    if "selected_employee_id" not in st.session_state:
+        st.session_state.selected_employee_id = None
+    if "employee_form_key" not in st.session_state:
+        st.session_state.employee_form_key = 0
     
     # --- Add New Employee ---
     st.header("Add New Employee")
     with st.form("add_employee_form", clear_on_submit=True):
-        name = st.text_input("Name", placeholder="e.g., Muhammad Asim Iqbal")
-        designation = st.text_input("Designation", placeholder="e.g., Manager")
+        name = st.text_input("Name", placeholder="e.g., Muhammad Asim Iqbal", key="add_name")
+        designation = st.text_input("Designation", placeholder="e.g., Manager", key="add_designation")
         
         st.subheader("Bank Details")
-        bank_name = st.text_input("Bank Name", placeholder="e.g., Bank Al-Falah")
-        account_title = st.text_input("Account Title", placeholder="e.g., Muhammad Asim Iqbal")
-        account_number = st.text_input("Account Number", placeholder="e.g., 0123-1004567890")
+        bank_name = st.text_input("Bank Name", placeholder="e.g., Bank Al-Falah", key="add_bank_name")
+        account_title = st.text_input("Account Title", placeholder="e.g., Muhammad Asim Iqbal", key="add_account_title")
+        account_number = st.text_input("Account Number", placeholder="e.g., 0123-1004567890", key="add_account_number")
         
         st.subheader("Salary")
-        salary = st.number_input("Monthly Salary (PKR)", min_value=0.0, step=1000.0)
+        salary = st.number_input("Monthly Salary (PKR)", min_value=0.0, step=1000.0, key="add_salary")
         
         submitted = st.form_submit_button("Add Employee")
         if submitted and name:
-            add_employee(name, designation, bank_name, account_title, account_number, salary)
-            st.rerun() # Rerun to refresh the tables below
+            if add_employee(name, designation, bank_name, account_title, account_number, salary):
+                st.rerun() # Rerun to refresh the tables below
         elif submitted:
             st.warning("Please provide an employee name.")
             
@@ -600,58 +661,81 @@ def page_employee_management():
         st.info("No employees found. Add one using the form above.")
         return
     
-    # Display dataframe, ensuring new columns are present
-    display_cols = ['id', 'name', 'designation', 'bank_name', 'account_title', 'account_number', 'salary']
-    # Filter df to only columns that exist, in case of old db schema
-    existing_cols = [col for col in display_cols if col in employees_df.columns]
-    st.dataframe(employees_df[existing_cols], use_container_width=True)
+    # Display dataframe with action buttons
+    st.subheader("Employee List")
+    
+    # Create a copy of the dataframe for display
+    display_df = employees_df.copy()
+    
+    # Add action buttons for each employee
+    if not display_df.empty:
+        for idx, employee in display_df.iterrows():
+            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+            
+            with col1:
+                st.write(f"**{employee['name']}**")
+                st.write(f"Designation: {employee.get('designation', 'N/A')}")
+                st.write(f"Salary: PKR {employee['salary']:,.2f}")
+            
+            with col2:
+                st.write(f"Bank: {employee.get('bank_name', 'N/A')}")
+                st.write(f"Account: {employee.get('account_title', 'N/A')}")
+                st.write(f"Acc No: {employee.get('account_number', 'N/A')}")
+            
+            with col3:
+                if st.button("Edit", key=f"edit_{employee['id']}"):
+                    st.session_state.employee_edit_mode = True
+                    st.session_state.selected_employee_id = employee['id']
+                    st.session_state.employee_form_key += 1
+                    st.rerun()
+            
+            with col4:
+                if st.button("Delete", key=f"delete_{employee['id']}"):
+                    if delete_employee(employee['id']):
+                        st.rerun()
+            
+            st.divider()
 
-
-    # --- Edit / Delete Section ---
-    employee_list = employees_df['name'].tolist()
-    # Add a blank option to avoid auto-selecting
-    selected_name = st.selectbox("Select Employee to Edit or Delete", [""] + employee_list, key="emp_select_box")
-
-    if selected_name:
-        selected_emp = employees_df[employees_df['name'] == selected_name].iloc[0]
-        emp_id = int(selected_emp['id']) # Ensure ID is Python int
-
-        col1_edit, col2_del = st.columns([2, 1])
-
-        with col1_edit:
-            st.subheader(f"Edit {selected_name}")
-            with st.form(f"edit_form_{emp_id}"):
-                # Pre-fill form with existing data
-                name = st.text_input("Name", value=selected_emp['name'])
-                designation = st.text_input("Designation", value=selected_emp.get('designation', ''))
+    # --- Edit Employee Form ---
+    if st.session_state.employee_edit_mode and st.session_state.selected_employee_id:
+        st.header("Edit Employee")
+        
+        # Get employee data
+        employee = get_employee_by_id(st.session_state.selected_employee_id)
+        
+        if employee:
+            with st.form(f"edit_employee_form_{st.session_state.selected_employee_id}", clear_on_submit=False):
+                name = st.text_input("Name", value=employee['name'], key=f"edit_name_{st.session_state.employee_form_key}")
+                designation = st.text_input("Designation", value=employee.get('designation', ''), key=f"edit_designation_{st.session_state.employee_form_key}")
                 
                 st.subheader("Bank Details")
-                bank_name = st.text_input("Bank Name", value=selected_emp.get('bank_name', ''))
-                account_title = st.text_input("Account Title", value=selected_emp.get('account_title', ''))
-                # Value is already a string from get_employees()
-                account_number = st.text_input("Account Number", value=selected_emp.get('account_number', '')) 
+                bank_name = st.text_input("Bank Name", value=employee.get('bank_name', ''), key=f"edit_bank_name_{st.session_state.employee_form_key}")
+                account_title = st.text_input("Account Title", value=employee.get('account_title', ''), key=f"edit_account_title_{st.session_state.employee_form_key}")
+                account_number = st.text_input("Account Number", value=employee.get('account_number', ''), key=f"edit_account_number_{st.session_state.employee_form_key}")
                 
                 st.subheader("Salary")
-                salary = st.number_input("Monthly Salary (PKR)", value=float(selected_emp['salary']), min_value=0.0, step=1000.0)
+                salary = st.number_input("Monthly Salary (PKR)", value=float(employee['salary']), min_value=0.0, step=1000.0, key=f"edit_salary_{st.session_state.employee_form_key}")
                 
-                updated = st.form_submit_button("Update Employee")
-                if updated:
-                    update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary)
-                    st.session_state.emp_select_box = "" # Reset select box
-                    st.rerun() 
-
-        with col2_del:
-            st.subheader(f"Delete {selected_name}")
-            st.warning("Deleting this employee is permanent and will detach related expense/ledger entries.")
-            if st.button("Delete Employee", type="primary", key=f"delete_{emp_id}"):
-                delete_employee(emp_id)
-                st.session_state.emp_select_box = "" # Reset select box
-                st.rerun() 
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col1:
+                    update_submitted = st.form_submit_button("Update Employee")
+                with col2:
+                    cancel_edit = st.form_submit_button("Cancel Edit")
+                
+                if update_submitted:
+                    if update_employee(st.session_state.selected_employee_id, name, designation, bank_name, account_title, account_number, salary):
+                        st.session_state.employee_edit_mode = False
+                        st.session_state.selected_employee_id = None
+                        st.rerun()
+                
+                if cancel_edit:
+                    st.session_state.employee_edit_mode = False
+                    st.session_state.selected_employee_id = None
+                    st.rerun()
         
+        # --- Employee Expense Ledger Section ---
         st.divider()
-
-        # --- NEW: Employee Expense Claim Ledger ---
-        st.subheader(f"Employee Expense Ledger (Kharchay) - {selected_name}")
+        st.subheader(f"Employee Expense Ledger (Kharchay) - {employee['name']}")
         st.write("Iss employee ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record.")
         
         today = datetime.today()
@@ -661,12 +745,12 @@ def page_employee_management():
         
         col1_claim, col2_claim = st.columns(2)
         with col1_claim:
-            claim_start_date = st.date_input("Ledger Start Date", value=start_of_month, key=f"claim_start_{emp_id}")
+            claim_start_date = st.date_input("Ledger Start Date", value=start_of_month, key=f"claim_start_{employee['id']}")
         with col2_claim:
-            claim_end_date = st.date_input("Ledger End Date", value=today_date, key=f"claim_end_{emp_id}")
+            claim_end_date = st.date_input("Ledger End Date", value=today_date, key=f"claim_end_{employee['id']}")
         
         # Get the ledger data
-        ledger_df = get_employee_expense_ledger(emp_id, claim_start_date, claim_end_date)
+        ledger_df = get_employee_expense_ledger(employee['id'], claim_start_date, claim_end_date)
         
         claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
         payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
@@ -682,69 +766,74 @@ def page_employee_management():
         mcol2.metric("Total Adaigi (Payments)", f"PKR {total_payments:,.2f}")
         mcol3.metric("Baqaya (Jo Company Ne Dena Hai)", f"PKR {net_balance:,.2f}", delta_color="off")
 
-        # ADDED: Download Button for this ledger
-        if st.button("Download Expense Ledger (PDF)", key=f"download_claim_ledger_{emp_id}"):
+        # Download Button for this ledger
+        if st.button("Download Expense Ledger (PDF)", key=f"download_claim_ledger_{employee['id']}"):
             summary_data = {
                 'total_claims': total_claims,
                 'total_payments': total_payments,
                 'net_balance': net_balance
             }
-            # Fetch the selected employee's full details again for the PDF function
-            conn = get_db_connection()
-            employee_data_for_pdf = conn.execute("SELECT * FROM employees WHERE id = ?", (emp_id,)).fetchone()
-            conn.close()
             
             pdf_data = create_employee_expense_ledger_pdf(
-                employee_data_for_pdf, ledger_df, claim_start_date, claim_end_date, summary_data
+                employee, ledger_df, claim_start_date, claim_end_date, summary_data
             )
             
-            # The download button needs to be unique, but the data is generated on click
             st.download_button(
                 label="Click to Download PDF",
                 data=pdf_data,
-                file_name=f"Expense_Ledger_{selected_name}_{claim_start_date}_to_{claim_end_date}.pdf",
+                file_name=f"Expense_Ledger_{employee['name']}_{claim_start_date}_to_{claim_end_date}.pdf",
                 mime="application/pdf",
-                key=f"download_btn_{emp_id}" # Unique key for the button itself
+                key=f"download_btn_{employee['id']}"
             )
 
         # Add a form to add new entries
-        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {selected_name})"):
-            with st.form(f"new_claim_payment_form_{emp_id}", clear_on_submit=True):
+        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {employee['name']})"):
+            with st.form(f"new_claim_payment_form_{employee['id']}", clear_on_submit=True):
                 
-                entry_date = st.date_input("Date", value=datetime.today(), key=f"claim_date_{emp_id}")
+                entry_date = st.date_input("Date", value=datetime.today(), key=f"claim_date_{employee['id']}")
                 entry_type = st.selectbox("Entry Ki Qisam (Type)", 
                                           ["Employee Expense Claim", "Employee Expense Payment"], 
-                                          key=f"claim_type_{emp_id}")
-                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key=f"claim_amt_{emp_id}")
-                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'", key=f"claim_desc_{emp_id}")
+                                          key=f"claim_type_{employee['id']}")
+                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key=f"claim_amt_{employee['id']}")
+                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'", key=f"claim_desc_{employee['id']}")
                 
                 submitted_entry = st.form_submit_button("Add Entry")
                 if submitted_entry:
                     # Ensure the entry_date is a date object for the function
-                    add_expense(
+                    if add_expense(
                         expense_date=entry_date,
                         category=entry_type,
                         amount=entry_amount,
                         description=entry_desc,
-                        employee_id=emp_id
-                    )
-                    st.rerun()
+                        employee_id=employee['id']
+                    ):
+                        st.rerun()
         
         # Display the ledger details
         st.subheader("Claims (Kharchay) Ki Tafseel")
-        st.dataframe(claims_df[['id', 'expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
+        if not claims_df.empty:
+            st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
+        else:
+            st.info("No claims found for this period.")
         
         st.subheader("Adaigiyon (Payments) Ki Tafseel")
-        st.dataframe(payments_df[['id', 'expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
+        if not payments_df.empty:
+            st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
+        else:
+            st.info("No payments found for this period.")
 
 
 def page_expense_management():
     """Page for managing expenses (CRUD)."""
     st.title("💸 Expense Management")
 
-    # --- Initialize session state for select boxes ---
-    if "exp_select_box" not in st.session_state:
-        st.session_state.exp_select_box = ""
+    # Initialize session state for managing expense operations
+    if "expense_edit_mode" not in st.session_state:
+        st.session_state.expense_edit_mode = False
+    if "selected_expense_id" not in st.session_state:
+        st.session_state.selected_expense_id = None
+    if "expense_form_key" not in st.session_state:
+        st.session_state.expense_form_key = 0
 
     # --- Add New Expense ---
     st.header("Add New Expense")
@@ -756,27 +845,28 @@ def page_expense_management():
     emp_options = [(None, "N/A (General Expense)")] + list(emp_names_dict.items())
 
     with st.form("add_expense_form", clear_on_submit=True):
-        expense_date = st.date_input("Expense Date", value=datetime.today())
-        category = st.selectbox("Category", EXPENSE_CATEGORIES)
-        amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0)
+        expense_date = st.date_input("Expense Date", value=datetime.today(), key="add_expense_date")
+        category = st.selectbox("Category", EXPENSE_CATEGORIES, key="add_category")
+        amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key="add_amount")
         
         # Use format_func to display names, but pass ID as the value
         selected_employee = st.selectbox(
             "Link to Employee (Optional - for Advances/Deductions)", 
             options=[opt[0] for opt in emp_options], # Pass IDs
-            format_func=lambda x: dict(emp_options).get(x, "N/A") # Show names
+            format_func=lambda x: dict(emp_options).get(x, "N/A"), # Show names
+            key="add_employee"
         )
         
-        description = st.text_area("Description (Optional)")
+        description = st.text_area("Description (Optional)", key="add_description")
         
         submitted = st.form_submit_button("Add Expense")
         if submitted:
-            add_expense(expense_date, category, amount, description, selected_employee)
-            st.rerun()
+            if add_expense(expense_date, category, amount, description, selected_employee):
+                st.rerun()
 
     st.divider()
 
-    # --- View and Delete Expenses ---
+    # --- View and Edit/Delete Expenses ---
     st.header("Manage Existing Expenses")
     
     col1, col2 = st.columns(2)
@@ -784,30 +874,106 @@ def page_expense_management():
     start_of_month = today.replace(day=1)
     
     with col1:
-        start_date = st.date_input("Start Date", value=start_of_month)
+        start_date = st.date_input("Start Date", value=start_of_month, key="expense_start_date")
     with col2:
-        end_date = st.date_input("End Date", value=today)
+        end_date = st.date_input("End Date", value=today, key="expense_end_date")
 
     expenses_df = get_expenses(start_date, end_date)
-    st.dataframe(expenses_df, use_container_width=True)
-
+    
     if not expenses_df.empty:
-        # --- Delete Section ---
-        expense_ids = expenses_df['id'].tolist()
-        # Add a blank option for the user to make a choice
-        selected_id = st.selectbox("Select Expense ID to Delete", [""] + expense_ids, key="exp_select_box")
-
-        if selected_id:
-            # Find the expense details for confirmation
-            selected_expense = expenses_df[expenses_df['id'] == selected_id].iloc[0]
-            st.info(f"You are about to delete: ID **{selected_expense['id']}** | PKR **{selected_expense['amount']:,.2f}** | Category: **{selected_expense['category']}**")
+        st.subheader("Expense List")
+        
+        # Display expenses with edit/delete options
+        for idx, expense in expenses_df.iterrows():
+            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
             
-            if st.button("Delete Selected Expense", type="primary", key=f"delete_exp_{selected_id}"):
-                delete_expense(selected_id)
-                st.session_state.exp_select_box = "" # Reset select box
-                st.rerun()
+            with col1:
+                st.write(f"**Date:** {expense['expense_date']}")
+                st.write(f"**Category:** {expense['category']}")
+                st.write(f"**Amount:** PKR {expense['amount']:,.2f}")
+            
+            with col2:
+                st.write(f"**Employee:** {expense['employee_name']}")
+                st.write(f"**Description:** {expense['description'][:50]}{'...' if len(str(expense['description'])) > 50 else ''}")
+            
+            with col3:
+                if st.button("Edit", key=f"edit_expense_{expense['id']}"):
+                    st.session_state.expense_edit_mode = True
+                    st.session_state.selected_expense_id = expense['id']
+                    st.session_state.expense_form_key += 1
+                    st.rerun()
+            
+            with col4:
+                if st.button("Delete", key=f"delete_expense_{expense['id']}"):
+                    if delete_expense(expense['id']):
+                        st.rerun()
+            
+            st.divider()
     else:
         st.info("No expenses found for the selected period.")
+
+    # --- Edit Expense Form ---
+    if st.session_state.expense_edit_mode and st.session_state.selected_expense_id:
+        st.header("Edit Expense")
+        
+        # Get expense data
+        expense = get_expense_by_id(st.session_state.selected_expense_id)
+        
+        if expense:
+            with st.form(f"edit_expense_form_{st.session_state.selected_expense_id}", clear_on_submit=False):
+                expense_date = st.date_input("Expense Date", 
+                                           value=datetime.strptime(expense['expense_date'], '%Y-%m-%d').date(), 
+                                           key=f"edit_expense_date_{st.session_state.expense_form_key}")
+                category = st.selectbox("Category", 
+                                      EXPENSE_CATEGORIES, 
+                                      index=EXPENSE_CATEGORIES.index(expense['category']) if expense['category'] in EXPENSE_CATEGORIES else 0,
+                                      key=f"edit_category_{st.session_state.expense_form_key}")
+                amount = st.number_input("Amount (PKR)", 
+                                       value=float(expense['amount']), 
+                                       min_value=0.01, 
+                                       step=10.0,
+                                       key=f"edit_amount_{st.session_state.expense_form_key}")
+                
+                # Employee selection for edit
+                emp_names_dict = get_employee_names()
+                emp_options = [(None, "N/A (General Expense)")] + list(emp_names_dict.items())
+                
+                # Find current employee index
+                current_employee = expense['employee_id']
+                current_index = 0
+                for i, (emp_id, _) in enumerate(emp_options):
+                    if emp_id == current_employee:
+                        current_index = i
+                        break
+                
+                selected_employee = st.selectbox(
+                    "Link to Employee (Optional - for Advances/Deductions)", 
+                    options=[opt[0] for opt in emp_options],
+                    index=current_index,
+                    format_func=lambda x: dict(emp_options).get(x, "N/A"),
+                    key=f"edit_employee_{st.session_state.expense_form_key}"
+                )
+                
+                description = st.text_area("Description (Optional)", 
+                                         value=expense['description'] or "",
+                                         key=f"edit_description_{st.session_state.expense_form_key}")
+                
+                col1, col2, col3 = st.columns([1, 1, 1])
+                with col1:
+                    update_submitted = st.form_submit_button("Update Expense")
+                with col2:
+                    cancel_edit = st.form_submit_button("Cancel Edit")
+                
+                if update_submitted:
+                    if update_expense(st.session_state.selected_expense_id, expense_date, category, amount, description, selected_employee):
+                        st.session_state.expense_edit_mode = False
+                        st.session_state.selected_expense_id = None
+                        st.rerun()
+                
+                if cancel_edit:
+                    st.session_state.expense_edit_mode = False
+                    st.session_state.selected_expense_id = None
+                    st.rerun()
 
 
 def page_reports_and_ledgers():
@@ -900,14 +1066,14 @@ def page_reports_and_ledgers():
                 submitted_ded = st.form_submit_button("Add Deduction")
                 if submitted_ded and ded_amount > 0:
                     # Ensure ded_date is converted back to date object for the function
-                    add_expense(
+                    if add_expense(
                         expense_date=ded_date,
                         category=ded_category,
                         amount=ded_amount,
                         description=ded_desc,
                         employee_id=selected_emp_id
-                    )
-                    st.rerun()
+                    ):
+                        st.rerun()
                     
     # --- End of new feature ---
 
