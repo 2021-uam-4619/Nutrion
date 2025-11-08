@@ -1,4 +1,4 @@
-#Streamlit 
+# Streamlit Enterprise Management System
 import streamlit as st
 import sqlite3
 import pandas as pd
@@ -6,10 +6,10 @@ from fpdf import FPDF
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import io
-import time 
+import time
+import base64
 
 # --- CONFIGURATION ---
-# Define the expense categories from your list
 EXPENSE_CATEGORIES = [
     "Guard", "Labour", "Bilty Expenses", "Office Rent", "Warehouse Rent", 
     "Muhammad Asim Iqbal Salary", "Import Export", "Office Electricity", "FBR", 
@@ -19,14 +19,19 @@ EXPENSE_CATEGORIES = [
     "Fine", "Other Deduction", 
     "Employee Expense Claim", "Employee Expense Payment" 
 ]
+
+EMPLOYEE_EXPENSE_CATEGORIES = [
+    "Travel Expense", "Meal Allowance", "Transportation", "Office Supplies",
+    "Client Entertainment", "Phone Bill", "Internet Bill", "Other Expense"
+]
+
 DB_NAME = "enterprise_data.db"
 
 # --- DATABASE SETUP ---
-
 def get_db_connection():
     """Establishes a connection to the SQLite database."""
     conn = sqlite3.connect(DB_NAME)
-    conn.row_factory = sqlite3.Row  # This allows accessing columns by name
+    conn.row_factory = sqlite3.Row
     return conn
 
 def init_db():
@@ -34,7 +39,7 @@ def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Employee Table - UPDATED with structured bank details
+    # Employee Table
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS employees (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,7 +48,8 @@ def init_db():
         bank_name TEXT,
         account_title TEXT,
         account_number TEXT,
-        salary REAL DEFAULT 0
+        salary REAL DEFAULT 0,
+        created_date TEXT DEFAULT CURRENT_TIMESTAMP
     );
     """)
     
@@ -56,51 +62,65 @@ def init_db():
         amount REAL NOT NULL,
         description TEXT,
         employee_id INTEGER,
+        added_by TEXT DEFAULT 'System',
+        status TEXT DEFAULT 'Approved',
+        created_date TEXT DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
     );
     """)
     
-    # Check if bank_details column exists from old version, and if so, migrate/add new columns
-    try:
-        cursor.execute("SELECT bank_name FROM employees LIMIT 1")
-    except sqlite3.OperationalError:
-        # If any of the new columns are missing, add them (handles migration from older schema)
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN bank_name TEXT")
-        except: pass
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_title TEXT")
-        except: pass
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_number TEXT")
-        except: pass
-        
+    # Employee Self-Service Table
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS employee_expenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        employee_id INTEGER NOT NULL,
+        expense_date TEXT NOT NULL,
+        category TEXT NOT NULL,
+        amount REAL NOT NULL,
+        description TEXT,
+        receipt_uploaded BOOLEAN DEFAULT 0,
+        receipt_path TEXT,
+        status TEXT DEFAULT 'Pending',
+        approved_by TEXT,
+        approved_date TEXT,
+        created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
+    );
+    """)
+    
     conn.commit()
     conn.close()
 
 # --- EMPLOYEE CRUD FUNCTIONS ---
-
 def add_employee(name, designation, bank_name, account_title, account_number, salary):
     """Adds a new employee to the database."""
     try:
         conn = get_db_connection()
-        conn.execute(
+        cursor = conn.cursor()
+        cursor.execute(
             "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
             (name, designation, bank_name, account_title, account_number, salary)
         )
+        employee_id = cursor.lastrowid
         conn.commit()
         conn.close()
-        st.success(f"Successfully added employee: {name}")
-        return True
+        st.success(f"✅ Successfully added employee: {name}")
+        return employee_id
     except Exception as e:
-        st.error(f"Error adding employee: {e}")
-        return False
+        st.error(f"❌ Error adding employee: {e}")
+        return None
 
 def get_employees():
     """Fetches all employees as a Pandas DataFrame."""
     conn = get_db_connection()
-    # Ensure all columns are selected
-    df = pd.read_sql_query("SELECT id, name, designation, bank_name, account_title, account_number, salary FROM employees", conn)
+    df = pd.read_sql_query("""
+        SELECT id, name, designation, bank_name, account_title, account_number, salary, 
+               created_date 
+        FROM employees 
+        ORDER BY name
+    """, conn)
     conn.close()
     
-    # Ensure account_number is treated as a string to prevent scientific notation
     if 'account_number' in df.columns:
         df['account_number'] = df['account_number'].astype(str).fillna('')
         
@@ -110,8 +130,7 @@ def get_employee_by_id(emp_id):
     """Fetches a single employee by ID."""
     conn = get_db_connection()
     employee = conn.execute(
-        "SELECT id, name, designation, bank_name, account_title, account_number, salary FROM employees WHERE id = ?", 
-        (emp_id,)
+        "SELECT * FROM employees WHERE id = ?", (emp_id,)
     ).fetchone()
     conn.close()
     return employee
@@ -129,40 +148,118 @@ def update_employee(emp_id, name, designation, bank_name, account_title, account
         )
         conn.commit()
         conn.close()
-        st.success(f"Successfully updated employee: {name}")
+        st.success(f"✅ Successfully updated employee: {name}")
         return True
     except Exception as e:
-        st.error(f"Error updating employee: {e}")
+        st.error(f"❌ Error updating employee: {e}")
         return False
 
 def delete_employee(emp_id):
     """Deletes an employee from the database."""
     try:
         conn = get_db_connection()
-        # Get employee name before deletion for confirmation message
         employee = get_employee_by_id(emp_id)
         employee_name = employee['name'] if employee else "Unknown"
         
-        # The ON DELETE SET NULL constraint in the expenses table will handle related records
         conn.execute("DELETE FROM employees WHERE id = ?", (emp_id,))
         conn.commit()
         conn.close()
-        st.success(f"Successfully deleted employee: {employee_name}")
+        st.success(f"✅ Successfully deleted employee: {employee_name}")
         return True
     except Exception as e:
-        st.error(f"Error deleting employee: {e}")
+        st.error(f"❌ Error deleting employee: {e}")
         return False
 
 def get_employee_names():
     """Gets a list of employee names and their IDs."""
     conn = get_db_connection()
-    employees = conn.execute("SELECT id, name FROM employees").fetchall()
+    employees = conn.execute("SELECT id, name FROM employees ORDER BY name").fetchall()
     conn.close()
-    # Create a dictionary {id: name}
     return {emp['id']: emp['name'] for emp in employees}
 
-# --- EXPENSE CRUD FUNCTIONS ---
+# --- EMPLOYEE SELF-SERVICE FUNCTIONS ---
+def add_employee_expense(employee_id, expense_date, category, amount, description, receipt_uploaded=False, receipt_path=None):
+    """Adds a new expense submitted by employee."""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """INSERT INTO employee_expenses 
+               (employee_id, expense_date, category, amount, description, receipt_uploaded, receipt_path) 
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (employee_id, expense_date.strftime('%Y-%m-%d'), category, amount, description, receipt_uploaded, receipt_path)
+        )
+        expense_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return expense_id, True
+    except Exception as e:
+        st.error(f"❌ Error adding employee expense: {e}")
+        return None, False
 
+def get_employee_expenses(employee_id, status_filter="All"):
+    """Gets expenses submitted by a specific employee."""
+    conn = get_db_connection()
+    
+    if status_filter == "All":
+        query = "SELECT * FROM employee_expenses WHERE employee_id = ? ORDER BY expense_date DESC"
+        params = (employee_id,)
+    else:
+        query = "SELECT * FROM employee_expenses WHERE employee_id = ? AND status = ? ORDER BY expense_date DESC"
+        params = (employee_id, status_filter)
+    
+    df = pd.read_sql_query(query, conn, params=params)
+    conn.close()
+    return df
+
+def get_all_pending_expenses():
+    """Gets all pending expenses for approval."""
+    conn = get_db_connection()
+    df = pd.read_sql_query("""
+        SELECT ee.*, e.name as employee_name 
+        FROM employee_expenses ee 
+        JOIN employees e ON ee.employee_id = e.id 
+        WHERE ee.status = 'Pending' 
+        ORDER BY ee.expense_date DESC
+    """, conn)
+    conn.close()
+    return df
+
+def approve_employee_expense(expense_id, approved_by):
+    """Approves an employee expense."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            """UPDATE employee_expenses SET 
+               status = 'Approved', approved_by = ?, approved_date = CURRENT_TIMESTAMP 
+               WHERE id = ?""",
+            (approved_by, expense_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"❌ Error approving expense: {e}")
+        return False
+
+def reject_employee_expense(expense_id, approved_by):
+    """Rejects an employee expense."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            """UPDATE employee_expenses SET 
+               status = 'Rejected', approved_by = ?, approved_date = CURRENT_TIMESTAMP 
+               WHERE id = ?""",
+            (approved_by, expense_id)
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"❌ Error rejecting expense: {e}")
+        return False
+
+# --- EXPENSE CRUD FUNCTIONS ---
 def add_expense(expense_date, category, amount, description, employee_id):
     """Adds a new expense record."""
     try:
@@ -173,10 +270,10 @@ def add_expense(expense_date, category, amount, description, employee_id):
         )
         conn.commit()
         conn.close()
-        st.success("Successfully added expense.")
+        st.success("✅ Successfully added expense.")
         return True
     except Exception as e:
-        st.error(f"Error adding expense: {e}")
+        st.error(f"❌ Error adding expense: {e}")
         return False
 
 def get_expenses(start_date, end_date):
@@ -184,7 +281,7 @@ def get_expenses(start_date, end_date):
     conn = get_db_connection()
     query = """
     SELECT e.id, e.expense_date, e.category, e.amount, e.description, 
-           IFNULL(emp.name, 'N/A') as employee_name
+           IFNULL(emp.name, 'N/A') as employee_name, e.status
     FROM expenses e
     LEFT JOIN employees emp ON e.employee_id = emp.id
     WHERE e.expense_date BETWEEN ? AND ?
@@ -194,56 +291,8 @@ def get_expenses(start_date, end_date):
     conn.close()
     return df
 
-def get_expense_by_id(expense_id):
-    """Fetches a single expense by ID."""
-    conn = get_db_connection()
-    expense = conn.execute(
-        """SELECT e.id, e.expense_date, e.category, e.amount, e.description, e.employee_id,
-           IFNULL(emp.name, 'N/A') as employee_name
-        FROM expenses e
-        LEFT JOIN employees emp ON e.employee_id = emp.id
-        WHERE e.id = ?""", 
-        (expense_id,)
-    ).fetchone()
-    conn.close()
-    return expense
-
-def update_expense(expense_id, expense_date, category, amount, description, employee_id):
-    """Updates an existing expense record."""
-    try:
-        conn = get_db_connection()
-        conn.execute(
-            """UPDATE expenses SET 
-               expense_date = ?, category = ?, amount = ?, description = ?, employee_id = ?
-               WHERE id = ?""",
-            (expense_date.strftime('%Y-%m-%d'), category, amount, description, employee_id, expense_id)
-        )
-        conn.commit()
-        conn.close()
-        st.success("Successfully updated expense.")
-        return True
-    except Exception as e:
-        st.error(f"Error updating expense: {e}")
-        return False
-
-def delete_expense(expense_id):
-    """Deletes an expense from the database."""
-    try:
-        conn = get_db_connection()
-        conn.execute("DELETE FROM expenses WHERE id = ?", (expense_id,))
-        conn.commit()
-        conn.close()
-        st.success("Successfully deleted expense.")
-        return True
-    except Exception as e:
-        st.error(f"Error deleting expense: {e}")
-        return False
-
 def get_expenses_for_employee(employee_id, start_date, end_date):
-    """
-    Fetches all SALARY DEDUCTIONS (like advances, fines) for a specific employee.
-    This EXCLUDES expense claims/payments, which are handled separately.
-    """
+    """Fetches all SALARY DEDUCTIONS for a specific employee."""
     conn = get_db_connection()
     query = """
     SELECT expense_date, category, description, amount
@@ -256,7 +305,6 @@ def get_expenses_for_employee(employee_id, start_date, end_date):
     conn.close()
     return df
 
-# NEW FUNCTION for Employee Expense Claims
 def get_employee_expense_ledger(employee_id, start_date, end_date):
     """Fetches claims and payments for an employee's expense ledger."""
     conn = get_db_connection()
@@ -273,993 +321,732 @@ def get_employee_expense_ledger(employee_id, start_date, end_date):
     return df
 
 # --- PDF REPORTING FUNCTIONS ---
-
 class PDF(FPDF):
-    """Custom PDF class to handle headers and footers."""
+    """Custom PDF class with professional styling."""
     def header(self):
-        self.set_font('Arial', 'B', 12)
-        self.cell(0, 10, self.title, 0, 1, 'C')
+        self.set_font('Arial', 'B', 16)
+        self.set_text_color(41, 128, 185)
+        self.cell(0, 10, 'NUTRION ENTERPRISE', 0, 1, 'C')
+        self.set_font('Arial', 'I', 12)
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 8, self.title, 0, 1, 'C')
         self.ln(5)
 
     def footer(self):
         self.set_y(-15)
         self.set_font('Arial', 'I', 8)
-        # Add generated on timestamp
-        self.cell(100, 10, f'Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}', 0, 0, 'L')
-        # Add page number
-        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'R')
+        self.set_text_color(128, 128, 128)
+        self.cell(0, 10, f'Page {self.page_no()} | Generated on: {datetime.now().strftime("%Y-%m-%d %H:%M")}', 0, 0, 'C')
 
-def create_employee_report_pdf(employee, report_month_year, ledger_df):
-    """Generates a salary slip PDF with ledger for an employee."""
+def create_employee_ledger_pdf(employee, start_date, end_date, expenses_df, employee_expenses_df):
+    """Generates a comprehensive PDF ledger for employee."""
     pdf = PDF()
-    pdf.title = f'Employee Monthly Report - {report_month_year}'
+    pdf.title = f'Employee Ledger - {start_date} to {end_date}'
     pdf.add_page()
-    pdf.set_font('Arial', '', 12)
     
-    # --- Employee Details ---
+    # Employee Information
     pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Employee Details', 0, 1, 'L')
-    pdf.set_font('Arial', '', 12)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, 'Employee Information', 0, 1)
+    pdf.set_font('Arial', '', 11)
+    pdf.set_text_color(0, 0, 0)
     
-    col_width_label = 50
-    col_width_value = 0
-
-    pdf.cell(col_width_label, 8, 'Employee Name:', 0, 0)
-    pdf.cell(col_width_value, 8, employee['name'], 0, 1)
+    info_data = [
+        ['Name:', employee['name']],
+        ['Designation:', employee.get('designation', 'N/A')],
+        ['Bank:', employee.get('bank_name', 'N/A')],
+        ['Account:', f"{employee.get('account_title', 'N/A')} - {employee.get('account_number', 'N/A')}"],
+        ['Salary:', f"PKR {employee['salary']:,.2f}"],
+        ['Period:', f"{start_date} to {end_date}"]
+    ]
     
-    pdf.cell(col_width_label, 8, 'Designation:', 0, 0)
-    pdf.cell(col_width_value, 8, employee['designation'], 0, 1)
-    
-    pdf.cell(col_width_label, 8, 'Bank Name:', 0, 0)
-    pdf.cell(col_width_value, 8, str(employee['bank_name']), 0, 1)
-    
-    pdf.cell(col_width_label, 8, 'Account Title:', 0, 0)
-    pdf.cell(col_width_value, 8, str(employee['account_title']), 0, 1)
-    
-    pdf.cell(col_width_label, 8, 'Account Number:', 0, 0)
-    pdf.cell(col_width_value, 8, str(employee['account_number']), 0, 1)
+    for label, value in info_data:
+        pdf.cell(40, 8, label, 0, 0)
+        pdf.cell(0, 8, str(value), 0, 1)
     
     pdf.ln(10)
     
-    # --- Salary Summary ---
+    # Expense Summary
+    total_expenses = expenses_df['amount'].sum() if not expenses_df.empty else 0
+    total_employee_expenses = employee_expenses_df[employee_expenses_df['status'] == 'Approved']['amount'].sum() if not employee_expenses_df.empty else 0
+    net_salary = employee['salary'] - total_expenses
+    
     pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Salary Summary', 0, 1, 'L')
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, 'Financial Summary', 0, 1)
+    pdf.set_font('Arial', '', 11)
     
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(230, 230, 230) # Set fill color for header
-    pdf.cell(130, 10, 'Description', 1, 0, 'L', fill=True)
-    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'R', fill=True)
+    summary_data = [
+        ['Base Salary:', f"PKR {employee['salary']:,.2f}"],
+        ['Deductions:', f"PKR {total_expenses:,.2f}"],
+        ['Approved Claims:', f"PKR {total_employee_expenses:,.2f}"],
+        ['Net Payable:', f"PKR {net_salary:,.2f}"]
+    ]
     
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(130, 10, 'Base Salary', 1, 0)
-    pdf.cell(0, 10, f"{employee['salary']:,.2f}", 1, 1, 'R')
-    
-    total_deductions = ledger_df['amount'].sum()
-    net_salary = employee['salary'] - total_deductions
-    
-    pdf.cell(130, 10, 'Total Deductions (from Ledger)', 1, 0)
-    pdf.cell(0, 10, f"({total_deductions:,.2f})", 1, 1, 'R')
-    
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(130, 10, 'Net Salary Payable', 1, 0)
-    pdf.cell(0, 10, f"{net_salary:,.2f}", 1, 1, 'R')
+    for label, value in summary_data:
+        pdf.cell(50, 8, label, 0, 0)
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, value, 0, 1)
+        pdf.set_font('Arial', '', 11)
     
     pdf.ln(10)
-
-    # --- Monthly Ledger (Deductions/Advances) ---
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Monthly Ledger (Deductions / Advances)', 0, 1, 'L')
     
-    pdf.set_font('Arial', 'B', 10)
-    pdf.set_fill_color(230, 230, 230) # Set fill color for header
-    pdf.cell(30, 10, 'Date', 1, 0, 'C', fill=True)
-    pdf.cell(45, 10, 'Category', 1, 0, 'C', fill=True)
-    pdf.cell(75, 10, 'Description', 1, 0, 'C', fill=True)
-    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', fill=True)
-    
-    pdf.set_font('Arial', '', 9)
-    if ledger_df.empty:
-        pdf.cell(0, 10, 'No deductions or advances recorded for this month.', 1, 1, 'C')
-    else:
-        for _, row in ledger_df.iterrows():
-            pdf.cell(30, 10, row['expense_date'], 1, 0)
-            pdf.cell(45, 10, row['category'], 1, 0)
-            pdf.cell(75, 10, str(row['description'])[:40], 1, 0) # Truncate description
-            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
-            
-    # Total
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(150, 10, 'Total Deductions:', 1, 0, 'R')
-    pdf.cell(0, 10, f'PKR {total_deductions:,.2f}', 1, 1, 'R')
-
-    # Return as bytes for download
-    return pdf.output(dest='S').encode('latin-1')
-
-def create_expense_report_pdf(start_date, end_date):
-    """Generates a PDF report for all expenses in a date range."""
-    df = get_expenses(start_date, end_date)
-    
-    pdf = PDF()
-    pdf.title = f'Expense Report ({start_date} to {end_date})'
-    pdf.add_page(orientation='L') # Landscape
-    pdf.set_font('Arial', '', 10)
-    
-    # Table Header
-    col_widths = [15, 30, 50, 30, 110, 30] # Adjust widths as needed
-    headers = ['ID', 'Date', 'Category', 'Amount', 'Description', 'Employee']
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.set_fill_color(230, 230, 230) # Set fill color for header
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 10, header, 1, 0, 'C', fill=True)
-    pdf.ln()
-
-    # Table Rows
-    pdf.set_font('Arial', '', 9)
-    if df.empty:
-        pdf.cell(sum(col_widths), 10, 'No expenses found for this period.', 1, 1, 'C')
-    else:
-        for _, row in df.iterrows():
-            pdf.cell(col_widths[0], 10, str(row['id']), 1, 0)
-            pdf.cell(col_widths[1], 10, row['expense_date'], 1, 0)
-            pdf.cell(col_widths[2], 10, row['category'], 1, 0)
-            pdf.cell(col_widths[3], 10, f"{row['amount']:,.2f}", 1, 0, 'R')
-            pdf.cell(col_widths[4], 10, str(row['description'])[:60], 1, 0) # Truncate description
-            pdf.cell(col_widths[5], 10, row['employee_name'], 1, 1)
-    
-    # Total
-    total_expenses = df['amount'].sum()
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(sum(col_widths[:-2]), 10, 'Total Expenses:', 1, 0, 'R')
-    pdf.cell(col_widths[-2] + col_widths[-1], 10, f'PKR {total_expenses:,.2f}', 1, 1, 'R')
-    
-    return pdf.output(dest='S').encode('latin-1')
-
-# UPDATED FUNCTION: Payroll Report with Bank Details
-def create_payroll_report_pdf(report_month_date):
-    """Generates a summary payroll report for all employees for a given month."""
-    report_month_year = report_month_date.strftime("%B %Y")
-    month_start_date = report_month_date.replace(day=1)
-    month_end_date = month_start_date + relativedelta(months=1, days=-1)
-
-    employees_df = get_employees()
-    
-    payroll_data = []
-    total_salary = 0
-    total_deductions = 0
-    total_net = 0
-
-    for _, employee in employees_df.iterrows():
-        ledger_df = get_expenses_for_employee(employee['id'], month_start_date, month_end_date)
-        deductions = ledger_df['amount'].sum()
-        net_salary = employee['salary'] - deductions
+    # Employee Submitted Expenses
+    if not employee_expenses_df.empty:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.set_text_color(41, 128, 185)
+        pdf.cell(0, 10, 'Employee Submitted Expenses', 0, 1)
         
-        payroll_data.append({
-            'id': employee['id'],
-            'name': employee['name'],
-            'designation': employee.get('designation', ''),
-            'salary': employee['salary'],
-            'deductions': deductions,
-            'net_salary': net_salary,
-            # ADDED: Bank details
-            'bank_name': employee.get('bank_name', ''),
-            'account_title': employee.get('account_title', ''),
-            'account_number': employee.get('account_number', '') # Already a string
-        })
+        # Table header
+        pdf.set_fill_color(41, 128, 185)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(25, 8, 'Date', 1, 0, 'C', True)
+        pdf.cell(40, 8, 'Category', 1, 0, 'C', True)
+        pdf.cell(80, 8, 'Description', 1, 0, 'C', True)
+        pdf.cell(25, 8, 'Amount', 1, 0, 'C', True)
+        pdf.cell(20, 8, 'Status', 1, 1, 'C', True)
         
-        total_salary += employee['salary']
-        total_deductions += deductions
-        total_net += net_salary
-
-    pdf = PDF()
-    pdf.title = f'Monthly Payroll Report - {report_month_year}'
-    pdf.add_page(orientation='L') # Landscape
-    pdf.set_font('Arial', '', 10)
-    
-    # Table Header
-    # UPDATED: Added new columns for bank details
-    col_widths = [10, 40, 30, 30, 40, 40, 25, 25, 25] # Total 265
-    headers = ['ID', 'Name', 'Designation', 'Bank', 'Acct. Title', 'Acct. Number', 'Salary', 'Deduct', 'Net Pay']
-    
-    pdf.set_font('Arial', 'B', 9) # Made font smaller to fit
-    pdf.set_fill_color(230, 230, 230) # Set fill color for header
-    for i, header in enumerate(headers):
-        pdf.cell(col_widths[i], 10, header, 1, 0, 'C', fill=True)
-    pdf.ln()
-
-    # Table Rows
-    pdf.set_font('Arial', '', 8) # Made font smaller to fit
-    if not payroll_data:
-        pdf.cell(sum(col_widths), 10, 'No employees found.', 1, 1, 'C')
-    else:
-        for row in payroll_data:
-            pdf.cell(col_widths[0], 10, str(row['id']), 1, 0)
-            pdf.cell(col_widths[1], 10, str(row['name'])[:25], 1, 0) # Truncate name
-            pdf.cell(col_widths[2], 10, str(row['designation'])[:18], 1, 0) # Truncate designation
-            # ADDED: Bank detail cells
-            pdf.cell(col_widths[3], 10, str(row['bank_name'])[:18], 1, 0)
-            pdf.cell(col_widths[4], 10, str(row['account_title'])[:25], 1, 0)
-            pdf.cell(col_widths[5], 10, str(row['account_number'])[:25], 1, 0)
-            # Existing cells
-            pdf.cell(col_widths[6], 10, f"{row['salary']:,.2f}", 1, 0, 'R')
-            pdf.cell(col_widths[7], 10, f"{row['deductions']:,.2f}", 1, 0, 'R')
-            pdf.cell(col_widths[8], 10, f"{row['net_salary']:,.2f}", 1, 1, 'R')
-    
-    # Total Row
-    pdf.set_font('Arial', 'B', 10)
-    # UPDATED: Adjusted span for new columns
-    pdf.cell(sum(col_widths[:6]), 10, 'Totals:', 1, 0, 'R')
-    pdf.cell(col_widths[6], 10, f'PKR {total_salary:,.2f}', 1, 0, 'R')
-    pdf.cell(col_widths[7], 10, f'PKR {total_deductions:,.2f}', 1, 0, 'R')
-    pdf.cell(col_widths[8], 10, f'PKR {total_net:,.2f}', 1, 1, 'R')
-    
-    return pdf.output(dest='S').encode('latin-1')
-
-# NEW FUNCTION: PDF for Employee Expense Claim Ledger
-def create_employee_expense_ledger_pdf(employee, ledger_df, start_date, end_date, summary_data):
-    """Generates a PDF report for an employee's expense claims and payments."""
-    
-    pdf = PDF()
-    pdf.title = f"Employee Expense Ledger - {employee['name']}"
-    pdf.add_page()
-    pdf.set_font('Arial', '', 12)
-    
-    # --- Report Details ---
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Employee Expense Ledger', 0, 1, 'L')
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(40, 8, 'Employee Name:', 0, 0)
-    pdf.cell(0, 8, employee['name'], 0, 1)
-    pdf.cell(40, 8, 'Report Period:', 0, 0)
-    pdf.cell(0, 8, f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}", 0, 1)
-    pdf.ln(5)
-
-    # --- Summary Box ---
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, 'Ledger Summary', 0, 1, 'L')
-    
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(230, 230, 230) # Set fill color
-    pdf.cell(130, 10, 'Description', 1, 0, 'L', fill=True)
-    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'R', fill=True)
-    
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(130, 10, 'Total Claims (Kharchay)', 1, 0)
-    pdf.cell(0, 10, f"{summary_data['total_claims']:,.2f}", 1, 1, 'R')
-    
-    pdf.cell(130, 10, 'Total Adaigi (Payments)', 1, 0)
-    pdf.cell(0, 10, f"({summary_data['total_payments']:,.2f})", 1, 1, 'R')
-    
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(130, 10, 'Baqaya (Balance Payable by Company)', 1, 0)
-    pdf.cell(0, 10, f"{summary_data['net_balance']:,.2f}", 1, 1, 'R')
-    pdf.ln(10)
-
-    # --- Claims Details Table ---
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, "Claims (Kharchay) Ki Tafseel", 0, 1, 'L')
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.set_fill_color(230, 230, 230)
-    pdf.cell(30, 10, 'Date', 1, 0, 'C', fill=True)
-    pdf.cell(120, 10, 'Description', 1, 0, 'C', fill=True)
-    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', fill=True)
-    
-    pdf.set_font('Arial', '', 9)
-    claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
-    if claims_df.empty:
-        pdf.cell(0, 10, 'No claims found for this period.', 1, 1, 'C')
-    else:
-        for _, row in claims_df.iterrows():
-            pdf.cell(30, 10, row['expense_date'], 1, 0)
-            pdf.cell(120, 10, str(row['description'])[:70], 1, 0) # Truncate
-            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(150, 10, 'Total Claims:', 1, 0, 'R')
-    pdf.cell(0, 10, f"PKR {summary_data['total_claims']:,.2f}", 1, 1, 'R')
-    pdf.ln(10)
-
-    # --- Payments Details Table ---
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, "Adaigiyon (Payments) Ki Tafseel", 0, 1, 'L')
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.set_fill_color(230, 230, 230)
-    pdf.cell(30, 10, 'Date', 1, 0, 'C', fill=True)
-    pdf.cell(120, 10, 'Description', 1, 0, 'C', fill=True)
-    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', fill=True)
-    
-    pdf.set_font('Arial', '', 9)
-    payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
-    if payments_df.empty:
-        pdf.cell(0, 10, 'No payments found for this period.', 1, 1, 'C')
-    else:
-        for _, row in payments_df.iterrows():
-            pdf.cell(30, 10, row['expense_date'], 1, 0)
-            pdf.cell(120, 10, str(row['description'])[:70], 1, 0) # Truncate
-            pdf.cell(0, 10, f"{row['amount']:,.2f}", 1, 1, 'R')
+        # Table rows
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Arial', '', 9)
+        
+        for _, row in employee_expenses_df.iterrows():
+            pdf.cell(25, 8, row['expense_date'], 1, 0)
+            pdf.cell(40, 8, row['category'][:25], 1, 0)
+            pdf.cell(80, 8, str(row['description'])[:45], 1, 0)
+            pdf.cell(25, 8, f"{row['amount']:,.2f}", 1, 0, 'R')
             
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(150, 10, 'Total Payments:', 1, 0, 'R')
-    pdf.cell(0, 10, f"PKR {summary_data['total_payments']:,.2f}", 1, 1, 'R')
+            # Color code status
+            if row['status'] == 'Approved':
+                pdf.set_text_color(0, 128, 0)
+            elif row['status'] == 'Rejected':
+                pdf.set_text_color(255, 0, 0)
+            else:
+                pdf.set_text_color(255, 165, 0)
+                
+            pdf.cell(20, 8, row['status'], 1, 1, 'C')
+            pdf.set_text_color(0, 0, 0)
+        
+        pdf.ln(5)
+    
+    # System Deductions
+    if not expenses_df.empty:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.set_text_color(41, 128, 185)
+        pdf.cell(0, 10, 'System Deductions', 0, 1)
+        
+        # Table header
+        pdf.set_fill_color(41, 128, 185)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(25, 8, 'Date', 1, 0, 'C', True)
+        pdf.cell(50, 8, 'Category', 1, 0, 'C', True)
+        pdf.cell(70, 8, 'Description', 1, 0, 'C', True)
+        pdf.cell(35, 8, 'Amount', 1, 1, 'C', True)
+        
+        # Table rows
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font('Arial', '', 9)
+        
+        for _, row in expenses_df.iterrows():
+            pdf.cell(25, 8, row['expense_date'], 1, 0)
+            pdf.cell(50, 8, row['category'][:30], 1, 0)
+            pdf.cell(70, 8, str(row['description'])[:45], 1, 0)
+            pdf.cell(35, 8, f"{row['amount']:,.2f}", 1, 1, 'R')
     
     return pdf.output(dest='S').encode('latin-1')
 
+# --- TEMPLATE GENERATION FUNCTIONS ---
+def get_employee_import_template():
+    """Generates employee import template."""
+    template_data = {
+        'name': ['John Doe', 'Jane Smith'],
+        'designation': ['Manager', 'Accountant'],
+        'bank_name': ['HBL', 'UBL'],
+        'account_title': ['John Doe', 'Jane Smith'],
+        'account_number': ['123456789', '987654321'],
+        'salary': [50000, 40000]
+    }
+    df = pd.DataFrame(template_data)
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    return output.getvalue()
+
+def get_expense_import_template():
+    """Generates expense import template."""
+    template_data = {
+        'expense_date': ['2024-01-15', '2024-01-20'],
+        'category': ['Office Rent', 'Transportation'],
+        'amount': [25000, 5000],
+        'description': ['Monthly office rent', 'Client meeting travel'],
+        'employee_id': [1, 2]  # Reference to existing employee IDs
+    }
+    df = pd.DataFrame(template_data)
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    return output.getvalue()
 
 # --- UI PAGES ---
-
 def page_dashboard():
     """Main dashboard page."""
-    st.title("🏠 Dashboard")
-    st.write("Welcome to your Enterprise Management System.")
-
-    # Get data for metrics
+    st.title("🏠 Enterprise Dashboard")
+    
+    # Quick Stats
+    col1, col2, col3, col4 = st.columns(4)
+    
+    employees_df = get_employees()
+    total_employees = len(employees_df)
+    total_salary = employees_df['salary'].sum()
+    
     today = date.today()
     start_of_month = today.replace(day=1)
-    
-    employees_df = get_employees()
     expenses_df = get_expenses(start_of_month, today)
-    
-    total_employees = len(employees_df)
-    total_salary_payroll = employees_df['salary'].sum()
     monthly_expenses = expenses_df['amount'].sum()
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Total Employees", f"{total_employees}")
-    col2.metric("Total Monthly Payroll", f"PKR {total_salary_payroll:,.2f}")
-    col3.metric("Expenses (This Month)", f"PKR {monthly_expenses:,.2f}")
-
-    st.subheader("Monthly Expenses by Category")
-    if not expenses_df.empty:
-        category_summary = expenses_df.groupby('category')['amount'].sum().sort_values(ascending=False)
-        st.bar_chart(category_summary)
-    else:
-        st.info("No expenses logged this month.")
-
+    
+    pending_expenses = get_all_pending_expenses()
+    pending_count = len(pending_expenses)
+    
+    with col1:
+        st.metric("Total Employees", total_employees)
+    with col2:
+        st.metric("Monthly Payroll", f"PKR {total_salary:,.2f}")
+    with col3:
+        st.metric("This Month Expenses", f"PKR {monthly_expenses:,.2f}")
+    with col4:
+        st.metric("Pending Approvals", pending_count)
+    
+    # Recent Activity
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Recent Employees")
+        if not employees_df.empty:
+            recent_employees = employees_df.head(5)[['name', 'designation', 'salary']]
+            st.dataframe(recent_employees, use_container_width=True)
+        else:
+            st.info("No employees found")
+    
+    with col2:
+        st.subheader("Pending Approvals")
+        if not pending_expenses.empty:
+            pending_display = pending_expenses.head(5)[['employee_name', 'category', 'amount', 'expense_date']]
+            st.dataframe(pending_display, use_container_width=True)
+        else:
+            st.info("No pending approvals")
 
 def page_employee_management():
-    """Page for managing employees (CRUD)."""
+    """Employee management with self-service features."""
     st.title("🧑‍💼 Employee Management")
     
-    # Initialize session state for managing employee operations
-    if "employee_edit_mode" not in st.session_state:
-        st.session_state.employee_edit_mode = False
-    if "selected_employee_id" not in st.session_state:
-        st.session_state.selected_employee_id = None
-    if "employee_form_key" not in st.session_state:
-        st.session_state.employee_form_key = 0
+    # Initialize session states
+    if "emp_edit_mode" not in st.session_state:
+        st.session_state.emp_edit_mode = False
+    if "selected_emp_id" not in st.session_state:
+        st.session_state.selected_emp_id = None
+    if "emp_view_mode" not in st.session_state:
+        st.session_state.emp_view_mode = "list"
     
-    # --- Add New Employee ---
-    st.header("Add New Employee")
-    with st.form("add_employee_form", clear_on_submit=True):
-        name = st.text_input("Name", placeholder="e.g., Muhammad Asim Iqbal", key="add_name")
-        designation = st.text_input("Designation", placeholder="e.g., Manager", key="add_designation")
-        
-        st.subheader("Bank Details")
-        bank_name = st.text_input("Bank Name", placeholder="e.g., Bank Al-Falah", key="add_bank_name")
-        account_title = st.text_input("Account Title", placeholder="e.g., Muhammad Asim Iqbal", key="add_account_title")
-        account_number = st.text_input("Account Number", placeholder="e.g., 0123-1004567890", key="add_account_number")
-        
-        st.subheader("Salary")
-        salary = st.number_input("Monthly Salary (PKR)", min_value=0.0, step=1000.0, key="add_salary")
-        
-        submitted = st.form_submit_button("Add Employee")
-        if submitted and name:
-            if add_employee(name, designation, bank_name, account_title, account_number, salary):
-                st.rerun() # Rerun to refresh the tables below
-        elif submitted:
-            st.warning("Please provide an employee name.")
-            
+    # Navigation
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        if st.button("📋 Employee List", use_container_width=True):
+            st.session_state.emp_view_mode = "list"
+    with col2:
+        if st.button("➕ Add Employee", use_container_width=True):
+            st.session_state.emp_view_mode = "add"
+    with col3:
+        if st.button("✅ Approvals", use_container_width=True):
+            st.session_state.emp_view_mode = "approvals"
+    
     st.divider()
-
-    # --- View and Edit/Delete Employees ---
-    st.header("Manage Existing Employees")
-    employees_df = get_employees()
     
-    if employees_df.empty:
-        st.info("No employees found. Add one using the form above.")
-        return
+    # Employee List View
+    if st.session_state.emp_view_mode == "list":
+        employees_df = get_employees()
+        
+        if employees_df.empty:
+            st.info("👥 No employees found. Add your first employee!")
+            return
+        
+        # Search and Filter
+        col1, col2 = st.columns([2, 1])
+        with col1:
+            search_term = st.text_input("🔍 Search employees", placeholder="Search by name or designation...")
+        with col2:
+            items_per_page = st.selectbox("Items per page", [5, 10, 20], index=1)
+        
+        # Filter employees
+        if search_term:
+            filtered_employees = employees_df[
+                employees_df['name'].str.contains(search_term, case=False, na=False) |
+                employees_df['designation'].str.contains(search_term, case=False, na=False)
+            ]
+        else:
+            filtered_employees = employees_df
+        
+        # Pagination
+        total_pages = max(1, (len(filtered_employees) + items_per_page - 1) // items_per_page)
+        page_number = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
+        start_idx = (page_number - 1) * items_per_page
+        end_idx = start_idx + items_per_page
+        
+        # Display employees
+        for idx, employee in filtered_employees.iloc[start_idx:end_idx].iterrows():
+            with st.container():
+                col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+                
+                with col1:
+                    st.subheader(employee['name'])
+                    st.write(f"**Designation:** {employee.get('designation', 'N/A')}")
+                    st.write(f"**Salary:** PKR {employee['salary']:,.2f}")
+                
+                with col2:
+                    st.write(f"**Bank:** {employee.get('bank_name', 'N/A')}")
+                    st.write(f"**Account:** {employee.get('account_number', 'N/A')}")
+                    st.write(f"**Joined:** {employee.get('created_date', 'N/A')[:10]}")
+                
+                with col3:
+                    if st.button("✏️ Edit", key=f"edit_{employee['id']}", use_container_width=True):
+                        st.session_state.emp_edit_mode = True
+                        st.session_state.selected_emp_id = employee['id']
+                        st.session_state.emp_view_mode = "edit"
+                        st.rerun()
+                
+                with col4:
+                    if st.button("📊 Ledger", key=f"ledger_{employee['id']}", use_container_width=True):
+                        st.session_state.selected_emp_id = employee['id']
+                        st.session_state.emp_view_mode = "ledger"
+                        st.rerun()
+                
+                st.divider()
     
-    # Display dataframe with action buttons
-    st.subheader("Employee List")
-    
-    # Create a copy of the dataframe for display
-    display_df = employees_df.copy()
-    
-    # Add action buttons for each employee
-    if not display_df.empty:
-        for idx, employee in display_df.iterrows():
-            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+    # Add Employee View
+    elif st.session_state.emp_view_mode == "add":
+        st.header("Add New Employee")
+        
+        with st.form("add_employee_form", clear_on_submit=True):
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.write(f"**{employee['name']}**")
-                st.write(f"Designation: {employee.get('designation', 'N/A')}")
-                st.write(f"Salary: PKR {employee['salary']:,.2f}")
+                name = st.text_input("👤 Full Name *", placeholder="Enter full name")
+                designation = st.text_input("💼 Designation *", placeholder="Enter designation")
+                salary = st.number_input("💰 Monthly Salary (PKR) *", min_value=0.0, step=1000.0, value=30000.0)
             
             with col2:
-                st.write(f"Bank: {employee.get('bank_name', 'N/A')}")
-                st.write(f"Account: {employee.get('account_title', 'N/A')}")
-                st.write(f"Acc No: {employee.get('account_number', 'N/A')}")
+                bank_name = st.text_input("🏦 Bank Name", placeholder="e.g., HBL, UBL, etc.")
+                account_title = st.text_input("📝 Account Title", placeholder="Account holder name")
+                account_number = st.text_input("🔢 Account Number", placeholder="Bank account number")
             
-            with col3:
-                if st.button("Edit", key=f"edit_{employee['id']}"):
-                    st.session_state.employee_edit_mode = True
-                    st.session_state.selected_employee_id = employee['id']
-                    st.session_state.employee_form_key += 1
-                    st.rerun()
-            
-            with col4:
-                if st.button("Delete", key=f"delete_{employee['id']}"):
-                    if delete_employee(employee['id']):
+            submitted = st.form_submit_button("➕ Add Employee", use_container_width=True)
+            if submitted:
+                if not name or not designation:
+                    st.error("❌ Please fill in all required fields (Name and Designation)")
+                else:
+                    employee_id = add_employee(name, designation, bank_name, account_title, account_number, salary)
+                    if employee_id:
+                        st.session_state.emp_view_mode = "list"
                         st.rerun()
-            
-            st.divider()
-
-    # --- Edit Employee Form ---
-    if st.session_state.employee_edit_mode and st.session_state.selected_employee_id:
-        st.header("Edit Employee")
-        
-        # Get employee data
-        employee = get_employee_by_id(st.session_state.selected_employee_id)
+    
+    # Edit Employee View
+    elif st.session_state.emp_view_mode == "edit" and st.session_state.selected_emp_id:
+        employee = get_employee_by_id(st.session_state.selected_emp_id)
         
         if employee:
-            with st.form(f"edit_employee_form_{st.session_state.selected_employee_id}", clear_on_submit=False):
-                name = st.text_input("Name", value=employee['name'], key=f"edit_name_{st.session_state.employee_form_key}")
-                designation = st.text_input("Designation", value=employee.get('designation', ''), key=f"edit_designation_{st.session_state.employee_form_key}")
+            st.header(f"Edit Employee: {employee['name']}")
+            
+            with st.form("edit_employee_form"):
+                col1, col2 = st.columns(2)
                 
-                st.subheader("Bank Details")
-                bank_name = st.text_input("Bank Name", value=employee.get('bank_name', ''), key=f"edit_bank_name_{st.session_state.employee_form_key}")
-                account_title = st.text_input("Account Title", value=employee.get('account_title', ''), key=f"edit_account_title_{st.session_state.employee_form_key}")
-                account_number = st.text_input("Account Number", value=employee.get('account_number', ''), key=f"edit_account_number_{st.session_state.employee_form_key}")
+                with col1:
+                    name = st.text_input("👤 Full Name *", value=employee['name'])
+                    designation = st.text_input("💼 Designation *", value=employee.get('designation', ''))
+                    salary = st.number_input("💰 Monthly Salary (PKR) *", value=float(employee['salary']), min_value=0.0, step=1000.0)
                 
-                st.subheader("Salary")
-                salary = st.number_input("Monthly Salary (PKR)", value=float(employee['salary']), min_value=0.0, step=1000.0, key=f"edit_salary_{st.session_state.employee_form_key}")
+                with col2:
+                    bank_name = st.text_input("🏦 Bank Name", value=employee.get('bank_name', ''))
+                    account_title = st.text_input("📝 Account Title", value=employee.get('account_title', ''))
+                    account_number = st.text_input("🔢 Account Number", value=employee.get('account_number', ''))
                 
                 col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
-                    update_submitted = st.form_submit_button("Update Employee")
+                    update_btn = st.form_submit_button("💾 Update", use_container_width=True)
                 with col2:
-                    cancel_edit = st.form_submit_button("Cancel Edit")
+                    delete_btn = st.form_submit_button("🗑️ Delete", use_container_width=True, type="secondary")
+                with col3:
+                    cancel_btn = st.form_submit_button("❌ Cancel", use_container_width=True)
                 
-                if update_submitted:
-                    if update_employee(st.session_state.selected_employee_id, name, designation, bank_name, account_title, account_number, salary):
-                        st.session_state.employee_edit_mode = False
-                        st.session_state.selected_employee_id = None
+                if update_btn:
+                    if update_employee(st.session_state.selected_emp_id, name, designation, bank_name, account_title, account_number, salary):
+                        st.session_state.emp_view_mode = "list"
+                        st.session_state.selected_emp_id = None
                         st.rerun()
                 
-                if cancel_edit:
-                    st.session_state.employee_edit_mode = False
-                    st.session_state.selected_employee_id = None
+                if delete_btn:
+                    if delete_employee(st.session_state.selected_emp_id):
+                        st.session_state.emp_view_mode = "list"
+                        st.session_state.selected_emp_id = None
+                        st.rerun()
+                
+                if cancel_btn:
+                    st.session_state.emp_view_mode = "list"
+                    st.session_state.selected_emp_id = None
                     st.rerun()
+    
+    # Employee Ledger View
+    elif st.session_state.emp_view_mode == "ledger" and st.session_state.selected_emp_id:
+        employee = get_employee_by_id(st.session_state.selected_emp_id)
         
-        # --- Employee Expense Ledger Section ---
-        st.divider()
-        st.subheader(f"Employee Expense Ledger (Kharchay) - {employee['name']}")
-        st.write("Iss employee ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record.")
-        
-        today = datetime.today()
-        # Ensure we use date objects for date arithmetic
-        today_date = date.today()
-        start_of_month = today_date.replace(day=1)
-        
-        col1_claim, col2_claim = st.columns(2)
-        with col1_claim:
-            claim_start_date = st.date_input("Ledger Start Date", value=start_of_month, key=f"claim_start_{employee['id']}")
-        with col2_claim:
-            claim_end_date = st.date_input("Ledger End Date", value=today_date, key=f"claim_end_{employee['id']}")
-        
-        # Get the ledger data
-        ledger_df = get_employee_expense_ledger(employee['id'], claim_start_date, claim_end_date)
-        
-        claims_df = ledger_df[ledger_df['category'] == 'Employee Expense Claim']
-        payments_df = ledger_df[ledger_df['category'] == 'Employee Expense Payment']
-        
-        total_claims = claims_df['amount'].sum()
-        total_payments = payments_df['amount'].sum()
-        net_balance = total_claims - total_payments
-        
-        # Display metrics
-        st.subheader("Ledger Summary")
-        mcol1, mcol2, mcol3 = st.columns(3)
-        mcol1.metric("Total Claims (Kharchay)", f"PKR {total_claims:,.2f}")
-        mcol2.metric("Total Adaigi (Payments)", f"PKR {total_payments:,.2f}")
-        mcol3.metric("Baqaya (Jo Company Ne Dena Hai)", f"PKR {net_balance:,.2f}", delta_color="off")
-
-        # Download Button for this ledger
-        if st.button("Download Expense Ledger (PDF)", key=f"download_claim_ledger_{employee['id']}"):
-            summary_data = {
-                'total_claims': total_claims,
-                'total_payments': total_payments,
-                'net_balance': net_balance
-            }
+        if employee:
+            st.header(f"Employee Ledger: {employee['name']}")
             
-            pdf_data = create_employee_expense_ledger_pdf(
-                employee, ledger_df, claim_start_date, claim_end_date, summary_data
-            )
+            # Date Range Selection
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                start_date = st.date_input("From Date", value=date.today().replace(day=1))
+            with col2:
+                end_date = st.date_input("To Date", value=date.today())
+            with col3:
+                st.write("")  # Spacer
+                download_btn = st.button("📥 Download PDF Ledger", use_container_width=True)
             
-            st.download_button(
-                label="Click to Download PDF",
-                data=pdf_data,
-                file_name=f"Expense_Ledger_{employee['name']}_{claim_start_date}_to_{claim_end_date}.pdf",
-                mime="application/pdf",
-                key=f"download_btn_{employee['id']}"
-            )
-
-        # Add a form to add new entries
-        with st.expander(f"Naya Claim / Adaigi Add Karein (baraye {employee['name']})"):
-            with st.form(f"new_claim_payment_form_{employee['id']}", clear_on_submit=True):
+            # Get data
+            expenses_df = get_expenses_for_employee(employee['id'], start_date, end_date)
+            employee_expenses_df = get_employee_expenses(employee['id'])
+            
+            # Display Summary
+            total_deductions = expenses_df['amount'].sum() if not expenses_df.empty else 0
+            total_claims = employee_expenses_df[employee_expenses_df['status'] == 'Approved']['amount'].sum() if not employee_expenses_df.empty else 0
+            net_salary = employee['salary'] - total_deductions
+            
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Base Salary", f"PKR {employee['salary']:,.2f}")
+            col2.metric("Deductions", f"PKR {total_deductions:,.2f}")
+            col3.metric("Approved Claims", f"PKR {total_claims:,.2f}")
+            col4.metric("Net Payable", f"PKR {net_salary:,.2f}")
+            
+            # Employee Self-Service Section
+            st.subheader("➕ Add New Expense Claim")
+            with st.form("add_employee_expense_form", clear_on_submit=True):
+                col1, col2, col3 = st.columns(3)
                 
-                entry_date = st.date_input("Date", value=datetime.today(), key=f"claim_date_{employee['id']}")
-                entry_type = st.selectbox("Entry Ki Qisam (Type)", 
-                                          ["Employee Expense Claim", "Employee Expense Payment"], 
-                                          key=f"claim_type_{employee['id']}")
-                entry_amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key=f"claim_amt_{employee['id']}")
-                entry_desc = st.text_input("Tafseel (Description)", placeholder="e.g., 'Petrol' or 'Baqaya clear kiya'", key=f"claim_desc_{employee['id']}")
+                with col1:
+                    exp_date = st.date_input("📅 Date", value=date.today())
+                    category = st.selectbox("📂 Category", EMPLOYEE_EXPENSE_CATEGORIES)
                 
-                submitted_entry = st.form_submit_button("Add Entry")
-                if submitted_entry:
-                    # Ensure the entry_date is a date object for the function
-                    if add_expense(
-                        expense_date=entry_date,
-                        category=entry_type,
-                        amount=entry_amount,
-                        description=entry_desc,
-                        employee_id=employee['id']
-                    ):
+                with col2:
+                    amount = st.number_input("💰 Amount (PKR)", min_value=1.0, step=100.0)
+                    # receipt = st.file_uploader("📎 Receipt (Optional)", type=['pdf', 'jpg', 'png'])
+                
+                with col3:
+                    description = st.text_area("📝 Description", placeholder="Describe the expense...", height=100)
+                
+                submitted = st.form_submit_button("✅ Submit Expense Claim", use_container_width=True)
+                if submitted:
+                    expense_id, success = add_employee_expense(
+                        employee['id'], exp_date, category, amount, description
+                    )
+                    if success:
+                        st.success("✅ Expense claim submitted for approval!")
                         st.rerun()
-        
-        # Display the ledger details
-        st.subheader("Claims (Kharchay) Ki Tafseel")
-        if not claims_df.empty:
-            st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
-        else:
-            st.info("No claims found for this period.")
-        
-        st.subheader("Adaigiyon (Payments) Ki Tafseel")
-        if not payments_df.empty:
-            st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
-        else:
-            st.info("No payments found for this period.")
-
-
-def page_expense_management():
-    """Page for managing expenses (CRUD)."""
-    st.title("💸 Expense Management")
-
-    # Initialize session state for managing expense operations
-    if "expense_edit_mode" not in st.session_state:
-        st.session_state.expense_edit_mode = False
-    if "selected_expense_id" not in st.session_state:
-        st.session_state.selected_expense_id = None
-    if "expense_form_key" not in st.session_state:
-        st.session_state.expense_form_key = 0
-
-    # --- Add New Expense ---
-    st.header("Add New Expense")
-    
-    # Get employee names for dropdown
-    emp_names_dict = get_employee_names()
-    # Create a list for the selectbox: [(id, name), ...]
-    # Add a "None" option
-    emp_options = [(None, "N/A (General Expense)")] + list(emp_names_dict.items())
-
-    with st.form("add_expense_form", clear_on_submit=True):
-        expense_date = st.date_input("Expense Date", value=datetime.today(), key="add_expense_date")
-        category = st.selectbox("Category", EXPENSE_CATEGORIES, key="add_category")
-        amount = st.number_input("Amount (PKR)", min_value=0.01, step=10.0, key="add_amount")
-        
-        # Use format_func to display names, but pass ID as the value
-        selected_employee = st.selectbox(
-            "Link to Employee (Optional - for Advances/Deductions)", 
-            options=[opt[0] for opt in emp_options], # Pass IDs
-            format_func=lambda x: dict(emp_options).get(x, "N/A"), # Show names
-            key="add_employee"
-        )
-        
-        description = st.text_area("Description (Optional)", key="add_description")
-        
-        submitted = st.form_submit_button("Add Expense")
-        if submitted:
-            if add_expense(expense_date, category, amount, description, selected_employee):
-                st.rerun()
-
-    st.divider()
-
-    # --- View and Edit/Delete Expenses ---
-    st.header("Manage Existing Expenses")
-    
-    col1, col2 = st.columns(2)
-    today = datetime.today()
-    start_of_month = today.replace(day=1)
-    
-    with col1:
-        start_date = st.date_input("Start Date", value=start_of_month, key="expense_start_date")
-    with col2:
-        end_date = st.date_input("End Date", value=today, key="expense_end_date")
-
-    expenses_df = get_expenses(start_date, end_date)
-    
-    if not expenses_df.empty:
-        st.subheader("Expense List")
-        
-        # Display expenses with edit/delete options
-        for idx, expense in expenses_df.iterrows():
-            col1, col2, col3, col4 = st.columns([3, 2, 1, 1])
+            
+            # Display Expenses
+            col1, col2 = st.columns(2)
             
             with col1:
-                st.write(f"**Date:** {expense['expense_date']}")
-                st.write(f"**Category:** {expense['category']}")
-                st.write(f"**Amount:** PKR {expense['amount']:,.2f}")
+                st.subheader("📋 Submitted Expenses")
+                if not employee_expenses_df.empty:
+                    for _, expense in employee_expenses_df.iterrows():
+                        status_color = {
+                            'Approved': '🟢',
+                            'Rejected': '🔴', 
+                            'Pending': '🟡'
+                        }.get(expense['status'], '⚪')
+                        
+                        st.write(f"{status_color} **PKR {expense['amount']:,.2f}** - {expense['category']}")
+                        st.write(f"   📅 {expense['expense_date']} | {expense['description']}")
+                        st.write(f"   📊 Status: {expense['status']}")
+                        st.divider()
+                else:
+                    st.info("No expense claims submitted yet.")
             
             with col2:
-                st.write(f"**Employee:** {expense['employee_name']}")
-                st.write(f"**Description:** {expense['description'][:50]}{'...' if len(str(expense['description'])) > 50 else ''}")
+                st.subheader("📊 System Deductions")
+                if not expenses_df.empty:
+                    for _, expense in expenses_df.iterrows():
+                        st.write(f"🔴 **PKR {expense['amount']:,.2f}** - {expense['category']}")
+                        st.write(f"   📅 {expense['expense_date']} | {expense['description']}")
+                        st.divider()
+                else:
+                    st.info("No deductions in this period.")
             
-            with col3:
-                if st.button("Edit", key=f"edit_expense_{expense['id']}"):
-                    st.session_state.expense_edit_mode = True
-                    st.session_state.selected_expense_id = expense['id']
-                    st.session_state.expense_form_key += 1
-                    st.rerun()
-            
-            with col4:
-                if st.button("Delete", key=f"delete_expense_{expense['id']}"):
-                    if delete_expense(expense['id']):
-                        st.rerun()
-            
-            st.divider()
-    else:
-        st.info("No expenses found for the selected period.")
-
-    # --- Edit Expense Form ---
-    if st.session_state.expense_edit_mode and st.session_state.selected_expense_id:
-        st.header("Edit Expense")
-        
-        # Get expense data
-        expense = get_expense_by_id(st.session_state.selected_expense_id)
-        
-        if expense:
-            with st.form(f"edit_expense_form_{st.session_state.selected_expense_id}", clear_on_submit=False):
-                expense_date = st.date_input("Expense Date", 
-                                           value=datetime.strptime(expense['expense_date'], '%Y-%m-%d').date(), 
-                                           key=f"edit_expense_date_{st.session_state.expense_form_key}")
-                category = st.selectbox("Category", 
-                                      EXPENSE_CATEGORIES, 
-                                      index=EXPENSE_CATEGORIES.index(expense['category']) if expense['category'] in EXPENSE_CATEGORIES else 0,
-                                      key=f"edit_category_{st.session_state.expense_form_key}")
-                amount = st.number_input("Amount (PKR)", 
-                                       value=float(expense['amount']), 
-                                       min_value=0.01, 
-                                       step=10.0,
-                                       key=f"edit_amount_{st.session_state.expense_form_key}")
-                
-                # Employee selection for edit
-                emp_names_dict = get_employee_names()
-                emp_options = [(None, "N/A (General Expense)")] + list(emp_names_dict.items())
-                
-                # Find current employee index
-                current_employee = expense['employee_id']
-                current_index = 0
-                for i, (emp_id, _) in enumerate(emp_options):
-                    if emp_id == current_employee:
-                        current_index = i
-                        break
-                
-                selected_employee = st.selectbox(
-                    "Link to Employee (Optional - for Advances/Deductions)", 
-                    options=[opt[0] for opt in emp_options],
-                    index=current_index,
-                    format_func=lambda x: dict(emp_options).get(x, "N/A"),
-                    key=f"edit_employee_{st.session_state.expense_form_key}"
+            # PDF Download
+            if download_btn:
+                pdf_data = create_employee_ledger_pdf(employee, start_date, end_date, expenses_df, employee_expenses_df)
+                st.download_button(
+                    label="⬇️ Download PDF Ledger",
+                    data=pdf_data,
+                    file_name=f"Ledger_{employee['name']}_{start_date}_to_{end_date}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
                 )
+    
+    # Approvals View
+    elif st.session_state.emp_view_mode == "approvals":
+        st.header("✅ Expense Approval Center")
+        
+        pending_expenses = get_all_pending_expenses()
+        
+        if pending_expenses.empty:
+            st.success("🎉 All caught up! No pending approvals.")
+            return
+        
+        for _, expense in pending_expenses.iterrows():
+            with st.container():
+                col1, col2, col3 = st.columns([3, 1, 1])
                 
-                description = st.text_area("Description (Optional)", 
-                                         value=expense['description'] or "",
-                                         key=f"edit_description_{st.session_state.expense_form_key}")
-                
-                col1, col2, col3 = st.columns([1, 1, 1])
                 with col1:
-                    update_submitted = st.form_submit_button("Update Expense")
+                    st.write(f"**{expense['employee_name']}**")
+                    st.write(f"**Category:** {expense['category']}")
+                    st.write(f"**Amount:** PKR {expense['amount']:,.2f}")
+                    st.write(f"**Date:** {expense['expense_date']}")
+                    st.write(f"**Description:** {expense['description']}")
+                
                 with col2:
-                    cancel_edit = st.form_submit_button("Cancel Edit")
+                    if st.button("✅ Approve", key=f"approve_{expense['id']}", use_container_width=True):
+                        if approve_employee_expense(expense['id'], "Admin"):
+                            st.success("✅ Expense approved!")
+                            time.sleep(1)
+                            st.rerun()
                 
-                if update_submitted:
-                    if update_expense(st.session_state.selected_expense_id, expense_date, category, amount, description, selected_employee):
-                        st.session_state.expense_edit_mode = False
-                        st.session_state.selected_expense_id = None
-                        st.rerun()
+                with col3:
+                    if st.button("❌ Reject", key=f"reject_{expense['id']}", use_container_width=True):
+                        if reject_employee_expense(expense['id'], "Admin"):
+                            st.error("❌ Expense rejected!")
+                            time.sleep(1)
+                            st.rerun()
                 
-                if cancel_edit:
-                    st.session_state.expense_edit_mode = False
-                    st.session_state.selected_expense_id = None
-                    st.rerun()
-
-
-def page_reports_and_ledgers():
-    """Page for generating reports."""
-    st.title("📊 Reports & Ledgers")
-
-    # --- Monthly Expense Report ---
-    st.header("Monthly Expense Report")
-    st.write("Generate a PDF report of all expenses for a selected period.")
-    
-    col1, col2 = st.columns(2)
-    today = datetime.today()
-    start_of_month = today.replace(day=1)
-    with col1:
-        report_start_date = st.date_input("Report Start Date", value=start_of_month, key="rep_start")
-    with col2:
-        report_end_date = st.date_input("Report End Date", value=today, key="rep_end")
-
-    if st.button("Generate Expense Report"):
-        pdf_data = create_expense_report_pdf(report_start_date, report_end_date)
-        st.download_button(
-            label="Download PDF Report",
-            data=pdf_data,
-            file_name=f"Expense_Report_{report_start_date}_to_{report_end_date}.pdf",
-            mime="application/pdf"
-        )
-        
-    st.divider()
-
-    # --- Monthly Payroll Report ---
-    st.header("Monthly Payroll Report")
-    st.write("Generate a summary PDF report of salary, deductions, and net pay for all employees.")
-    
-    payroll_month = st.date_input("Select Month for Payroll Report", value=datetime.today(), key="payroll_month")
-    
-    if st.button("Generate Payroll Report"):
-        pdf_data = create_payroll_report_pdf(payroll_month)
-        st.download_button(
-            label="Download Payroll Report (PDF)",
-            data=pdf_data,
-            file_name=f"Payroll_Report_{payroll_month.strftime('%Y_%m')}.pdf",
-            mime="application/pdf"
-        )
-
-    st.divider()
-
-    # --- Employee Ledger / Salary Slip ---
-    st.header("Generate Employee Monthly Report & Ledger")
-    st.write("Generate a professional PDF report, including salary and a ledger of deductions/advances.")
-    
-    emp_names_dict = get_employee_names()
-    if not emp_names_dict:
-        st.warning("No employees found. Please add an employee first.", icon="🧑‍💼")
-        return
-        
-    emp_options = list(emp_names_dict.items())
-    selected_emp_id = st.selectbox(
-        "Select Employee", 
-        options=[opt[0] for opt in emp_options],
-        format_func=lambda x: emp_names_dict.get(x)
-    )
-    
-    report_month_date = st.date_input("Select Month for Report", value=datetime.today())
-    report_month_year = report_month_date.strftime("%B %Y")
-    
-    # --- Show current deductions and add new ones ---
-    if selected_emp_id:
-        # 1. Calculate and display current deductions
-        month_start = report_month_date.replace(day=1)
-        month_end = month_start + relativedelta(months=1, days=-1)
-        
-        current_ledger_df = get_expenses_for_employee(selected_emp_id, month_start, month_end)
-        current_total_deductions = current_ledger_df['amount'].sum()
-        
-        st.metric("Current Deductions This Month", f"PKR {current_total_deductions:,.2f}")
-
-        # 2. Add an expander with a form to add new deductions
-        with st.expander("Add New Deduction / Advance"):
-            with st.form(f"new_deduction_form_{selected_emp_id}", clear_on_submit=True):
-                st.info(f"This will be added to the ledger for {report_month_year}.")
-                
-                # Use the 1st of the selected month as the date for the new deduction
-                ded_date = report_month_date.replace(day=1)
-                
-                # Use a specific list for this form
-                ded_category = st.selectbox("Category", ["Advance", "Fine", "Other Deduction", "Employee Expenses"])
-                ded_amount = st.number_input("Amount", min_value=0.01, step=10.0)
-                ded_desc = st.text_input("Description (e.g., 'Mess bill' or 'Broken item fine')")
-                
-                submitted_ded = st.form_submit_button("Add Deduction")
-                if submitted_ded and ded_amount > 0:
-                    # Ensure ded_date is converted back to date object for the function
-                    if add_expense(
-                        expense_date=ded_date,
-                        category=ded_category,
-                        amount=ded_amount,
-                        description=ded_desc,
-                        employee_id=selected_emp_id
-                    ):
-                        st.rerun()
-                    
-    # --- End of new feature ---
-
-    if st.button("Generate Employee Report"):
-        # Fetch the selected employee's full details
-        conn = get_db_connection()
-        employee_data = conn.execute("SELECT * FROM employees WHERE id = ?", (selected_emp_id,)).fetchone()
-        conn.close()
-        
-        if employee_data:
-            # Get start and end of the selected month
-            month_start_date = report_month_date.replace(day=1)
-            month_end_date = month_start_date + relativedelta(months=1, days=-1)
-            
-            # Fetch the ledger (expenses) for this employee for the month
-            ledger_df = get_expenses_for_employee(selected_emp_id, month_start_date, month_end_date)
-            
-            # Generate PDF
-            pdf_data = create_employee_report_pdf(employee_data, report_month_year, ledger_df)
-            
-            st.download_button(
-                label="Download Employee Report (PDF)",
-                data=pdf_data,
-                file_name=f"Employee_Report_{employee_data['name']}_{report_month_date.strftime('%Y_%m')}.pdf",
-                mime="application/pdf"
-            )
-        else:
-            st.error("Could not find employee data.")
-    
-    st.divider()
+                st.divider()
 
 def page_data_import():
-    """Page for importing data from CSV/Excel."""
-    st.title("📥 Data Import")
-
-    # --- Create Template Files in Memory ---
-    @st.cache_data
-    def get_employee_template():
-        df = pd.DataFrame(columns=["name", "designation", "bank_name", "account_title", "account_number", "salary"])
-        output = io.BytesIO()
-        df.to_csv(output, index=False, encoding='utf-8-sig')
-        return output.getvalue()
-
-    @st.cache_data
-    def get_expense_template():
-        df = pd.DataFrame(columns=["expense_date", "category", "amount", "description", "employee_id"])
-        output = io.BytesIO()
-        df.to_csv(output, index=False, encoding='utf-8-sig')
-        return output.getvalue()
-
-    # --- Import Employees ---
-    st.header("Import Employees")
-    st.write("Upload a CSV or Excel file with employee data. Download the template to see the required format.")
+    """Data import page with templates."""
+    st.title("📥 Data Import Center")
     
-    st.download_button(
-        label="Download Employee Template (CSV)",
-        data=get_employee_template(),
-        file_name="employee_template.csv",
-        mime="text/csv"
-    )
+    tab1, tab2, tab3 = st.tabs(["📋 Employee Import", "💸 Expense Import", "📚 Instructions"])
     
-    st.info("""
-    **Required Format:**
-    - `name` (text)
-    - `designation` (text)
-    - `bank_name` (text, optional)
-    - `account_title` (text, optional)
-    - `account_number` (text, optional)
-    - `salary` (number)
-    """)
-    
-    uploaded_file = st.file_uploader("Choose an Employee file", type=["csv", "xlsx"], key="emp_uploader")
-    
-    if uploaded_file:
-        try:
-            # FIX: Read account_number as string to prevent scientific notation
-            dtype_spec = {'account_number': str}
-            if uploaded_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_file, dtype=dtype_spec)
-            else:
-                df = pd.read_excel(uploaded_file, dtype=dtype_spec)
-            
-            st.write("**File Preview:**")
-            st.dataframe(df.head())
-            
-            if st.button("Import Employees"):
-                conn = get_db_connection()
-                with st.spinner("Importing..."):
-                    for _, row in df.iterrows():
-                        # Use .get() for optional fields to handle missing columns gracefully
-                        conn.execute(
-                            "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
-                            (row['name'], row.get('designation'), 
-                             row.get('bank_name'), row.get('account_title'), 
-                             row.get('account_number'), # Already a string
-                             row['salary'])
-                        )
-                    conn.commit()
-                conn.close()
-                st.success(f"Successfully imported {len(df)} employees!")
-                st.rerun() # Rerun to ensure the new employees appear in the manage tab
+    with tab1:
+        st.header("Import Employees")
+        
+        # Download Template
+        st.subheader("1. Download Template")
+        st.info("Download the template file and fill in your employee data.")
+        
+        template_data = get_employee_import_template()
+        st.download_button(
+            label="📥 Download Employee Template (Excel)",
+            data=template_data,
+            file_name="employee_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        
+        # Upload and Import
+        st.subheader("2. Upload Filled Template")
+        uploaded_file = st.file_uploader("Choose Excel file", type=["xlsx", "xls"], key="emp_import")
+        
+        if uploaded_file:
+            try:
+                df = pd.read_excel(uploaded_file)
+                st.success("✅ File loaded successfully!")
                 
-        except Exception as e:
-            st.error(f"An error occurred during import: {e}")
-
-    st.divider()
-
-    # --- Import Expenses (Similar logic) ---
-    st.header("Import Expenses")
-    st.write("Upload a CSV or Excel file with expense data. Download the template to see the required format.")
-    
-    st.download_button(
-        label="Download Expense Template (CSV)",
-        data=get_expense_template(),
-        file_name="expense_template.csv",
-        mime="text/csv"
-    )
-
-    st.info("""
-    **Required Format:**
-    - `expense_date` (YYYY-MM-DD)
-    - `category` (must match one of the predefined categories)
-    - `amount` (number)
-    - `description` (text, optional)
-    - `employee_id` (number, optional - must match an ID in the employees table)
-    """)
-    
-    uploaded_expense_file = st.file_uploader("Choose an Expense file", type=["csv", "xlsx"], key="exp_uploader")
-    
-    if uploaded_expense_file:
-        try:
-            if uploaded_expense_file.name.endswith('.csv'):
-                df = pd.read_csv(uploaded_expense_file)
-            else:
-                df = pd.read_excel(uploaded_expense_file)
-            
-            st.write("**File Preview:**")
-            st.dataframe(df.head())
-            
-            if st.button("Import Expenses"):
-                conn = get_db_connection()
-                with st.spinner("Importing..."):
-                    for _, row in df.iterrows():
-                        # Basic validation
-                        if row['category'] not in EXPENSE_CATEGORIES:
-                            st.warning(f"Skipping row: Category '{row['category']}' not found.")
-                            continue
-                        
-                        conn.execute(
-                            "INSERT INTO expenses (expense_date, category, amount, description, employee_id) VALUES (?, ?, ?, ?, ?)",
-                            (row['expense_date'], row['category'], row['amount'], 
-                             row.get('description'), row.get('employee_id'))
-                        )
-                    conn.commit()
-                conn.close()
-                st.success(f"Successfully imported expenses!")
+                # Display preview
+                st.subheader("Data Preview")
+                st.dataframe(df.head(), use_container_width=True)
                 
-        except Exception as e:
-            st.error(f"An error occurred during import: {e}")
-
+                # Validation
+                required_cols = ['name', 'designation', 'salary']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                
+                if missing_cols:
+                    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                else:
+                    if st.button("🚀 Import Employees", use_container_width=True):
+                        with st.spinner("Importing employees..."):
+                            conn = get_db_connection()
+                            success_count = 0
+                            
+                            for _, row in df.iterrows():
+                                try:
+                                    conn.execute(
+                                        "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
+                                        (row['name'], row.get('designation'), row.get('bank_name'), 
+                                         row.get('account_title'), row.get('account_number'), row['salary'])
+                                    )
+                                    success_count += 1
+                                except Exception as e:
+                                    st.warning(f"Failed to import {row.get('name', 'Unknown')}: {str(e)}")
+                            
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success(f"✅ Successfully imported {success_count} out of {len(df)} employees!")
+                            st.balloons()
+                
+            except Exception as e:
+                st.error(f"❌ Error reading file: {e}")
+    
+    with tab2:
+        st.header("Import Expenses")
+        
+        # Download Template
+        st.subheader("1. Download Template")
+        st.info("Download the template file and fill in your expense data.")
+        
+        template_data = get_expense_import_template()
+        st.download_button(
+            label="📥 Download Expense Template (Excel)",
+            data=template_data,
+            file_name="expense_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
+        
+        # Upload and Import
+        st.subheader("2. Upload Filled Template")
+        uploaded_file = st.file_uploader("Choose Excel file", type=["xlsx", "xls"], key="exp_import")
+        
+        if uploaded_file:
+            try:
+                df = pd.read_excel(uploaded_file)
+                st.success("✅ File loaded successfully!")
+                
+                # Display preview
+                st.subheader("Data Preview")
+                st.dataframe(df.head(), use_container_width=True)
+                
+                # Validation
+                required_cols = ['expense_date', 'category', 'amount']
+                missing_cols = [col for col in required_cols if col not in df.columns]
+                
+                if missing_cols:
+                    st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                else:
+                    if st.button("🚀 Import Expenses", use_container_width=True):
+                        with st.spinner("Importing expenses..."):
+                            conn = get_db_connection()
+                            success_count = 0
+                            
+                            for _, row in df.iterrows():
+                                try:
+                                    # Convert employee_id to None if NaN
+                                    employee_id = row.get('employee_id')
+                                    if pd.isna(employee_id):
+                                        employee_id = None
+                                    
+                                    conn.execute(
+                                        "INSERT INTO expenses (expense_date, category, amount, description, employee_id) VALUES (?, ?, ?, ?, ?)",
+                                        (row['expense_date'], row['category'], row['amount'], 
+                                         row.get('description'), employee_id)
+                                    )
+                                    success_count += 1
+                                except Exception as e:
+                                    st.warning(f"Failed to import expense: {str(e)}")
+                            
+                            conn.commit()
+                            conn.close()
+                            
+                            st.success(f"✅ Successfully imported {success_count} out of {len(df)} expenses!")
+                            st.balloons()
+                
+            except Exception as e:
+                st.error(f"❌ Error reading file: {e}")
+    
+    with tab3:
+        st.header("📚 Import Instructions")
+        
+        st.markdown("""
+        ### Employee Import Guidelines:
+        
+        **Required Fields:**
+        - `name`: Employee full name (Text)
+        - `designation`: Job title (Text)  
+        - `salary`: Monthly salary (Number)
+        
+        **Optional Fields:**
+        - `bank_name`: Bank name (Text)
+        - `account_title`: Account holder name (Text)
+        - `account_number`: Bank account number (Text)
+        
+        ### Expense Import Guidelines:
+        
+        **Required Fields:**
+        - `expense_date`: Date in YYYY-MM-DD format
+        - `category`: Expense category from predefined list
+        - `amount`: Expense amount (Number)
+        
+        **Optional Fields:**
+        - `description`: Expense description (Text)
+        - `employee_id`: Link to employee ID (Number)
+        
+        ### Tips:
+        - Keep Excel file under 5MB
+        - Ensure date formats are correct
+        - Employee IDs must exist in the system
+        - Categories should match predefined options
+        """)
 
 # --- MAIN APP ---
-
 def main():
     """Main function to run the Streamlit app."""
-    st.set_page_config(page_title="Enterprise Management", layout="wide")
-    
-    # Initialize the database
-    init_db()
-
-    # Sidebar Navigation
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio(
-        "Go to",
-        ["🏠 Dashboard", "🧑‍💼 Employee Management", "💸 Expense Management", "📊 Reports & Ledgers", "📥 Data Import"]
+    st.set_page_config(
+        page_title="Nutrion Enterprise Management",
+        page_icon="🏢",
+        layout="wide",
+        initial_sidebar_state="expanded"
     )
-
+    
+    # Custom CSS
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .sidebar .sidebar-content {
+        background-color: #f0f2f6;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Initialize database
+    init_db()
+    
+    # Sidebar Navigation
+    st.sidebar.title("🏢 Nutrion Enterprise")
+    st.sidebar.markdown("---")
+    
+    page = st.sidebar.radio(
+        "Navigation",
+        ["🏠 Dashboard", "🧑‍💼 Employee Management", "📥 Data Import"],
+        index=0
+    )
+    
+    st.sidebar.markdown("---")
+    st.sidebar.info("""
+    **Quick Actions:**
+    - Add employees with bank details
+    - Employees can submit expenses
+    - Download PDF ledgers
+    - Bulk import data
+    """)
+    
     # Page routing
     if page == "🏠 Dashboard":
         page_dashboard()
     elif page == "🧑‍💼 Employee Management":
         page_employee_management()
-    elif page == "💸 Expense Management":
-        page_expense_management()
-    elif page == "📊 Reports & Ledgers":
-        page_reports_and_ledgers()
     elif page == "📥 Data Import":
         page_data_import()
 
