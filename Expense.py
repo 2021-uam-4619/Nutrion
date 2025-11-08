@@ -9,6 +9,7 @@ import io
 import time
 import uuid
 import base64
+from datetime import datetime, date, timedelta
 
 # --- CONFIGURATION ---
 EXPENSE_CATEGORIES = [
@@ -697,6 +698,193 @@ def create_employee_ledger_pdf(employee, start_date, end_date, expenses_df, empl
     
     return pdf.output(dest='S').encode('latin-1')
 
+def create_salary_slip_pdf(employee, month_year, deductions=0, net_salary=None):
+    """Generates a professional salary slip PDF with account details."""
+    settings_manager = SettingsManager()
+    settings = settings_manager.get_settings()
+    
+    pdf = PDF()
+    pdf.title = f'Salary Slip - {month_year}'
+    pdf.add_page()
+    
+    # Header with company info
+    pdf.set_font('Arial', 'B', 18)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, settings['company_name'], 0, 1, 'C')
+    pdf.set_font('Arial', 'I', 12)
+    pdf.set_text_color(128, 128, 128)
+    pdf.cell(0, 8, 'Salary Slip', 0, 1, 'C')
+    pdf.cell(0, 8, f'For the month of {month_year}', 0, 1, 'C')
+    pdf.ln(10)
+    
+    # Employee Details Section
+    pdf.set_font('Arial', 'B', 14)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, 'Employee Details', 0, 1)
+    pdf.set_font('Arial', '', 11)
+    pdf.set_text_color(0, 0, 0)
+    
+    employee_details = [
+        ['Employee Name:', employee['name']],
+        ['Designation:', employee.get('designation', 'N/A')],
+        ['Employee ID:', employee['id'][:8]],
+        ['Department:', employee.get('department', 'N/A')],
+        ['Payment Month:', month_year],
+        ['Payment Date:', datetime.now().strftime('%d-%b-%Y')]
+    ]
+    
+    for label, value in employee_details:
+        pdf.cell(50, 8, label, 0, 0)
+        pdf.cell(0, 8, str(value), 0, 1)
+    
+    pdf.ln(10)
+    
+    # Bank Details Section
+    pdf.set_font('Arial', 'B', 14)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, 'Bank Details', 0, 1)
+    pdf.set_font('Arial', '', 11)
+    pdf.set_text_color(0, 0, 0)
+    
+    bank_details = [
+        ['Bank Name:', employee.get('bank_name', 'N/A')],
+        ['Account Title:', employee.get('account_title', 'N/A')],
+        ['Account Number:', employee.get('account_number', 'N/A')]
+    ]
+    
+    for label, value in bank_details:
+        pdf.cell(45, 8, label, 0, 0)
+        pdf.cell(0, 8, str(value), 0, 1)
+    
+    pdf.ln(10)
+    
+    # Salary Breakdown Section
+    pdf.set_font('Arial', 'B', 14)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, 'Salary Breakdown', 0, 1)
+    
+    # Table header
+    pdf.set_fill_color(41, 128, 185)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(100, 10, 'Description', 1, 0, 'C', True)
+    pdf.cell(0, 10, 'Amount (PKR)', 1, 1, 'C', True)
+    
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Arial', '', 11)
+    
+    # Basic Salary
+    pdf.cell(100, 10, 'Basic Salary', 1, 0)
+    pdf.cell(0, 10, f"{employee['salary']:,.2f}", 1, 1, 'R')
+    
+    # Deductions
+    if deductions > 0:
+        pdf.cell(100, 10, 'Total Deductions', 1, 0)
+        pdf.cell(0, 10, f"({deductions:,.2f})", 1, 1, 'R')
+    
+    # Net Salary
+    net_salary = net_salary or (employee['salary'] - deductions)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(100, 10, 'Net Salary Payable', 1, 0)
+    pdf.set_text_color(0, 128, 0)  # Green for net salary
+    pdf.cell(0, 10, f"{net_salary:,.2f}", 1, 1, 'R')
+    pdf.set_text_color(0, 0, 0)
+    
+    pdf.ln(15)
+    
+    # Authorization Section
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(0, 8, '_________________________', 0, 1, 'R')
+    pdf.cell(0, 8, 'Authorized Signature', 0, 1, 'R')
+    
+    pdf.ln(10)
+    
+    # Footer Note
+    pdf.set_font('Arial', 'I', 9)
+    pdf.set_text_color(128, 128, 128)
+    pdf.multi_cell(0, 6, f"Note: This is a computer generated salary slip and does not require signature. For any queries, please contact {settings['company_phone']} or email {settings['company_email']}")
+    
+    return pdf.output(dest='S').encode('latin-1')
+
+def create_bulk_salary_sheet_pdf(employees_data, month_year):
+    """Generates a bulk salary sheet PDF for all employees."""
+    settings_manager = SettingsManager()
+    settings = settings_manager.get_settings()
+    
+    pdf = PDF()
+    pdf.title = f'Salary Sheet - {month_year}'
+    pdf.add_page()
+    
+    # Header
+    pdf.set_font('Arial', 'B', 18)
+    pdf.set_text_color(41, 128, 185)
+    pdf.cell(0, 10, settings['company_name'], 0, 1, 'C')
+    pdf.set_font('Arial', 'I', 14)
+    pdf.set_text_color(128, 128, 128)
+    pdf.cell(0, 8, f'Monthly Salary Sheet - {month_year}', 0, 1, 'C')
+    pdf.ln(5)
+    
+    # Summary
+    total_salary = sum(emp['salary'] for emp in employees_data)
+    total_deductions = sum(emp.get('deductions', 0) for emp in employees_data)
+    total_net = sum(emp.get('net_salary', emp['salary']) for emp in employees_data)
+    
+    pdf.set_font('Arial', 'B', 12)
+    pdf.cell(0, 8, f'Total Employees: {len(employees_data)} | Total Salary: PKR {total_salary:,.2f} | Total Net: PKR {total_net:,.2f}', 0, 1)
+    pdf.ln(5)
+    
+    # Table Header
+    pdf.set_fill_color(41, 128, 185)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font('Arial', 'B', 9)
+    
+    # Adjust column widths for better fit
+    col_widths = [40, 30, 30, 40, 25, 25, 25]
+    headers = ['Employee', 'Designation', 'Bank', 'Account No', 'Salary', 'Deductions', 'Net Pay']
+    
+    for i, header in enumerate(headers):
+        pdf.cell(col_widths[i], 10, header, 1, 0, 'C', True)
+    pdf.ln()
+    
+    # Table Rows
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font('Arial', '', 8)
+    
+    for emp in employees_data:
+        # Employee name (truncate if too long)
+        pdf.cell(col_widths[0], 8, emp['name'][:18], 1, 0)
+        # Designation
+        pdf.cell(col_widths[1], 8, emp.get('designation', '')[:12], 1, 0)
+        # Bank name
+        pdf.cell(col_widths[2], 8, emp.get('bank_name', '')[:12], 1, 0)
+        # Account number
+        pdf.cell(col_widths[3], 8, str(emp.get('account_number', ''))[:15], 1, 0)
+        # Salary
+        pdf.cell(col_widths[4], 8, f"{emp['salary']:,.0f}", 1, 0, 'R')
+        # Deductions
+        deductions = emp.get('deductions', 0)
+        pdf.cell(col_widths[5], 8, f"{deductions:,.0f}", 1, 0, 'R')
+        # Net Pay
+        net_salary = emp.get('net_salary', emp['salary'] - deductions)
+        pdf.cell(col_widths[6], 8, f"{net_salary:,.0f}", 1, 1, 'R')
+    
+    # Total Row
+    pdf.set_font('Arial', 'B', 9)
+    pdf.cell(sum(col_widths[:4]), 8, 'TOTALS:', 1, 0, 'R')
+    pdf.cell(col_widths[4], 8, f"{total_salary:,.0f}", 1, 0, 'R')
+    pdf.cell(col_widths[5], 8, f"{total_deductions:,.0f}", 1, 0, 'R')
+    pdf.cell(col_widths[6], 8, f"{total_net:,.0f}", 1, 1, 'R')
+    
+    pdf.ln(10)
+    
+    # Footer
+    pdf.set_font('Arial', 'I', 8)
+    pdf.set_text_color(128, 128, 128)
+    pdf.cell(0, 8, f'Generated on: {datetime.now().strftime("%d-%b-%Y %H:%M")}', 0, 1, 'C')
+    pdf.cell(0, 8, f'Prepared by: {settings["company_name"]} HR Department', 0, 1, 'C')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 # --- TEMPLATE GENERATION FUNCTIONS ---
 def get_employee_import_template():
     """Generates employee import template."""
@@ -759,6 +947,66 @@ def page_dashboard():
     with col4:
         st.markdown(f'<div class="metric-card">✅ Pending Approvals<br>{pending_count}</div>', unsafe_allow_html=True)
     
+    # Quick PDF Downloads Section
+    st.markdown("### 📥 Quick PDF Downloads")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("#### 💰 Salary Sheets")
+        if st.button("📄 Download All Salary Slips", use_container_width=True, key="all_slips"):
+            employees = get_employees()
+            if not employees.empty:
+                month_year = datetime.now().strftime("%B %Y")
+                for _, emp in employees.iterrows():
+                    pdf_data = create_salary_slip_pdf(emp, month_year)
+                    st.download_button(
+                        label=f"Download {emp['name']}",
+                        data=pdf_data,
+                        file_name=f"Salary_Slip_{emp['name']}_{month_year.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        key=f"slip_{emp['id']}"
+                    )
+    
+    with col2:
+        st.markdown("#### 📊 Bulk Reports")
+        if st.button("📋 Bulk Salary Sheet", use_container_width=True, key="bulk_sheet"):
+            employees = get_employees()
+            if not employees.empty:
+                month_year = datetime.now().strftime("%B %Y")
+                employees_data = employees.to_dict('records')
+                pdf_data = create_bulk_salary_sheet_pdf(employees_data, month_year)
+                st.download_button(
+                    label="📥 Download Salary Sheet",
+                    data=pdf_data,
+                    file_name=f"Salary_Sheet_{month_year.replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )
+    
+    with col3:
+        st.markdown("#### 👤 Individual Reports")
+        employees = get_employees()
+        if not employees.empty:
+            selected_employee = st.selectbox("Select Employee", 
+                                           options=employees['id'].tolist(),
+                                           format_func=lambda x: employees[employees['id'] == x]['name'].iloc[0],
+                                           key="dashboard_emp_select")
+            
+            if selected_employee:
+                employee = get_employee_by_id(selected_employee)
+                month_year = st.selectbox("Select Month", 
+                                        options=[datetime.now().strftime("%B %Y"), 
+                                                (datetime.now() - relativedelta(months=1)).strftime("%B %Y")],
+                                        key="month_select")
+                
+                if st.button("📄 Download Salary Slip", use_container_width=True, key="ind_slip"):
+                    pdf_data = create_salary_slip_pdf(employee, month_year)
+                    st.download_button(
+                        label="📥 Download Salary Slip",
+                        data=pdf_data,
+                        file_name=f"Salary_Slip_{employee['name']}_{month_year.replace(' ', '_')}.pdf",
+                        mime="application/pdf"
+                    )
+
     # Recent Activity
     col1, col2 = st.columns(2)
     
@@ -817,7 +1065,7 @@ def page_employee_management():
         st.session_state.selected_emp_id = None
     
     # Navigation
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         if st.button("📋 Employee List", use_container_width=True):
             st.session_state.emp_view_mode = "list"
@@ -830,6 +1078,9 @@ def page_employee_management():
     with col4:
         if st.button("✅ Approvals", use_container_width=True):
             st.session_state.emp_view_mode = "approvals"
+    with col5:
+        if st.button("💰 Salary Slips", use_container_width=True):
+            st.session_state.emp_view_mode = "salary_slips"
     
     st.divider()
     
@@ -1108,7 +1359,7 @@ def page_employee_management():
     elif st.session_state.emp_view_mode == "transactions":
         st.markdown("### 💸 Transaction Management")
         
-        # Add new transaction form
+        # Add new transaction form - FIXED: Added proper form submit button
         st.markdown("#### ➕ Record New Transaction")
         with st.form("add_transaction_form"):
             employees = get_employees()
@@ -1124,17 +1375,107 @@ def page_employee_management():
                 with col2:
                     description = st.text_input("Description", placeholder="Brief description of transaction")
                     category = st.selectbox("Category", EXPENSE_CATEGORIES)
-                    date = st.date_input("Date", value=date.today())
+                    transaction_date = st.date_input("Date", value=date.today())  # FIXED: Changed variable name from 'date'
                 
-                if st.form_submit_button("💾 Record Transaction", use_container_width=True):
+                submitted = st.form_submit_button("💾 Record Transaction", use_container_width=True)
+                if submitted:
                     if description and amount > 0:
-                        if add_expense(date, category, amount, description, employee_id):
+                        if add_expense(transaction_date, category, amount, description, employee_id):
                             st.success("✅ Transaction recorded successfully!")
                             st.rerun()
                     else:
                         st.error("❌ Please fill all required fields correctly")
             else:
                 st.info("👥 No employees found. Please add employees first.")
+
+    # Salary Slips View
+    elif st.session_state.emp_view_mode == "salary_slips":
+        st.markdown("### 💰 Salary Slips & Sheets")
+        
+        employees = get_employees()
+        
+        if employees.empty:
+            st.info("👥 No employees found. Please add employees first.")
+        else:
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.markdown("#### 📄 Individual Salary Slips")
+                selected_employee = st.selectbox("Select Employee", 
+                                               options=employees['id'].tolist(),
+                                               format_func=lambda x: employees[employees['id'] == x]['name'].iloc[0],
+                                               key="salary_emp_select")
+                
+                month_year = st.selectbox("Select Month", 
+                                        options=[datetime.now().strftime("%B %Y"), 
+                                                (datetime.now() - relativedelta(months=1)).strftime("%B %Y")],
+                                        key="salary_month_select")
+                
+                if selected_employee:
+                    employee = get_employee_by_id(selected_employee)
+                    
+                    # Calculate deductions for the month
+                    month_start = datetime.now().replace(day=1).date()
+                    month_end = (month_start + relativedelta(months=1) - timedelta(days=1))
+                    deductions_df = get_expenses_for_employee(selected_employee, month_start, month_end)
+                    total_deductions = deductions_df['amount'].sum() if not deductions_df.empty else 0
+                    net_salary = employee['salary'] - total_deductions
+                    
+                    st.metric("Basic Salary", f"PKR {employee['salary']:,.2f}")
+                    st.metric("Total Deductions", f"PKR {total_deductions:,.2f}")
+                    st.metric("Net Salary", f"PKR {net_salary:,.2f}")
+                    
+                    if st.button("📄 Generate Salary Slip", use_container_width=True, key="gen_slip"):
+                        pdf_data = create_salary_slip_pdf(employee, month_year, total_deductions, net_salary)
+                        st.download_button(
+                            label="📥 Download Salary Slip",
+                            data=pdf_data,
+                            file_name=f"Salary_Slip_{employee['name']}_{month_year.replace(' ', '_')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+            
+            with col2:
+                st.markdown("#### 📊 Bulk Salary Sheet")
+                bulk_month_year = st.selectbox("Select Month for Bulk Sheet", 
+                                             options=[datetime.now().strftime("%B %Y"), 
+                                                     (datetime.now() - relativedelta(months=1)).strftime("%B %Y")],
+                                             key="bulk_month_select")
+                
+                # Prepare employee data for bulk sheet
+                employees_data = []
+                for _, emp in employees.iterrows():
+                    month_start = datetime.now().replace(day=1).date()
+                    month_end = (month_start + relativedelta(months=1) - timedelta(days=1))
+                    deductions_df = get_expenses_for_employee(emp['id'], month_start, month_end)
+                    total_deductions = deductions_df['amount'].sum() if not deductions_df.empty else 0
+                    
+                    employees_data.append({
+                        'name': emp['name'],
+                        'designation': emp.get('designation', ''),
+                        'bank_name': emp.get('bank_name', ''),
+                        'account_number': emp.get('account_number', ''),
+                        'salary': emp['salary'],
+                        'deductions': total_deductions,
+                        'net_salary': emp['salary'] - total_deductions
+                    })
+                
+                total_salary = sum(emp['salary'] for emp in employees_data)
+                total_net = sum(emp['net_salary'] for emp in employees_data)
+                
+                st.metric("Total Employees", len(employees_data))
+                st.metric("Total Salary", f"PKR {total_salary:,.2f}")
+                st.metric("Total Net Payable", f"PKR {total_net:,.2f}")
+                
+                if st.button("📋 Generate Bulk Salary Sheet", use_container_width=True, key="gen_bulk"):
+                    pdf_data = create_bulk_salary_sheet_pdf(employees_data, bulk_month_year)
+                    st.download_button(
+                        label="📥 Download Salary Sheet",
+                        data=pdf_data,
+                        file_name=f"Salary_Sheet_{bulk_month_year.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
 
 def page_expense_management():
     """Expense management page."""
@@ -1481,9 +1822,9 @@ def main():
         st.session_state.current_page = "💸 Expense Management"
         st.rerun()
         
-    if st.sidebar.button("✅ Approve Expenses", use_container_width=True, key="sidebar_approve"):
+    if st.sidebar.button("💰 Salary Slips", use_container_width=True, key="sidebar_salary"):
         st.session_state.current_page = "🧑‍💼 Employee Management"
-        st.session_state.emp_view_mode = "approvals"
+        st.session_state.emp_view_mode = "salary_slips"
         st.rerun()
 
     # System info in sidebar
