@@ -5,7 +5,7 @@ from fpdf import FPDF
 from datetime import datetime, date
 from dateutil.relativedelta import relativedelta
 import io
-import time # We might not need this if form handles rerun, but good to have
+import time 
 
 # --- CONFIGURATION ---
 # Define the expense categories from your list
@@ -15,8 +15,8 @@ EXPENSE_CATEGORIES = [
     "Abdul Manan Sb Salary", "Office Entertainment", "PSID", "Advance", 
     "Commission", "Office Stationery Expense", "Employee Expenses", "Other Expense", 
     "Company Expense", "Muhammad Abdullah Salary",
-    "Fine", "Other Deduction", # ADDED NEW CATEGORIES
-    "Employee Expense Claim", "Employee Expense Payment" # NEW: For employee reimbursement ledger
+    "Fine", "Other Deduction", 
+    "Employee Expense Claim", "Employee Expense Payment" 
 ]
 DB_NAME = "enterprise_data.db"
 
@@ -59,23 +59,18 @@ def init_db():
     );
     """)
     
-    # Check if bank_details column exists from old version, and if so, migrate
+    # Check if bank_details column exists from old version, and if so, migrate/add new columns
     try:
-        cursor.execute("SELECT bank_details FROM employees LIMIT 1")
-        # If we are here, the old column exists. Let's migrate/drop it.
-        # For simplicity in this context, we'll just add new columns if they don't exist
-        # A full migration is complex, so we'll assume new columns are added.
-        # Let's add new columns if they don't exist
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN bank_name TEXT")
-        except: pass # Column already exists
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_title TEXT")
-        except: pass # Column already exists
-        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_number TEXT")
-        except: pass # Column already exists
+        cursor.execute("SELECT bank_name FROM employees LIMIT 1")
     except sqlite3.OperationalError:
-        # 'bank_details' column doesn't exist, which is fine (new setup)
-        pass
-
+        # If any of the new columns are missing, add them (handles migration from older schema)
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN bank_name TEXT")
+        except: pass
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_title TEXT")
+        except: pass
+        try: cursor.execute("ALTER TABLE employees ADD COLUMN account_number TEXT")
+        except: pass
+        
     conn.commit()
     conn.close()
 
@@ -98,11 +93,11 @@ def add_employee(name, designation, bank_name, account_title, account_number, sa
 def get_employees():
     """Fetches all employees as a Pandas DataFrame."""
     conn = get_db_connection()
-    # Ensure all columns are selected, even if old 'bank_details' exists
+    # Ensure all columns are selected
     df = pd.read_sql_query("SELECT id, name, designation, bank_name, account_title, account_number, salary FROM employees", conn)
     conn.close()
     
-    # FIX: Ensure account_number is treated as a string to prevent scientific notation
+    # Ensure account_number is treated as a string to prevent scientific notation
     if 'account_number' in df.columns:
         df['account_number'] = df['account_number'].astype(str).fillna('')
         
@@ -129,6 +124,7 @@ def delete_employee(emp_id):
     """Deletes an employee from the database."""
     try:
         conn = get_db_connection()
+        # The ON DELETE SET NULL constraint in the expenses table will handle related records
         conn.execute("DELETE FROM employees WHERE id = ?", (emp_id,))
         conn.commit()
         conn.close()
@@ -574,6 +570,7 @@ def page_employee_management():
         st.session_state.emp_select_box = ""
     
     # --- Add New Employee ---
+    st.header("Add New Employee")
     with st.form("add_employee_form", clear_on_submit=True):
         name = st.text_input("Name", placeholder="e.g., Muhammad Asim Iqbal")
         designation = st.text_input("Designation", placeholder="e.g., Manager")
@@ -589,6 +586,7 @@ def page_employee_management():
         submitted = st.form_submit_button("Add Employee")
         if submitted and name:
             add_employee(name, designation, bank_name, account_title, account_number, salary)
+            st.rerun() # Rerun to refresh the tables below
         elif submitted:
             st.warning("Please provide an employee name.")
             
@@ -640,30 +638,32 @@ def page_employee_management():
                 if updated:
                     update_employee(emp_id, name, designation, bank_name, account_title, account_number, salary)
                     st.session_state.emp_select_box = "" # Reset select box
-                    st.rerun() # <-- FIX: Add rerun back
+                    st.rerun() 
 
         with col2_del:
             st.subheader(f"Delete {selected_name}")
-            st.warning("This action is permanent.")
+            st.warning("Deleting this employee is permanent and will detach related expense/ledger entries.")
             if st.button("Delete Employee", type="primary", key=f"delete_{emp_id}"):
                 delete_employee(emp_id)
                 st.session_state.emp_select_box = "" # Reset select box
-                st.rerun() # <-- FIX: Add rerun back
+                st.rerun() 
         
         st.divider()
 
-        # --- NEW: Employee Expense Claim Ledger (Moved here) ---
+        # --- NEW: Employee Expense Claim Ledger ---
         st.subheader(f"Employee Expense Ledger (Kharchay) - {selected_name}")
         st.write("Iss employee ke company se claim kiye gaye kharchay aur unko ki gayi adaigiyon ka record.")
         
         today = datetime.today()
-        start_of_month = today.replace(day=1)
+        # Ensure we use date objects for date arithmetic
+        today_date = date.today()
+        start_of_month = today_date.replace(day=1)
         
         col1_claim, col2_claim = st.columns(2)
         with col1_claim:
             claim_start_date = st.date_input("Ledger Start Date", value=start_of_month, key=f"claim_start_{emp_id}")
         with col2_claim:
-            claim_end_date = st.date_input("Ledger End Date", value=today, key=f"claim_end_{emp_id}")
+            claim_end_date = st.date_input("Ledger End Date", value=today_date, key=f"claim_end_{emp_id}")
         
         # Get the ledger data
         ledger_df = get_employee_expense_ledger(emp_id, claim_start_date, claim_end_date)
@@ -689,8 +689,13 @@ def page_employee_management():
                 'total_payments': total_payments,
                 'net_balance': net_balance
             }
+            # Fetch the selected employee's full details again for the PDF function
+            conn = get_db_connection()
+            employee_data_for_pdf = conn.execute("SELECT * FROM employees WHERE id = ?", (emp_id,)).fetchone()
+            conn.close()
+            
             pdf_data = create_employee_expense_ledger_pdf(
-                selected_emp, ledger_df, claim_start_date, claim_end_date, summary_data
+                employee_data_for_pdf, ledger_df, claim_start_date, claim_end_date, summary_data
             )
             
             # The download button needs to be unique, but the data is generated on click
@@ -715,6 +720,7 @@ def page_employee_management():
                 
                 submitted_entry = st.form_submit_button("Add Entry")
                 if submitted_entry:
+                    # Ensure the entry_date is a date object for the function
                     add_expense(
                         expense_date=entry_date,
                         category=entry_type,
@@ -722,14 +728,14 @@ def page_employee_management():
                         description=entry_desc,
                         employee_id=emp_id
                     )
-                    # The page will rerun automatically on form submit & refresh ledger
+                    st.rerun()
         
         # Display the ledger details
         st.subheader("Claims (Kharchay) Ki Tafseel")
-        st.dataframe(claims_df[['expense_date', 'description', 'amount']], use_container_width=True)
+        st.dataframe(claims_df[['id', 'expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
         
         st.subheader("Adaigiyon (Payments) Ki Tafseel")
-        st.dataframe(payments_df[['expense_date', 'description', 'amount']], use_container_width=True)
+        st.dataframe(payments_df[['id', 'expense_date', 'description', 'amount']], use_container_width=True, hide_index=True)
 
 
 def page_expense_management():
@@ -766,6 +772,7 @@ def page_expense_management():
         submitted = st.form_submit_button("Add Expense")
         if submitted:
             add_expense(expense_date, category, amount, description, selected_employee)
+            st.rerun()
 
     st.divider()
 
@@ -787,13 +794,18 @@ def page_expense_management():
     if not expenses_df.empty:
         # --- Delete Section ---
         expense_ids = expenses_df['id'].tolist()
+        # Add a blank option for the user to make a choice
         selected_id = st.selectbox("Select Expense ID to Delete", [""] + expense_ids, key="exp_select_box")
 
         if selected_id:
+            # Find the expense details for confirmation
+            selected_expense = expenses_df[expenses_df['id'] == selected_id].iloc[0]
+            st.info(f"You are about to delete: ID **{selected_expense['id']}** | PKR **{selected_expense['amount']:,.2f}** | Category: **{selected_expense['category']}**")
+            
             if st.button("Delete Selected Expense", type="primary", key=f"delete_exp_{selected_id}"):
                 delete_expense(selected_id)
                 st.session_state.exp_select_box = "" # Reset select box
-                st.rerun() # <-- FIX: Add rerun back (This was the line in the traceback)
+                st.rerun()
     else:
         st.info("No expenses found for the selected period.")
 
@@ -825,7 +837,7 @@ def page_reports_and_ledgers():
         
     st.divider()
 
-    # --- NEW: Monthly Payroll Report ---
+    # --- Monthly Payroll Report ---
     st.header("Monthly Payroll Report")
     st.write("Generate a summary PDF report of salary, deductions, and net pay for all employees.")
     
@@ -861,7 +873,7 @@ def page_reports_and_ledgers():
     report_month_date = st.date_input("Select Month for Report", value=datetime.today())
     report_month_year = report_month_date.strftime("%B %Y")
     
-    # --- NEW FEATURE: Show current deductions and add new ones ---
+    # --- Show current deductions and add new ones ---
     if selected_emp_id:
         # 1. Calculate and display current deductions
         month_start = report_month_date.replace(day=1)
@@ -887,6 +899,7 @@ def page_reports_and_ledgers():
                 
                 submitted_ded = st.form_submit_button("Add Deduction")
                 if submitted_ded and ded_amount > 0:
+                    # Ensure ded_date is converted back to date object for the function
                     add_expense(
                         expense_date=ded_date,
                         category=ded_category,
@@ -894,7 +907,7 @@ def page_reports_and_ledgers():
                         description=ded_desc,
                         employee_id=selected_emp_id
                     )
-                    # The page will rerun automatically on form submit, refreshing the metric
+                    st.rerun()
                     
     # --- End of new feature ---
 
@@ -910,7 +923,6 @@ def page_reports_and_ledgers():
             month_end_date = month_start_date + relativedelta(months=1, days=-1)
             
             # Fetch the ledger (expenses) for this employee for the month
-            # This will now include any deductions just added
             ledger_df = get_expenses_for_employee(selected_emp_id, month_start_date, month_end_date)
             
             # Generate PDF
@@ -926,11 +938,6 @@ def page_reports_and_ledgers():
             st.error("Could not find employee data.")
     
     st.divider()
-
-    # --- REMOVED ---
-    # The "Employee Kharchay Ka Ledger" was here, but has been
-    # moved to the 'page_employee_management' page as requested.
-    
 
 def page_data_import():
     """Page for importing data from CSV/Excel."""
@@ -990,17 +997,18 @@ def page_data_import():
                 conn = get_db_connection()
                 with st.spinner("Importing..."):
                     for _, row in df.iterrows():
+                        # Use .get() for optional fields to handle missing columns gracefully
                         conn.execute(
                             "INSERT INTO employees (name, designation, bank_name, account_title, account_number, salary) VALUES (?, ?, ?, ?, ?, ?)",
-                            (row['name'], row['designation'], 
+                            (row['name'], row.get('designation'), 
                              row.get('bank_name'), row.get('account_title'), 
-                             # Ensure value is passed, even if it's None/NaN
-                             row.get('account_number'), 
+                             row.get('account_number'), # Already a string
                              row['salary'])
                         )
                     conn.commit()
                 conn.close()
                 st.success(f"Successfully imported {len(df)} employees!")
+                st.rerun() # Rerun to ensure the new employees appear in the manage tab
                 
         except Exception as e:
             st.error(f"An error occurred during import: {e}")
