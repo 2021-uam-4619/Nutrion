@@ -340,7 +340,8 @@ def page_employee_management():
     st.divider()
 
     st.subheader("Manage Employees")
-    st.help("""
+    # FIXED: Changed st.help() to st.markdown()
+    st.markdown("""
     Use the table below to edit or delete employees.
     - **To Edit:** Click on any cell, make your change, and press Enter.
     - **To Delete:** Click the `x` icon at the end of a row.
@@ -478,7 +479,8 @@ def page_expense_management():
     st.divider()
     
     st.subheader("Manage Expense Categories")
-    st.help("""
+    # FIXED: Changed st.help() to st.markdown()
+    st.markdown("""
     Use the table below to edit or delete categories.
     - **To Edit:** Click on the 'name' cell, make your change, and press Enter.
     - **To Delete:** Click the `x` icon at the end of a row.
@@ -716,7 +718,8 @@ def page_salary_management():
     st.divider()
 
     st.subheader("2. View & Download Salary Sheet")
-    st.help("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
+    # FIXED: Changed st.help() to st.markdown()
+    st.markdown("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
     
     if st.button("Generate Salary Sheet"):
         try:
@@ -944,7 +947,8 @@ def page_reporting():
     st.title("Download Reports")
     
     st.header("Company Expense Report")
-    st.help("Full report of all company expenses, filterable by date and category.")
+    # FIXED: Changed st.help() to st.markdown()
+    st.markdown("Full report of all company expenses, filterable by date and category.")
     
     categories_df = get_all_categories()
     category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
@@ -1015,7 +1019,8 @@ def page_reporting():
     st.divider()
 
     st.header("Expense Category Sheet")
-    st.help("Downloads a simple list of all defined expense categories.")
+    # FIXED: Changed st.help() to st.markdown()
+    st.markdown("Downloads a simple list of all defined expense categories.")
     
     if st.button("Generate Category Sheet (PDF)"):
         try:
@@ -1109,7 +1114,8 @@ def page_data_import():
 
     with tab3:
         st.subheader("1. Download Expense Template")
-        st.help("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
+        # FIXED: Changed st.help() to st.markdown()
+        st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
         cols = ["expense_date", "description", "amount", "category_name", "employee_name"]
         excel_data, file_name = generate_excel_template(cols, "expense_import_template.xlsx")
         st.download_button(
@@ -1178,7 +1184,8 @@ def page_data_import():
 
     with tab4:
         st.subheader("1. Download Ledger Template")
-        st.help("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
+        # FIXED: Changed st.help() to st.markdown()
+        st.markdown("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
         cols = ["employee_name", "entry_date", "description", "debit", "credit"]
         excel_data, file_name = generate_excel_template(cols, "ledger_import_template.xlsx")
         st.download_button(
