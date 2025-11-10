@@ -1037,7 +1037,7 @@ def page_data_import():
     st.info("Use this page to import your old employee data from an Excel file.")
 
     st.subheader("1. Download Excel Template")
-        st.markdown("Download the template, fill it out, and upload it in step 2.")
+    st.markdown("Download the template, fill it out, and upload it in step 2.")
     
     # Create template DataFrame
     template_df = pd.DataFrame(columns=[
