@@ -35,7 +35,8 @@ class PDF(FPDF):
         
         # --- Signature Lines ---
         footer_width = self.w - self.l_margin - self.r_margin
-        self.cell(footer_width / 2, 10, "Prepared by: _______________", 0, 0, 'L')
+        # --- MODIFIED: Added computerized signature ---
+        self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
         self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
         self.ln(10)
 
@@ -257,6 +258,34 @@ def get_all_categories():
     conn = get_db_connection()
     return pd.read_sql_query("SELECT * FROM expense_categories ORDER BY name", conn)
 
+# --- NEW: Helper for Dashboard Stats ---
+@st.cache_data(ttl=60)
+def get_dashboard_stats():
+    """Fetches key stats for the dashboard."""
+    conn = get_db_connection()
+    
+    # 1. Total Employees
+    emp_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM employees", conn)
+    emp_count = emp_count_df['count'].iloc[0] if not emp_count_df.empty else 0
+    
+    # 2. Total Expenses (Current Month)
+    today = date.today()
+    first_day_month = today.replace(day=1)
+    last_day_month = (first_day_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    
+    exp_total_df = pd.read_sql_query(
+        "SELECT SUM(amount) as total FROM company_expenses WHERE expense_date BETWEEN ? AND ?",
+        conn,
+        params=(str(first_day_month), str(last_day_month))
+    )
+    exp_total = exp_total_df['total'].iloc[0] if not exp_total_df.empty and exp_total_df['total'].iloc[0] else 0.0
+    
+    # 3. Total Categories
+    cat_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM expense_categories", conn)
+    cat_count = cat_count_df['count'].iloc[0] if not cat_count_df.empty else 0
+    
+    return emp_count, exp_total, cat_count
+
 def clear_cache():
     st.cache_data.clear()
 
@@ -275,6 +304,20 @@ def generate_excel_template(columns, file_name):
 # --- Main App Pages ---
 def page_dashboard():
     st.title(f"Welcome to {COMPANY_NAME} HR & Expense Manager")
+    
+    # --- NEW: Dashboard Stats ---
+    try:
+        emp_count, exp_total, cat_count = get_dashboard_stats()
+        
+        st.subheader("At-a-Glance (Current Month)")
+        cols = st.columns(3)
+        cols[0].metric("Total Employees", f"{emp_count}")
+        cols[1].metric("Expenses (This Month)", f"Rs. {exp_total:,.2f}")
+        cols[2].metric("Expense Categories", f"{cat_count}")
+    
+    except Exception as e:
+        st.warning(f"Could not load dashboard stats: {e}")
+    
     st.info("""
     Use the navigation menu on the left to manage your company's data:
     - **Dashboard**: This page.
@@ -285,7 +328,7 @@ def page_dashboard():
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
-    st.image("https.placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
+    st.image("https://placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
 
 def page_employee_management():
     st.title("Employee Management")
@@ -861,6 +904,24 @@ def page_employee_ledger():
         if start_date > end_date:
             st.error("Start Date cannot be after End Date.")
             return
+
+        # --- NEW: Get All-Time Balance ---
+        try:
+            conn = get_db_connection()
+            all_time_df = pd.read_sql_query(
+                "SELECT (COALESCE(SUM(credit), 0) - COALESCE(SUM(debit), 0)) as balance FROM employee_ledger WHERE employee_id = ?",
+                conn,
+                params=(selected_emp_id,)
+            )
+            all_time_balance = all_time_df['balance'].iloc[0] if not all_time_df.empty else 0
+            st.metric(label=f"All-Time Balance for {employee_list[selected_emp_id]}", value=f"Rs. {all_time_balance:,.2f}")
+        
+        except Exception as e:
+            st.error(f"Error fetching all-time balance: {e}")
+        
+        st.divider()
+        st.subheader(f"Ledger History (for date range)")
+        # --- END NEW ---
 
         try:
             conn = get_db_connection()
