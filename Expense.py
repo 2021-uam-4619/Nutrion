@@ -10,7 +10,7 @@ COMPANY_NAME = "Nutrion"
 DEVELOPER_NAME = "DataNex Solution"
 DEVELOPER_CONTACT = "+92320 7429422"
 # You can host a logo online (e.g., on imgur) and paste the link here
-COMPANY_LOGO_URL = "logo.png" 
+COMPANY_LOGO_URL = "https://placehold.co/100x100/png?text=Nutrion" 
 
 # --- Database Setup ---
 DB_NAME = 'nutrion_app.db'
@@ -115,13 +115,26 @@ class PDF(FPDF):
         self.ln(5)
 
     def footer(self):
-        self.set_y(-15)
+        self.set_y(-25) # Position 2.5 cm from bottom
+        self.set_font('Arial', '', 10)
+        
+        # Add signature lines
+        page_width = self.w - 2 * self.l_margin
+        line_width = page_width / 2.5 # Adjust as needed
+        
+        self.cell(line_width, 7, "Prepared by: _______________", 0, 0, 'L')
+        self.cell(page_width - line_width, 7, "Approved by: _______________", 0, 1, 'R')
+        
+        self.set_y(-15) # Position 1.5 cm from bottom
         self.set_font('Arial', 'I', 8)
         self.cell(0, 5, f'Page {self.page_no()}', 0, 0, 'C')
         self.cell(0, 5, f'Developed by {DEVELOPER_NAME} ({DEVELOPER_CONTACT})', 0, 1, 'R')
 
-    def create_table_from_df(self, df):
-        """Creates a table in the PDF from a Pandas DataFrame."""
+    def create_table_from_df(self, df, totals_cols=None):
+        """
+        Creates a table in the PDF from a Pandas DataFrame.
+        Optionally adds a "GRAND TOTAL" row.
+        """
         if df.empty:
             self.cell(0, 10, "No data available for the selected criteria.", 0, 1, 'C')
             return
@@ -144,13 +157,50 @@ class PDF(FPDF):
         self.set_font('Arial', '', 9)
         self.set_fill_color(245, 245, 245) # Light gray for alternating rows
         fill = False
+        
+        # Initialize totals
+        totals = {col: 0 for col in df.columns if totals_cols and col.lower() in [tc.lower() for tc in totals_cols]}
+
         for index, row in df.iterrows():
             for i, col in enumerate(df.columns):
-                self.cell(col_widths[i], 10, str(row[col]), 1, 0, 'L', fill=fill)
+                cell_value = str(row[col])
+                self.cell(col_widths[i], 10, cell_value, 1, 0, 'L', fill=fill)
+                
+                # Update totals
+                if col in totals:
+                    try:
+                        totals[col] += pd.to_numeric(row[col])
+                    except:
+                        pass # Ignore if value is not numeric
             self.ln()
             fill = not fill
+            
+        # Add totals row
+        if totals_cols and totals:
+            self.set_font('Arial', 'B', 10)
+            self.set_fill_color(210, 210, 210) # Gray for total row
+            
+            # Find first non-total column to put "GRAND TOTAL"
+            first_col_index = -1
+            for i, col in enumerate(df.columns):
+                 if col not in totals:
+                     first_col_index = i
+                     self.cell(col_widths[i], 10, "GRAND TOTAL", 1, 0, 'R', fill=True)
+                     break
+            
+            # Print other cells
+            for i, col in enumerate(df.columns):
+                if i == first_col_index:
+                    continue
+                
+                if col in totals:
+                    self.cell(col_widths[i], 10, f"{totals[col]:,.2f}", 1, 0, 'L', fill=True)
+                else:
+                    self.cell(col_widths[i], 10, "", 1, 0, 'L', fill=True)
+            self.ln()
 
-def generate_pdf_report(df, title, date_range=None, orientation='L'):
+
+def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
     """Generates a PDF report from a DataFrame."""
     pdf = PDF(orientation=orientation, unit='mm', format='A4')
     pdf.report_title = title
@@ -159,7 +209,7 @@ def generate_pdf_report(df, title, date_range=None, orientation='L'):
         pdf.date_range_str = f"For period: {date_range[0]} to {date_range[1]}"
         
     pdf.add_page()
-    pdf.create_table_from_df(df)
+    pdf.create_table_from_df(df, totals_cols=totals_cols)
     
     # Return PDF as bytes
     return pdf.output(dest='S').encode('latin-1')
@@ -181,7 +231,14 @@ def get_all_categories():
 
 # --- Page: Dashboard (New) ---
 def page_dashboard():
-    st.header("Dashboard")
+    st.header(f"Welcome to {COMPANY_NAME} Dashboard")
+    st.info("""
+    **How to use this system:**
+    - **Navigation:** Use the menu on the left to move between pages.
+    - **Data Entry:** Use forms (like "Log New Expense") to add new data.
+    - **Edit/Delete:** Use `st.data_editor` tables (on Employee and Category pages) or selection forms (on Expense page) to manage existing data.
+    - **Reports:** Download professional PDF reports from the 'Reporting', 'Salary', and 'Ledger' pages.
+    """)
     
     with get_db_connection() as conn:
         total_employees = conn.execute("SELECT COUNT(*) FROM employees").fetchone()[0]
@@ -238,6 +295,7 @@ def page_dashboard():
 # --- Page: Employee Management (Requirement 4) ---
 def page_employee_management():
     st.header("Employee Management")
+    st.info("Add, edit, or remove employee records. All data is saved automatically.")
     
     with st.expander("Add New Employee"):
         with st.form("new_employee_form", clear_on_submit=True):
@@ -384,6 +442,7 @@ def page_expense_management():
                     df_categories.reset_index(), # Show ID in PDF
                     title="Expense Category List",
                     orientation='P'
+                    # No totals_cols needed here
                 )
                 st.download_button(
                     label="Download Category List as PDF (Req 10)",
@@ -591,6 +650,12 @@ def page_expense_management():
 # --- Page: Salary Management (Requirement 2) ---
 def page_salary_management():
     st.header("Salary Management")
+    st.help("""
+    Follow these steps to process monthly salaries:
+    1.  **Generate Monthly Salary Credits:** Run this first. It adds the 'Base Salary' as a credit to each employee's ledger for the month.
+    2.  **View & Download Salary Sheet:** After credits are generated (and any deductions are logged), run this to see the final salary calculation for all employees and download the official PDF sheet.
+    3.  **Generate Individual Salary Slip:** Use this to get a detailed PDF slip for a single employee.
+    """)
 
     st.subheader("1. Generate Monthly Salary Credits")
     st.info("This adds a 'Credit' entry (Base Salary) to each employee's ledger for the selected month. Run this first.")
@@ -674,7 +739,8 @@ def page_salary_management():
             # Download PDF (Req 2)
             pdf_bytes = generate_pdf_report(
                 df_salary_sheet, 
-                title=f"Salary Sheet - {salary_month_sheet.strftime('%B %Y')}"
+                title=f"Salary Sheet - {salary_month_sheet.strftime('%B %Y')}",
+                totals_cols=['Base Salary', 'Total Credits', 'Total Deductions', 'Net Salary']
             )
             st.download_button(
                 label="Download Salary Sheet as PDF",
@@ -745,20 +811,20 @@ def page_salary_management():
             
             pdf.set_font('Arial', 'B', 12)
             pdf.cell(0, 10, "Salary Summary", 0, 1)
-            pdf.create_table_from_df(df_summary)
+            pdf.create_table_from_df(df_summary, totals_cols=['Amount'])
             pdf.ln(10)
             
             cols = st.columns(2)
             if not df_credits.empty:
                 pdf.set_font('Arial', 'B', 12)
                 pdf.cell(0, 10, "Credits / Earnings", 0, 1)
-                pdf.create_table_from_df(df_credits)
+                pdf.create_table_from_df(df_credits, totals_cols=['credit'])
                 pdf.ln(5)
             
             if not df_deductions.empty:
                 pdf.set_font('Arial', 'B', 12)
                 pdf.cell(0, 10, "Debits / Deductions", 0, 1)
-                pdf.create_table_from_df(df_deductions)
+                pdf.create_table_from_df(df_deductions, totals_cols=['debit'])
 
             pdf_bytes = pdf.output(dest='S').encode('latin-1')
             
@@ -842,9 +908,10 @@ def page_employee_ledger():
                     
                     # Download PDF (Req 5)
                     pdf_bytes = generate_pdf_report(
-                        df_final_ledger,
+                        df_final_ledger.rename(columns={'entry_date':'Date', 'description':'Description', 'credit':'Credit', 'debit':'Debit', 'balance':'Balance'}),
                         title=f"Ledger for {employee_list[emp_id]}",
-                        date_range=(start_date_str, end_date_str)
+                        date_range=(start_date_str, end_date_str),
+                        totals_cols=['Credit', 'Debit'] # Use renamed columns
                     )
                     
                     st.download_button(
@@ -944,9 +1011,10 @@ def page_reporting():
                 return
 
             pdf_bytes = generate_pdf_report(
-                df_expense_report,
+                df_expense_report.rename(columns={'expense_date':'Date', 'category':'Category', 'description':'Description', 'amount':'Amount', 'employee_deducted':'Employee'}),
                 title="Company Expense Report",
-                date_range=(exp_start_date, exp_end_date)
+                date_range=(exp_start_date, exp_end_date),
+                totals_cols=['Amount'] # Use renamed column
             )
             
             st.download_button(
@@ -969,7 +1037,7 @@ def page_data_import():
     st.info("Use this page to import your old employee data from an Excel file.")
 
     st.subheader("1. Download Excel Template")
-    st.markdown("Download the template, fill it out, and upload it in step 2.")
+        st.markdown("Download the template, fill it out, and upload it in step 2.")
     
     # Create template DataFrame
     template_df = pd.DataFrame(columns=[
@@ -1016,7 +1084,7 @@ def page_data_import():
                         st.error(f"Error during import: {e}")
                         
         except Exception as e:
-            st.error(f"Error reading file: {e}")
+                        st.error(f"Error reading file: {e}")
 
 # --- Main Application ---
 def main():
