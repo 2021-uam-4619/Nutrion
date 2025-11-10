@@ -9,5 +9,6 @@ reportlab
 fpdf
 plotly
 xlsxwriter
+DatabaseManager
 
 
