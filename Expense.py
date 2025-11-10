@@ -10,7 +10,7 @@ COMPANY_NAME = "Nutrion"
 DEVELOPER_NAME = "DataNex Solution"
 DEVELOPER_CONTACT = "+92320 7429422"
 # You can host a logo online (e.g., on imgur) and paste the link here
-COMPANY_LOGO_URL = "https://placehold.co/100x100/png?text=Nutrion" 
+COMPANY_LOGO_URL = "logo.png" 
 
 # --- Database Setup ---
 DB_NAME = 'nutrion_app.db'
