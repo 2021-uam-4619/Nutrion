@@ -215,6 +215,17 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     return pdf.output(dest='S').encode('latin-1')
 
 # --- Helper Functions ---
+
+# NEW/REFACTORED HELPER
+@st.cache_data
+def create_excel_template(df, sheet_name='Sheet1'):
+    """Creates an in-memory Excel file from a DataFrame."""
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name=sheet_name)
+    return output.getvalue()
+
+
 @st.cache_data(ttl=600) # Cache for 10 minutes
 def get_all_employees():
     """Fetches all employees for dropdowns."""
@@ -1034,57 +1045,206 @@ def page_reporting():
 # --- Page: Data Import (Requirement 7) ---
 def page_data_import():
     st.header("Data Import")
-    st.info("Use this page to import your old employee data from an Excel file.")
+    st.info("Use this page to import your old data from Excel files. Please import in order: **1. Categories**, **2. Employees**, then **3. Expenses/Ledgers**.")
 
-    st.subheader("1. Download Excel Template")
-    st.markdown("Download the template, fill it out, and upload it in step 2.")
-    
-    # Create template DataFrame
-    template_df = pd.DataFrame(columns=[
+    # --- Create Template DataFrames ---
+    template_employees_df = pd.DataFrame(columns=[
         "name", "designation", "salary", "account_no", "account_title", "bank"
     ])
     
-    # Convert to Excel in-memory
-    @st.cache_data
-    def get_template_excel():
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            template_df.to_excel(writer, index=False, sheet_name='Employees')
-        return output.getvalue()
-
-    st.download_button(
-        label="Download Employee Template (.xlsx)",
-        data=get_template_excel(),
-        file_name="employee_import_template.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-    st.subheader("2. Upload Completed Template")
-    uploaded_file = st.file_uploader("Choose an Excel file", type=["xlsx", "xls"])
+    template_categories_df = pd.DataFrame(columns=[
+        "name" # Simple, just the category name
+    ])
     
-    if uploaded_file is not None:
-        try:
-            df_import = pd.read_excel(uploaded_file, dtype=str) # Import all as string to avoid type issues
-            df_import['salary'] = pd.to_numeric(df_import['salary'], errors='coerce').fillna(0)
-            
-            st.dataframe(df_import)
-            
-            # Validate columns
-            if list(df_import.columns) != list(template_df.columns):
-                st.error("File columns do not match the template. Please download and use the provided template.")
-            else:
-                if st.button("Import Data"):
-                    try:
-                        with get_db_connection() as conn:
-                            # Use to_sql for bulk insert
-                            df_import.to_sql('employees', conn, if_exists='append', index=False)
-                        st.success(f"Successfully imported {len(df_import)} employee records.")
-                        st.cache_data.clear()
-                    except Exception as e:
-                        st.error(f"Error during import: {e}")
-                        
-        except Exception as e:
-                        st.error(f"Error reading file: {e}")
+    template_expenses_df = pd.DataFrame(columns=[
+        "expense_date (YYYY-MM-DD)", 
+        "category_name", # Will be mapped to category_id
+        "description", 
+        "amount", 
+        "employee_name (optional)" # Will be mapped to employee_id
+    ])
+    
+    template_ledger_df = pd.DataFrame(columns=[
+        "entry_date (YYYY-MM-DD)",
+        "employee_name", # Will be mapped to employee_id
+        "description",
+        "credit",
+        "debit"
+    ])
+
+    tab1, tab2, tab3, tab4 = st.tabs(["Import Employees", "Import Expense Categories", "Import Company Expenses", "Import Ledger Entries"])
+
+    # --- TAB 1: EMPLOYEES ---
+    with tab1:
+        st.subheader("1. Download Employee Template")
+        st.markdown("Download the template, fill it out, and upload it below.")
+        st.download_button(
+            label="Download Employee Template (.xlsx)",
+            data=create_excel_template(template_employees_df, 'Employees'),
+            file_name="employee_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.subheader("2. Upload Employee Template")
+        uploaded_file_emp = st.file_uploader("Choose an Employee file", type=["xlsx", "xls"], key="emp_uploader")
+        
+        if uploaded_file_emp is not None:
+            try:
+                df_import = pd.read_excel(uploaded_file_emp, dtype=str) # Import all as string
+                df_import['salary'] = pd.to_numeric(df_import['salary'], errors='coerce').fillna(0)
+                
+                st.dataframe(df_import)
+                
+                if list(df_import.columns) != list(template_employees_df.columns):
+                    st.error("File columns do not match the template.")
+                else:
+                    if st.button("Import Employees"):
+                        try:
+                            with get_db_connection() as conn:
+                                df_import.to_sql('employees', conn, if_exists='append', index=False)
+                            st.success(f"Successfully imported {len(df_import)} employee records.")
+                            st.cache_data.clear() # Clear employee cache
+                        except Exception as e:
+                            st.error(f"Error during import: {e}")
+                            
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+    # --- TAB 2: EXPENSE CATEGORIES ---
+    with tab2:
+        st.subheader("1. Download Category Template")
+        st.download_button(
+            label="Download Expense Category Template (.xlsx)",
+            data=create_excel_template(template_categories_df, 'Categories'),
+            file_name="category_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.subheader("2. Upload Category Template")
+        uploaded_file_cat = st.file_uploader("Choose a Category file", type=["xlsx", "xls"], key="cat_uploader")
+        
+        if uploaded_file_cat is not None:
+            try:
+                df_import_cat = pd.read_excel(uploaded_file_cat)
+                
+                st.dataframe(df_import_cat)
+                
+                if list(df_import_cat.columns) != list(template_categories_df.columns):
+                    st.error("File columns do not match the template.")
+                else:
+                    if st.button("Import Categories"):
+                        try:
+                            with get_db_connection() as conn:
+                                # Use to_sql, database UNIQUE constraint will handle duplicates
+                                df_import_cat.to_sql('expense_categories', conn, if_exists='append', index=False)
+                            st.success(f"Successfully imported {len(df_import_cat)} categories. Duplicates were ignored.")
+                            st.cache_data.clear() # Clear category cache
+                        except Exception as e:
+                            st.error(f"Error during import: {e}")
+                            
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+    # --- TAB 3: COMPANY EXPENSES ---
+    with tab3:
+        st.warning("Please make sure all Employees and Categories are imported *before* importing expenses.")
+        st.subheader("1. Download Expense Template")
+        st.download_button(
+            label="Download Company Expense Template (.xlsx)",
+            data=create_excel_template(template_expenses_df, 'Expenses'),
+            file_name="expense_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.subheader("2. Upload Expense Template")
+        uploaded_file_exp = st.file_uploader("Choose an Expense file", type=["xlsx", "xls"], key="exp_uploader")
+        
+        if uploaded_file_exp is not None:
+            try:
+                # Get mapping tables
+                emp_df = get_all_employees()
+                cat_df = get_all_categories()
+                emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
+                cat_map = {row['name']: row['id'] for _, row in cat_df.iterrows()}
+
+                df_import_exp = pd.read_excel(uploaded_file_exp)
+                
+                # Process data
+                df_import_exp['category_id'] = df_import_exp['category_name'].map(cat_map)
+                df_import_exp['employee_id'] = df_import_exp['employee_name (optional)'].map(emp_map)
+                
+                # Clean numeric and date cols
+                df_import_exp['amount'] = pd.to_numeric(df_import_exp['amount'], errors='coerce').fillna(0)
+                df_import_exp['expense_date'] = pd.to_datetime(df_import_exp['expense_date (YYYY-MM-DD)']).dt.date
+                
+                st.dataframe(df_import_exp)
+                
+                # Check for errors
+                failed_cats = df_import_exp[df_import_exp['category_id'].isna()]['category_name'].unique()
+                if len(failed_cats) > 0:
+                    st.error(f"Error: The following categories were not found: {', '.join(failed_cats)}. Please add them first.")
+                else:
+                    if st.button("Import Company Expenses"):
+                        df_to_insert = df_import_exp[['expense_date', 'category_id', 'description', 'amount', 'employee_id']]
+                        try:
+                            with get_db_connection() as conn:
+                                df_to_insert.to_sql('company_expenses', conn, if_exists='append', index=False)
+                            st.success(f"Successfully imported {len(df_to_insert)} expenses.")
+                        except Exception as e:
+                            st.error(f"Error during import: {e}")
+
+            except Exception as e:
+                st.error(f"Error reading file or processing data: {e}")
+
+    # --- TAB 4: EMPLOYEE LEDGER ENTRIES ---
+    with tab4:
+        st.warning("Please make sure all Employees are imported *before* importing ledger entries.")
+        st.subheader("1. Download Ledger Template")
+        st.download_button(
+            label="Download Employee Ledger Template (.xlsx)",
+            data=create_excel_template(template_ledger_df, 'Ledger'),
+            file_name="ledger_import_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+        st.subheader("2. Upload Ledger Template")
+        uploaded_file_led = st.file_uploader("Choose a Ledger file", type=["xlsx", "xls"], key="led_uploader")
+        
+        if uploaded_file_led is not None:
+            try:
+                # Get mapping tables
+                emp_df = get_all_employees()
+                emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
+
+                df_import_led = pd.read_excel(uploaded_file_led)
+                
+                # Process data
+                df_import_led['employee_id'] = df_import_led['employee_name'].map(emp_map)
+                
+                # Clean numeric and date cols
+                df_import_led['credit'] = pd.to_numeric(df_import_led['credit'], errors='coerce').fillna(0)
+                df_import_led['debit'] = pd.to_numeric(df_import_led['debit'], errors='coerce').fillna(0)
+                df_import_led['entry_date'] = pd.to_datetime(df_import_led['entry_date (YYYY-MM-DD)']).dt.date
+                
+                st.dataframe(df_import_led)
+                
+                # Check for errors
+                failed_emps = df_import_led[df_import_led['employee_id'].isna()]['employee_name'].unique()
+                if len(failed_emps) > 0:
+                    st.error(f"Error: The following employees were not found: {', '.join(failed_emps)}. Please add them first.")
+                else:
+                    if st.button("Import Ledger Entries"):
+                        df_to_insert = df_import_led[['entry_date', 'employee_id', 'description', 'credit', 'debit']]
+                        try:
+                            with get_db_connection() as conn:
+                                df_to_insert.to_sql('employee_ledger', conn, if_exists='append', index=False)
+                            st.success(f"Successfully imported {len(df_to_insert)} ledger entries.")
+                        except Exception as e:
+                            st.error(f"Error during import: {e}")
+
+            except Exception as e:
+                st.error(f"Error reading file or processing data: {e}")
+
 
 # --- Main Application ---
 def main():
