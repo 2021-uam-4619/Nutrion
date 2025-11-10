@@ -58,19 +58,53 @@ class PDF(FPDF):
         self.set_fill_color(224, 235, 255)
         
         num_cols = len(df.columns)
-        total_width = self.w - self.l_margin - self.r_margin
-        col_width = total_width / num_cols
+        total_width = self.w - self.l_margin - self.r_margin - 10  # Reduced width for safety
         
-        for col in df.columns:
-            self.cell(col_width, 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+        # Calculate dynamic column widths based on content
+        col_widths = self.calculate_column_widths(df, total_width, num_cols)
+        
+        # Draw header
+        x_position = self.get_x()
+        for i, col in enumerate(df.columns):
+            self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
+        # Draw rows
         self.set_font('Arial', '', 8)
         self.set_fill_color(255)
         fill = False
+        
         for index, row in df.iterrows():
-            for col in df.columns:
+            max_height = 6  # Minimum row height
+            line_heights = []
+            
+            # Calculate required height for each cell in this row
+            for i, col in enumerate(df.columns):
                 cell_text = str(row[col])
+                if pd.api.types.is_numeric_dtype(df[col]):
+                    try:
+                        cell_value = row[col]
+                        if pd.isna(cell_value):
+                            cell_text = "N/A"
+                        else:
+                            cell_text = f"{float(cell_value):,.2f}"
+                    except (ValueError, TypeError):
+                        pass
+                
+                # Calculate text height for this cell
+                lines = self.wrap_text(cell_text, col_widths[i] - 1)
+                line_heights.append(len(lines) * 6)
+            
+            # Use the maximum height for this row
+            row_height = max(line_heights) if line_heights else 6
+            max_height = max(max_height, row_height)
+            
+            # Draw each cell
+            x_position = self.get_x()
+            for i, col in enumerate(df.columns):
+                cell_text = str(row[col])
+                align = 'L'
+                
                 if pd.api.types.is_numeric_dtype(df[col]):
                     try:
                         cell_value = row[col]
@@ -80,30 +114,193 @@ class PDF(FPDF):
                         else:
                             cell_text = f"{float(cell_value):,.2f}"
                             align = 'R'
-                        self.cell(col_width, 6, cell_text, 'LR', 0, align, fill)
                     except (ValueError, TypeError):
-                        self.cell(col_width, 6, cell_text, 'LR', 0, 'L', fill)
-                else:
-                    self.cell(col_width, 6, cell_text, 'LR', 0, 'L', fill)
-            self.ln()
+                        align = 'L'
+                
+                # Wrap text and draw cell
+                self.set_xy(x_position, self.get_y())
+                lines = self.wrap_text(cell_text, col_widths[i] - 1)
+                
+                # Draw cell background
+                self.set_fill_color(240, 240, 240) if fill else self.set_fill_color(255)
+                self.cell(col_widths[i], max_height, '', 1, 0, 'L', 1)
+                
+                # Draw text
+                self.set_xy(x_position + 1, self.get_y())
+                text_y = self.get_y()
+                for j, line in enumerate(lines):
+                    self.set_xy(x_position + 1, text_y + (j * 6))
+                    self.cell(col_widths[i] - 2, 6, line, 0, 0, align)
+                
+                x_position += col_widths[i]
+            
+            self.ln(max_height)
             fill = not fill
         
-        self.cell(total_width, 0, '', 'T', 1)
-        
+        # Totals row
         if totals_cols:
             self.set_font('Arial', 'B', 9)
             self.set_fill_color(240, 240, 240)
-            grand_total = 0.0
+            x_position = self.get_x()
             
             for i, col in enumerate(df.columns):
                 if i == 0:
-                    self.cell(col_width, 7, "GRAND TOTAL", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_width, 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
-                    self.cell(col_width, 7, "", 1, 0, 'C', 1)
+                    self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
             self.ln()
+
+    def calculate_column_widths(self, df, total_width, num_cols):
+        """Calculate dynamic column widths based on content"""
+        # Minimum widths for better readability
+        min_width = 15
+        max_width = total_width / 2
+        
+        # Estimate content width for each column
+        col_widths = []
+        for col in df.columns:
+            # Header width
+            header_width = len(str(col).replace('_', ' ').title()) * 2.5
+            
+            # Content width estimation
+            content_samples = df[col].astype(str).str[:30]  # Sample first 30 chars
+            max_content_len = content_samples.str.len().max()
+            content_width = max_content_len * 1.8
+            
+            # Use the maximum of header and content width
+            col_width = max(header_width, content_width, min_width)
+            col_width = min(col_width, max_width)
+            col_widths.append(col_width)
+        
+        # Normalize to fit total width
+        total_current_width = sum(col_widths)
+        if total_current_width > total_width:
+            # Scale down proportionally
+            scale_factor = total_width / total_current_width
+            col_widths = [max(min_width, w * scale_factor) for w in col_widths]
+        else:
+            # Distribute extra space
+            extra_space = total_width - total_current_width
+            if extra_space > 0:
+                col_widths = [w + (extra_space / num_cols) for w in col_widths]
+        
+        return col_widths
+
+    def wrap_text(self, text, max_width):
+        """Wrap text to fit within specified width"""
+        if not text:
+            return ['']
+        
+        words = str(text).split(' ')
+        lines = []
+        current_line = []
+        
+        for word in words:
+            test_line = ' '.join(current_line + [word])
+            if self.get_string_width(test_line) < max_width:
+                current_line.append(word)
+            else:
+                if current_line:
+                    lines.append(' '.join(current_line))
+                current_line = [word] if self.get_string_width(word) < max_width else [word[:int(max_width/2)] + '...']
+        
+        if current_line:
+            lines.append(' '.join(current_line))
+        
+        # If still too long, truncate
+        final_lines = []
+        for line in lines:
+            while line and self.get_string_width(line) > max_width:
+                line = line[:-1]
+            final_lines.append(line if line else '')
+        
+        return final_lines if final_lines else ['']
+
+def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
+    pdf = PDF(orientation='P', unit='mm', format='A4')
+    pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
+    pdf.date_range_str = ""
+    pdf.add_page()
+    
+    # Employee details section with better spacing
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 12, f"Employee: {emp_details['name']}", 0, 1, 'L')
+    pdf.set_font('Arial', '', 11)
+    pdf.cell(0, 8, f"Designation: {emp_details['designation']}", 0, 1, 'L')
+    pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
+    pdf.ln(8)
+
+    # Earnings & Deductions table with improved layout
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(224, 235, 255)
+    pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
+    
+    # Calculate column widths for better fit
+    total_width = pdf.w - 2 * pdf.l_margin
+    desc_width = total_width * 0.6
+    amount_width = (total_width - desc_width) / 2
+    
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+    pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+    pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+
+    pdf.set_font('Arial', '', 9)
+    if ledger_df.empty:
+        pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
+    else:
+        for _, row in ledger_df.iterrows():
+            # Wrap description text
+            desc_text = str(row['description'])
+            desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
+            
+            credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
+            debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
+            
+            # Calculate row height based on description lines
+            row_height = max(8, len(desc_lines) * 8)
+            
+            # Draw description (multi-line if needed)
+            x = pdf.get_x()
+            y = pdf.get_y()
+            pdf.multi_cell(desc_width, 8, desc_text, 1, 'L')
+            
+            # Move to credit column position
+            pdf.set_xy(x + desc_width, y)
+            pdf.cell(amount_width, row_height, credit_text, 1, 0, 'R')
+            
+            # Move to debit column position
+            pdf.set_xy(x + desc_width + amount_width, y)
+            pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
+
+    # Totals row
+    pdf.set_font('Arial', 'B', 10)
+    pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
+    pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
+    pdf.cell(amount_width, 8, f"{total_debits:,.2f}", 1, 1, 'R')
+
+    pdf.ln(8)
+    
+    # Net Salary section with highlighted appearance
+    pdf.set_font('Arial', 'B', 14)
+    pdf.set_fill_color(210, 210, 210)
+    pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
+    pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
+    
+    pdf.ln(12)
+    
+    # Bank details section
+    pdf.set_font('Arial', 'B', 11)
+    pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
+    pdf.set_font('Arial', '', 10)
+    pdf.cell(0, 6, f"  Bank: {emp_details['bank']}", 0, 1, 'L')
+    pdf.cell(0, 6, f"  Account Title: {emp_details['account_title']}", 0, 1, 'L')
+    pdf.cell(0, 6, f"  Account No: {emp_details['account_no']}", 0, 1, 'L')
+
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- Database Setup ---
 @st.cache_resource
@@ -213,59 +410,6 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     else:
         pdf.add_table(df, totals_cols=totals_cols)
     
-    return pdf.output(dest='S').encode('latin-1')
-
-def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
-    pdf = PDF(orientation='P', unit='mm', format='A4')
-    pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
-    pdf.date_range_str = ""
-    pdf.add_page()
-    
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Employee: {emp_details['name']}", 0, 1, 'L')
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 7, f"Designation: {emp_details['designation']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
-    pdf.ln(5)
-
-    pdf.set_font('Arial', 'B', 11)
-    pdf.set_fill_color(224, 235, 255)
-    pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
-    
-    col_width = (pdf.w - 2 * pdf.l_margin) / 3
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(col_width * 4, 9, "Description", 1, 0, 'C')
-    pdf.cell(col_width * 0.75, 7, "Credits (Rs.)", 1, 0, 'C')
-    pdf.cell(col_width * 0.75, 7, "Debits (Rs.)", 1, 1, 'C')
-
-    pdf.set_font('Arial', '', 9)
-    if ledger_df.empty:
-        pdf.cell(0, 7, "No ledger activity found for this month.", 1, 1, 'C')
-    else:
-        for _, row in ledger_df.iterrows():
-            pdf.cell(col_width * 3, 7, str(row['description']), 1, 0, 'L')
-            pdf.cell(col_width * 0.75, 7, f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00", 1, 0, 'R')
-            pdf.cell(col_width * 0.75, 7, f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00", 1, 1, 'R')
-
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(col_width * 1.5, 7, "Total", 1, 0, 'R')
-    pdf.cell(col_width * 0.75, 7, f"{total_credits:,.2f}", 1, 0, 'R')
-    pdf.cell(col_width * 0.75, 7, f"{total_debits:,.2f}", 1, 1, 'R')
-
-    pdf.ln(5)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(210, 210, 210)
-    pdf.cell(col_width * 1.5, 10, "Net Salary Payable", 1, 0, 'R', fill=True)
-    pdf.cell(col_width * 1.5, 10, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
-    
-    pdf.ln(10)
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(0, 7, "Bank Details", 0, 1, 'L')
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 7, f"  Bank: {emp_details['bank']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"  Account Title: {emp_details['account_title']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"  Account No: {emp_details['account_no']}", 0, 1, 'L')
-
     return pdf.output(dest='S').encode('latin-1')
 
 # --- Helper Functions ---
@@ -382,9 +526,12 @@ def page_dashboard():
         
         st.subheader("At-a-Glance (Current Month)")
         cols = st.columns(3)
-        cols[0].metric("Total Employees", f"{emp_count}")
-        cols[1].metric("Expenses (This Month)", f"Rs. {exp_total:,.2f}")
-        cols[2].metric("Expense Categories", f"{cat_count}")
+        with cols[0]:
+            st.metric("Total Employees", f"{emp_count}")
+        with cols[1]:
+            st.metric("Expenses (This Month)", f"Rs. {exp_total:,.2f}")
+        with cols[2]:
+            st.metric("Expense Categories", f"{cat_count}")
     
     except Exception as e:
         st.warning(f"Could not load dashboard stats: {e}")
@@ -1510,7 +1657,44 @@ def page_data_import():
 
 # --- Main App ---
 def main():
-    st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide")
+    st.set_page_config(
+        page_title=f"{COMPANY_NAME} App", 
+        layout="wide",
+        page_icon="💰",
+        initial_sidebar_state="expanded"
+    )
+    
+    # Custom CSS for better UI
+    st.markdown("""
+    <style>
+    .main-header {
+        font-size: 2.5rem;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 1rem;
+        border-radius: 10px;
+        border-left: 5px solid #1f77b4;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border: 1px solid #c3e6cb;
+        border-radius: 5px;
+        padding: 1rem;
+        color: #155724;
+    }
+    .warning-box {
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        border-radius: 5px;
+        padding: 1rem;
+        color: #856404;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
     init_db()
 
@@ -1522,14 +1706,14 @@ def main():
         pass
         
     page_options = {
-        "Dashboard": page_dashboard,
-        "Employee Management": page_employee_management,
-        "Expense Management": page_expense_management,
-        "Employee Personal Expenses": page_employee_personal_expenses,
-        "Salary Management": page_salary_management,
-        "Employee Ledger": page_employee_ledger,
-        "Reporting": page_reporting,
-        "Data Import": page_data_import,
+        "📊 Dashboard": page_dashboard,
+        "👥 Employee Management": page_employee_management,
+        "💰 Expense Management": page_expense_management,
+        "💸 Employee Personal Expenses": page_employee_personal_expenses,
+        "💳 Salary Management": page_salary_management,
+        "📋 Employee Ledger": page_employee_ledger,
+        "📈 Reporting": page_reporting,
+        "📤 Data Import": page_data_import,
     }
     
     selected_page = st.sidebar.radio("Navigation", list(page_options.keys()))
