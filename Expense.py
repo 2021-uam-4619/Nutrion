@@ -117,6 +117,15 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
+    # Check if employees table has join_date column, if not, alter table
+    c.execute("PRAGMA table_info(employees)")
+    columns = [column[1] for column in c.fetchall()]
+    
+    if 'join_date' not in columns:
+        c.execute("ALTER TABLE employees ADD COLUMN join_date DATE")
+        st.info("Updated employees table with join_date column.")
+    
+    # Create tables if they don't exist with updated schema
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
