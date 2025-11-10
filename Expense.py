@@ -1027,6 +1027,7 @@ def page_employee_ledger():
             if show_all_time:
                 query = """
                     SELECT 
+                        id,
                         entry_date AS "Date",
                         description AS "Description",
                         credit AS "Credit",
@@ -1040,6 +1041,7 @@ def page_employee_ledger():
             else:
                 query = """
                     SELECT 
+                        id,
                         entry_date AS "Date",
                         description AS "Description",
                         credit AS "Credit",
@@ -1056,7 +1058,9 @@ def page_employee_ledger():
             balance_df = ledger_df.copy()
             balance_df['Balance'] = (balance_df['Credit'] - balance_df['Debit']).cumsum()
             
-            st.dataframe(balance_df, use_container_width=True)
+            # Display without the ID column
+            display_df = balance_df.drop('id', axis=1) if 'id' in balance_df.columns else balance_df
+            st.dataframe(display_df, use_container_width=True)
             
             final_balance = balance_df['Balance'].iloc[-1] if not balance_df.empty else 0
             if not show_all_time:
@@ -1064,7 +1068,7 @@ def page_employee_ledger():
 
             if st.button("Download Ledger (PDF)"):
                 pdf_bytes = generate_pdf_report(
-                    balance_df, 
+                    display_df, 
                     f"Ledger for {employee_list[selected_emp_id]}", 
                     date_range=date_range if not show_all_time else None,
                     orientation='P',
@@ -1080,6 +1084,120 @@ def page_employee_ledger():
 
         except Exception as e:
             st.error(f"Error fetching ledger: {e}")
+
+        st.divider()
+        
+        # --- NEW: Delete Ledger Entries Section ---
+        st.subheader("Manage Ledger Entries")
+        st.warning("""
+        **Warning:** Deleting ledger entries can affect salary calculations and accounting records. 
+        Only delete entries that were created by mistake.
+        """)
+        
+        try:
+            conn = get_db_connection()
+            
+            # Get ledger entries with IDs for deletion
+            if show_all_time:
+                delete_query = """
+                    SELECT 
+                        id,
+                        entry_date AS "Date",
+                        description AS "Description",
+                        credit AS "Credit",
+                        debit AS "Debit",
+                        related_expense_id
+                    FROM employee_ledger
+                    WHERE employee_id = ?
+                    ORDER BY entry_date DESC
+                """
+                delete_params = (selected_emp_id,)
+            else:
+                delete_query = """
+                    SELECT 
+                        id,
+                        entry_date AS "Date",
+                        description AS "Description",
+                        credit AS "Credit",
+                        debit AS "Debit",
+                        related_expense_id
+                    FROM employee_ledger
+                    WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
+                    ORDER BY entry_date DESC
+                """
+                delete_params = (selected_emp_id, str(start_date), str(end_date))
+            
+            delete_df = pd.read_sql_query(delete_query, conn, params=delete_params)
+            
+            if not delete_df.empty:
+                # Create a user-friendly display for selection
+                delete_df['Display'] = delete_df.apply(
+                    lambda row: f"ID: {row['id']} | {row['Date']} | {row['Description']} | Credit: {row['Credit']} | Debit: {row['Debit']}", 
+                    axis=1
+                )
+                
+                ledger_entries = delete_df['Display'].tolist()
+                ledger_ids = delete_df['id'].tolist()
+                related_expense_ids = delete_df['related_expense_id'].tolist()
+                
+                selected_entry = st.selectbox(
+                    "Select Ledger Entry to Delete",
+                    options=ledger_entries,
+                    key="delete_ledger_select"
+                )
+                
+                if selected_entry:
+                    # Find the selected entry details
+                    selected_index = ledger_entries.index(selected_entry)
+                    selected_id = ledger_ids[selected_index]
+                    selected_expense_id = related_expense_ids[selected_index]
+                    
+                    st.error(f"**Selected Entry:** {selected_entry}")
+                    
+                    # Show warning if this is linked to a company expense
+                    if pd.notna(selected_expense_id):
+                        st.warning("""
+                        ⚠️ **This ledger entry is linked to a company expense!**
+                        
+                        **Deleting this entry will:**
+                        - Remove the debit from employee's ledger
+                        - **BUT** the company expense will remain in the system
+                        - This may cause accounting inconsistencies
+                        
+                        **Recommended:** Delete the expense from the Expense Management page instead.
+                        """)
+                    
+                    col1, col2 = st.columns([1, 4])
+                    with col1:
+                        if st.button("🗑️ Delete Entry", type="secondary"):
+                            try:
+                                conn = get_db_connection()
+                                cursor = conn.cursor()
+                                
+                                # Delete the ledger entry
+                                cursor.execute(
+                                    "DELETE FROM employee_ledger WHERE id = ?",
+                                    (int(selected_id),)
+                                )
+                                
+                                conn.commit()
+                                st.success(f"Ledger entry ID {selected_id} deleted successfully!")
+                                clear_cache()
+                                st.rerun()
+                                
+                            except Exception as e:
+                                st.error(f"Error deleting ledger entry: {e}")
+                    
+                    with col2:
+                        if st.button("🔄 Refresh List"):
+                            clear_cache()
+                            st.rerun()
+            
+            else:
+                st.info("No ledger entries found to delete.")
+                
+        except Exception as e:
+            st.error(f"Error loading ledger entries for deletion: {e}")
 
 def page_reporting():
     st.title("Download Reports")
@@ -1201,6 +1319,10 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file)
+                # Fix date columns - convert to string
+                if 'join_date' in df.columns:
+                    df['join_date'] = pd.to_datetime(df['join_date']).dt.strftime('%Y-%m-%d')
+                
                 st.dataframe(df)
                 
                 if st.button("Import Employees"):
@@ -1266,6 +1388,11 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file)
+                
+                # FIX: Convert date columns to string format
+                if 'expense_date' in df.columns:
+                    df['expense_date'] = pd.to_datetime(df['expense_date']).dt.strftime('%Y-%m-%d')
+                
                 st.dataframe(df)
                 
                 if st.button("Import Expenses"):
@@ -1287,6 +1414,10 @@ def page_data_import():
                             if not cat_id:
                                 error_list.append(f"Category '{row['category_name']}' not found.")
                                 continue
+                            
+                            # Handle empty employee names
+                            if pd.isna(row['employee_name']) or row['employee_name'] == '':
+                                emp_id = None
                             
                             cursor.execute(
                                 """
@@ -1335,6 +1466,11 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file).fillna(0)
+                
+                # FIX: Convert date columns to string format
+                if 'entry_date' in df.columns:
+                    df['entry_date'] = pd.to_datetime(df['entry_date']).dt.strftime('%Y-%m-%d')
+                
                 st.dataframe(df)
 
                 if st.button("Import Ledger Entries"):
