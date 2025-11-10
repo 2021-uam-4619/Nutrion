@@ -1039,7 +1039,7 @@ def page_salary_management():
                 salary_df, 
                 f"Salary Sheet - {selected_month.strftime('%B %Y')}", 
                 date_range=(first_day, last_day),
-                orientation='L',
+                orientation='P',
                 totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"]
             )
             
