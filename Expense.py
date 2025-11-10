@@ -12,12 +12,13 @@ DB_FILE = "nutrion_app.db"
 COMPANY_NAME = "Nutrion"
 DEVELOPER_INFO = "Developed by DataNex Solution | +92320 7429422"
 
-# --- PDF Class with Header/Footer ---
+# --- Enhanced PDF Class with Better Page Management ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.report_title = "Report"
         self.date_range_str = ""
+        self.set_auto_page_break(auto=True, margin=40)  # Increased margin for footer
 
     def header(self):
         # Add company logo
@@ -35,7 +36,8 @@ class PDF(FPDF):
         self.ln(5)
 
     def footer(self):
-        self.set_y(-35)
+        # Position at 3.0 cm from bottom
+        self.set_y(-30)
         self.set_font('Arial', '', 10)
         
         footer_width = self.w - self.l_margin - self.r_margin
@@ -45,21 +47,30 @@ class PDF(FPDF):
             self.image('', self.l_margin, self.get_y(), 40)
             self.ln(15)
         except:
-            self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
+            # Prepared by section
+            self.cell(footer_width / 2, 8, "Prepared by: ___________________", 0, 0, 'L')
+            # Approved by section
+            self.cell(footer_width / 2, 8, "Approved by: _______________", 0, 1, 'R')
         
-        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
-        self.ln(10)
+        self.ln(5)
 
         self.set_font('Arial', 'I', 8)
-        self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
-        self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
+        self.cell(footer_width / 2, 8, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
+        self.cell(footer_width / 2, 8, DEVELOPER_INFO, 0, 0, 'R')
+
+    def check_page_break(self, height_needed):
+        """Check if we need a page break for the given height"""
+        if self.get_y() + height_needed > self.page_break_trigger:
+            self.add_page()
+            return True
+        return False
 
     def add_table(self, df, totals_cols=None):
         self.set_font('Arial', 'B', 9)
         self.set_fill_color(224, 235, 255)
         
         num_cols = len(df.columns)
-        total_width = self.w - self.l_margin - self.r_margin - 10  # Reduced width for safety
+        total_width = self.w - self.l_margin - self.r_margin - 10
         
         # Calculate dynamic column widths based on content
         col_widths = self.calculate_column_widths(df, total_width, num_cols)
@@ -99,6 +110,19 @@ class PDF(FPDF):
             # Use the maximum height for this row
             row_height = max(line_heights) if line_heights else 6
             max_height = max(max_height, row_height)
+            
+            # Check if we need a page break before drawing this row
+            if self.check_page_break(max_height + 5):
+                # Redraw header on new page
+                self.set_font('Arial', 'B', 9)
+                self.set_fill_color(224, 235, 255)
+                x_position = self.get_x()
+                for i, col in enumerate(df.columns):
+                    self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+                self.ln()
+                self.set_font('Arial', '', 8)
+                self.set_fill_color(255)
+                fill = False
             
             # Draw each cell
             x_position = self.get_x()
@@ -140,6 +164,16 @@ class PDF(FPDF):
         
         # Totals row
         if totals_cols:
+            # Check if we need a page break before totals
+            if self.check_page_break(10):
+                # Redraw header on new page
+                self.set_font('Arial', 'B', 9)
+                self.set_fill_color(224, 235, 255)
+                x_position = self.get_x()
+                for i, col in enumerate(df.columns):
+                    self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+                self.ln()
+            
             self.set_font('Arial', 'B', 9)
             self.set_fill_color(240, 240, 240)
             x_position = self.get_x()
@@ -251,6 +285,14 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
 
     pdf.set_font('Arial', '', 9)
     if ledger_df.empty:
+        # Check page break before adding content
+        if pdf.check_page_break(15):
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+            pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+            pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+            pdf.set_font('Arial', '', 9)
+        
         pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
     else:
         for _, row in ledger_df.iterrows():
@@ -263,6 +305,15 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             
             # Calculate row height based on description lines
             row_height = max(8, len(desc_lines) * 8)
+            
+            # Check page break before drawing row
+            if pdf.check_page_break(row_height + 5):
+                # Redraw header on new page
+                pdf.set_font('Arial', 'B', 10)
+                pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+                pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+                pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+                pdf.set_font('Arial', '', 9)
             
             # Draw description (multi-line if needed)
             x = pdf.get_x()
@@ -277,6 +328,13 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             pdf.set_xy(x + desc_width + amount_width, y)
             pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
 
+    # Check page break before totals
+    if pdf.check_page_break(15):
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+
     # Totals row
     pdf.set_font('Arial', 'B', 10)
     pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
@@ -285,6 +343,10 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
 
     pdf.ln(8)
     
+    # Check page break before net salary section
+    if pdf.check_page_break(20):
+        pdf.ln(5)
+    
     # Net Salary section with highlighted appearance
     pdf.set_font('Arial', 'B', 14)
     pdf.set_fill_color(210, 210, 210)
@@ -292,6 +354,10 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
     
     pdf.ln(12)
+    
+    # Check page break before bank details
+    if pdf.check_page_break(25):
+        pdf.ln(5)
     
     # Bank details section
     pdf.set_font('Arial', 'B', 11)
@@ -320,7 +386,6 @@ def init_db():
     
     if 'join_date' not in columns:
         c.execute("ALTER TABLE employees ADD COLUMN join_date DATE")
-        st.success("Updated employees table with join_date column.")
     
     # Check and update employee_ledger table
     c.execute("PRAGMA table_info(employee_ledger)")
@@ -328,7 +393,10 @@ def init_db():
     
     if 'related_expense_id' not in ledger_columns:
         c.execute("ALTER TABLE employee_ledger ADD COLUMN related_expense_id INTEGER")
-        st.success("Updated employee_ledger table with related_expense_id column.")
+    
+    # Check and add entry_type column if it doesn't exist
+    if 'entry_type' not in [col[1] for col in c.execute("PRAGMA table_info(employee_ledger)").fetchall()]:
+        c.execute("ALTER TABLE employee_ledger ADD COLUMN entry_type TEXT DEFAULT 'REGULAR'")
     
     # Create tables if they don't exist
     c.execute('''
@@ -373,7 +441,7 @@ def init_db():
             debit REAL DEFAULT 0,
             credit REAL DEFAULT 0,
             related_expense_id INTEGER,
-            entry_type TEXT DEFAULT 'REGULAR',  -- REGULAR, ADVANCE, SALARY, PAYMENT, EXPENSE
+            entry_type TEXT DEFAULT 'REGULAR',
             FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
             FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
@@ -401,7 +469,7 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     else:
         pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
         
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.set_auto_page_break(auto=True, margin=40)
     pdf.set_left_margin(10)
     pdf.set_right_margin(10)
     pdf.add_page()
@@ -414,12 +482,95 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     
     return pdf.output(dest='S').encode('latin-1')
 
+# --- Enhanced Ledger Summary PDF ---
+def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_range=None):
+    pdf = PDF(orientation='P', unit='mm', format='A4')
+    pdf.report_title = f"Employee Ledger Summary - {employee_name}"
+    
+    if date_range:
+        pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+    else:
+        pdf.date_range_str = "All Time Records"
+        
+    pdf.add_page()
+    
+    # Summary Section
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, "Ledger Summary", 0, 1, 'L')
+    pdf.ln(5)
+    
+    # Check page break before summary table
+    if pdf.check_page_break(50):
+        pdf.ln(5)
+    
+    # Summary table
+    pdf.set_font('Arial', 'B', 11)
+    pdf.set_fill_color(224, 235, 255)
+    pdf.cell(0, 8, "Category", 1, 0, 'L', 1)
+    pdf.cell(0, 8, "Amount (Rs.)", 1, 1, 'R', 1)
+    
+    pdf.set_font('Arial', '', 10)
+    categories = [
+        ("Total Expenses", summary_data['total_expenses']),
+        ("Total Advances", summary_data['total_advances']),
+        ("Total Salary", summary_data['total_salary']),
+        ("Total Payments", summary_data['total_payments']),
+        ("Total Credits", summary_data['total_credits']),
+        ("Total Debits", summary_data['total_debits'])
+    ]
+    
+    for category, amount in categories:
+        # Check page break before each row
+        if pdf.check_page_break(10):
+            pdf.set_font('Arial', 'B', 11)
+            pdf.set_fill_color(224, 235, 255)
+            pdf.cell(0, 8, "Category", 1, 0, 'L', 1)
+            pdf.cell(0, 8, "Amount (Rs.)", 1, 1, 'R', 1)
+            pdf.set_font('Arial', '', 10)
+        
+        pdf.cell(0, 8, category, 1, 0, 'L')
+        pdf.cell(0, 8, f"{amount:,.2f}", 1, 1, 'R')
+    
+    # Check page break before balance
+    if pdf.check_page_break(15):
+        pdf.ln(5)
+    
+    # Remaining Balance (highlighted)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(210, 210, 210)
+    balance_text = "Remaining Balance (Payable to Employee)" if summary_data['remaining_balance'] >= 0 else "Remaining Balance (Payable to Company)"
+    pdf.cell(0, 10, balance_text, 1, 0, 'L', 1)
+    pdf.cell(0, 10, f"Rs. {abs(summary_data['remaining_balance']):,.2f}", 1, 1, 'R', 1)
+    
+    pdf.ln(10)
+    
+    # Detailed Ledger
+    if not ledger_df.empty:
+        # Check page break before detailed section
+        if pdf.check_page_break(20):
+            pdf.ln(5)
+            
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, "Detailed Ledger Entries", 0, 1, 'L')
+        pdf.ln(5)
+        
+        # Prepare data for table
+        display_df = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
+        display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
+        
+        # Format amounts
+        display_df['Debit'] = display_df['Debit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
+        display_df['Credit'] = display_df['Credit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
+        
+        pdf.add_table(display_df)
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 # --- Helper Functions ---
 @st.cache_data(ttl=60)
 def get_all_employees():
     conn = get_db_connection()
     df = pd.read_sql_query("SELECT * FROM employees ORDER BY name", conn)
-    # Convert join_date to string for compatibility with data editor
     if 'join_date' in df.columns:
         df['join_date'] = df['join_date'].astype(str)
     return df
@@ -496,7 +647,6 @@ def add_employee_advance():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # Add advance to employee ledger with entry_type 'ADVANCE'
                     cursor.execute(
                         """
                         INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
@@ -543,7 +693,6 @@ def add_employee_payment():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # Add payment to employee ledger with entry_type 'PAYMENT'
                     cursor.execute(
                         """
                         INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
@@ -591,7 +740,6 @@ def add_employee_personal_expense():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # Add debit to employee ledger with entry_type 'EXPENSE'
                     cursor.execute(
                         """
                         INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
@@ -613,15 +761,39 @@ def get_employee_ledger_summary(employee_id, start_date=None, end_date=None):
     """Get comprehensive ledger summary for an employee"""
     conn = get_db_connection()
     
-    # Base query
-    query = """
-        SELECT 
-            entry_type,
-            SUM(debit) as total_debit,
-            SUM(credit) as total_credit
-        FROM employee_ledger 
-        WHERE employee_id = ?
-    """
+    # Check if entry_type column exists
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(employee_ledger)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'entry_type' not in columns:
+        # If entry_type doesn't exist, use description-based categorization
+        query = """
+            SELECT 
+                CASE 
+                    WHEN description LIKE 'Advance:%' THEN 'ADVANCE'
+                    WHEN description LIKE 'Payment:%' THEN 'PAYMENT' 
+                    WHEN description LIKE 'Personal Expense:%' THEN 'EXPENSE'
+                    WHEN description LIKE 'Company Expense:%' THEN 'EXPENSE'
+                    WHEN description LIKE 'Monthly Salary Credit%' THEN 'SALARY'
+                    ELSE 'REGULAR'
+                END as entry_type,
+                SUM(debit) as total_debit,
+                SUM(credit) as total_credit
+            FROM employee_ledger 
+            WHERE employee_id = ?
+        """
+    else:
+        # Use entry_type column if it exists
+        query = """
+            SELECT 
+                entry_type,
+                SUM(debit) as total_debit,
+                SUM(credit) as total_credit
+            FROM employee_ledger 
+            WHERE employee_id = ?
+        """
+    
     params = [employee_id]
     
     # Add date filter if provided
@@ -654,75 +826,64 @@ def get_employee_ledger_summary(employee_id, start_date=None, end_date=None):
         'remaining_balance': remaining_balance
     }
 
-# --- Enhanced PDF for Ledger Summary ---
-def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_range=None):
-    pdf = PDF(orientation='P', unit='mm', format='A4')
-    pdf.report_title = f"Employee Ledger Summary - {employee_name}"
+def get_employee_ledger_with_type(employee_id, start_date=None, end_date=None):
+    """Get employee ledger with entry_type handling"""
+    conn = get_db_connection()
     
-    if date_range:
-        pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+    # Check if entry_type column exists
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(employee_ledger)")
+    columns = [column[1] for column in cursor.fetchall()]
+    
+    if 'entry_type' not in columns:
+        # If entry_type doesn't exist, use description-based categorization
+        query = """
+            SELECT 
+                id,
+                entry_date AS "Date",
+                description AS "Description",
+                CASE 
+                    WHEN description LIKE 'Advance:%' THEN 'ADVANCE'
+                    WHEN description LIKE 'Payment:%' THEN 'PAYMENT' 
+                    WHEN description LIKE 'Personal Expense:%' THEN 'EXPENSE'
+                    WHEN description LIKE 'Company Expense:%' THEN 'EXPENSE'
+                    WHEN description LIKE 'Monthly Salary Credit%' THEN 'SALARY'
+                    ELSE 'REGULAR'
+                END as "Type",
+                credit AS "Credit",
+                debit AS "Debit"
+            FROM employee_ledger
+            WHERE employee_id = ?
+        """
     else:
-        pdf.date_range_str = "All Time Records"
-        
-    pdf.add_page()
+        # Use entry_type column if it exists
+        query = """
+            SELECT 
+                id,
+                entry_date AS "Date",
+                description AS "Description",
+                entry_type AS "Type",
+                credit AS "Credit",
+                debit AS "Debit"
+            FROM employee_ledger
+            WHERE employee_id = ?
+        """
     
-    # Summary Section
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, "Ledger Summary", 0, 1, 'L')
-    pdf.ln(5)
+    params = [employee_id]
     
-    # Summary table
-    pdf.set_font('Arial', 'B', 11)
-    pdf.set_fill_color(224, 235, 255)
-    pdf.cell(0, 8, "Category", 1, 0, 'L', 1)
-    pdf.cell(0, 8, "Amount (Rs.)", 1, 1, 'R', 1)
+    # Add date filter if provided
+    if start_date and end_date:
+        query += " AND entry_date BETWEEN ? AND ?"
+        params.extend([str(start_date), str(end_date)])
     
-    pdf.set_font('Arial', '', 10)
-    categories = [
-        ("Total Expenses", summary_data['total_expenses']),
-        ("Total Advances", summary_data['total_advances']),
-        ("Total Salary", summary_data['total_salary']),
-        ("Total Payments", summary_data['total_payments']),
-        ("Total Credits", summary_data['total_credits']),
-        ("Total Debits", summary_data['total_debits'])
-    ]
+    query += " ORDER BY entry_date ASC"
     
-    for category, amount in categories:
-        pdf.cell(0, 8, category, 1, 0, 'L')
-        pdf.cell(0, 8, f"{amount:,.2f}", 1, 1, 'R')
-    
-    # Remaining Balance (highlighted)
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(210, 210, 210)
-    balance_text = "Remaining Balance (Payable to Employee)" if summary_data['remaining_balance'] >= 0 else "Remaining Balance (Payable to Company)"
-    pdf.cell(0, 10, balance_text, 1, 0, 'L', 1)
-    pdf.cell(0, 10, f"Rs. {abs(summary_data['remaining_balance']):,.2f}", 1, 1, 'R', 1)
-    
-    pdf.ln(10)
-    
-    # Detailed Ledger
-    if not ledger_df.empty:
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, "Detailed Ledger Entries", 0, 1, 'L')
-        pdf.ln(5)
-        
-        # Prepare data for table
-        display_df = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
-        display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
-        
-        # Format amounts
-        display_df['Debit'] = display_df['Debit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
-        display_df['Credit'] = display_df['Credit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
-        
-        pdf.add_table(display_df)
-    
-    return pdf.output(dest='S').encode('latin-1')
+    return pd.read_sql_query(query, conn, params=params)
 
 # --- Main App Pages ---
 def page_dashboard():
     st.title(f"Welcome to {COMPANY_NAME} HR & Expense Manager")
     
-    # Add company logo to dashboard
     try:
         st.image('logo.png', width=200)
     except:
@@ -808,7 +969,6 @@ def page_employee_management():
             st.info("No employees found. Add employees using the form above.")
             return
 
-        # Convert join_date to string for data editor compatibility
         if 'join_date' in employees_df.columns:
             employees_df['join_date'] = employees_df['join_date'].astype(str)
 
@@ -1027,7 +1187,6 @@ def page_expense_management():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # Delete related ledger entry if exists
                     cursor.execute(
                         "DELETE FROM employee_ledger WHERE related_expense_id = ?",
                         (int(expense_to_edit),)
@@ -1414,40 +1573,11 @@ def page_employee_ledger():
         st.subheader(f"Ledger History - {employee_list[selected_emp_id]}")
 
         try:
-            conn = get_db_connection()
-            
-            if show_all_time:
-                query = """
-                    SELECT 
-                        id,
-                        entry_date AS "Date",
-                        description AS "Description",
-                        entry_type AS "Type",
-                        credit AS "Credit",
-                        debit AS "Debit"
-                    FROM employee_ledger
-                    WHERE employee_id = ?
-                    ORDER BY entry_date ASC
-                """
-                params = (selected_emp_id,)
-                date_range = (None, None)
-            else:
-                query = """
-                    SELECT 
-                        id,
-                        entry_date AS "Date",
-                        description AS "Description",
-                        entry_type AS "Type",
-                        credit AS "Credit",
-                        debit AS "Debit"
-                    FROM employee_ledger
-                    WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
-                    ORDER BY entry_date ASC
-                """
-                params = (selected_emp_id, str(start_date), str(end_date))
-                date_range = (start_date, end_date)
-
-            ledger_df = pd.read_sql_query(query, conn, params=params)
+            ledger_df = get_employee_ledger_with_type(
+                selected_emp_id, 
+                None if show_all_time else start_date, 
+                None if show_all_time else end_date
+            )
 
             if not ledger_df.empty:
                 # Calculate running balance
@@ -1466,7 +1596,7 @@ def page_employee_ledger():
                             employee_list[selected_emp_id],
                             ledger_df,
                             summary_data,
-                            date_range=None if show_all_time else date_range
+                            date_range=None if show_all_time else (start_date, end_date)
                         )
                         
                         st.download_button(
@@ -1484,7 +1614,7 @@ def page_employee_ledger():
                         pdf_bytes = generate_pdf_report(
                             detailed_df, 
                             f"Detailed Ledger - {employee_list[selected_emp_id]}", 
-                            date_range=date_range if not show_all_time else None,
+                            date_range=None if show_all_time else (start_date, end_date),
                             orientation='L',
                             totals_cols=["Credit", "Debit"]
                         )
@@ -1970,7 +2100,6 @@ def main():
     init_db()
 
     st.sidebar.title(f"{COMPANY_NAME} Portal")
-    # Add logo to sidebar
     try:
         st.sidebar.image('logo.png', width=150)
     except:
