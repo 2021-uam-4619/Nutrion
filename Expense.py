@@ -19,6 +19,12 @@ class PDF(FPDF):
         self.date_range_str = ""
 
     def header(self):
+        # Add company logo
+        try:
+            self.image('logo.png', 10, 8, 25)  # x=10, y=8, width=25mm
+        except:
+            pass  # If logo doesn't exist, continue without it
+        
         self.set_font('Arial', 'B', 15)
         self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
         self.set_font('Arial', 'B', 12)
@@ -32,7 +38,15 @@ class PDF(FPDF):
         self.set_font('Arial', '', 10)
         
         footer_width = self.w - self.l_margin - self.r_margin
-        self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
+        
+        # Add signature image
+        try:
+            self.image('Asim Siganture.jpg', self.l_margin, self.get_y(), 40)  # Adjust width as needed
+            self.ln(15)  # Add space after signature
+        except:
+            # If signature doesn't exist, show text
+            self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
+        
         self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
         self.ln(10)
 
@@ -149,6 +163,17 @@ def init_db():
             FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
     ''')
+    
+    # Pre-populate expense categories
+    default_categories = [
+        "Guard", "Labour", "Bilty Expenses", "Office Rent", "Warehouse Rent",
+        "Import Export", "Office Electricity", "FBR", "Office Entertainment",
+        "PSID", "Advance", "Commission", "Office Stationery Expense",
+        "Employee Expenses", "Other Expense", "Company Expense", "Salary"
+    ]
+    
+    for category in default_categories:
+        c.execute("INSERT OR IGNORE INTO expense_categories (name) VALUES (?)", (category,))
     
     conn.commit()
 
@@ -274,9 +299,63 @@ def generate_excel_template(columns, file_name):
     output.seek(0)
     return output, file_name
 
+# --- NEW: Employee Personal Expense Function ---
+def add_employee_personal_expense():
+    st.subheader("Add Employee Personal Expense")
+    
+    employees_df = get_all_employees()
+    if employees_df.empty:
+        st.warning("No employees found. Please add employees first.")
+        return
+        
+    employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
+    
+    with st.form("employee_personal_expense_form"):
+        cols = st.columns(2)
+        with cols[0]:
+            employee_id = st.selectbox(
+                "Select Employee",
+                options=list(employee_list.keys()),
+                format_func=lambda x: employee_list[x]
+            )
+            expense_date = st.date_input("Expense Date", date.today())
+        with cols[1]:
+            amount = st.number_input("Amount", min_value=0.01, step=100.0)
+            description = st.text_input("Description", placeholder="e.g., Travel allowance, Meal expense")
+        
+        submitted = st.form_submit_button("Add Personal Expense")
+        if submitted:
+            if employee_id and amount > 0 and description:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    # Add debit to employee ledger
+                    cursor.execute(
+                        """
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
+                        VALUES (?, ?, ?, ?, 0)
+                        """,
+                        (employee_id, str(expense_date), f"Personal Expense: {description}", amount)
+                    )
+                    
+                    conn.commit()
+                    st.success(f"Personal expense of Rs. {amount:,.2f} added to {employee_list[employee_id]}'s ledger.")
+                    clear_cache()
+                except sqlite3.Error as e:
+                    st.error(f"Database error: {e}")
+            else:
+                st.error("Please fill in all fields.")
+
 # --- Main App Pages ---
 def page_dashboard():
     st.title(f"Welcome to {COMPANY_NAME} HR & Expense Manager")
+    
+    # Add company logo to dashboard
+    try:
+        st.image('logo.png', width=200)
+    except:
+        pass
     
     try:
         emp_count, exp_total, cat_count = get_dashboard_stats()
@@ -295,6 +374,7 @@ def page_dashboard():
     - **Dashboard**: This page.
     - **Employee Management**: Add, view, edit, and delete employee records.
     - **Expense Management**: Log company expenses and manage expense categories.
+    - **Employee Personal Expenses**: Add personal expenses that will be deducted from employee salary.
     - **Salary Management**: Generate monthly salary sheets and individual pay slips.
     - **Employee Ledger**: View detailed financial ledgers for each employee.
     - **Reporting**: Download summary reports for expenses and categories.
@@ -340,7 +420,6 @@ def page_employee_management():
     st.divider()
 
     st.subheader("Manage Employees")
-    # FIXED: Changed st.help() to st.markdown()
     st.markdown("""
     Use the table below to edit or delete employees.
     - **To Edit:** Click on any cell, make your change, and press Enter.
@@ -457,7 +536,7 @@ def page_expense_management():
                     expense_id = cursor.lastrowid
                     
                     if employee_id != 0:
-                        ledger_desc = f"Expense: {description} (Ref ID: {expense_id})"
+                        ledger_desc = f"Company Expense: {description} (Ref ID: {expense_id})"
                         cursor.execute(
                             """
                             INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
@@ -479,7 +558,6 @@ def page_expense_management():
     st.divider()
     
     st.subheader("Manage Expense Categories")
-    # FIXED: Changed st.help() to st.markdown()
     st.markdown("""
     Use the table below to edit or delete categories.
     - **To Edit:** Click on the 'name' cell, make your change, and press Enter.
@@ -648,6 +726,45 @@ def page_expense_management():
     except Exception as e:
         st.error(f"Error loading expenses: {e}")
 
+# --- NEW PAGE: Employee Personal Expenses ---
+def page_employee_personal_expenses():
+    st.title("Employee Personal Expenses")
+    
+    st.info("""
+    Use this page to add personal expenses for employees. These expenses will be deducted from their salary.
+    Examples: Travel allowance, meal expenses, phone bills, etc.
+    """)
+    
+    add_employee_personal_expense()
+    
+    st.divider()
+    
+    st.subheader("Recent Personal Expenses")
+    try:
+        conn = get_db_connection()
+        personal_expenses_df = pd.read_sql_query(
+            """
+            SELECT 
+                el.entry_date as "Date",
+                e.name as "Employee",
+                el.description as "Description",
+                el.debit as "Amount"
+            FROM employee_ledger el
+            JOIN employees e ON el.employee_id = e.id
+            WHERE el.description LIKE 'Personal Expense:%'
+            ORDER BY el.entry_date DESC
+            LIMIT 50
+            """, conn
+        )
+        
+        if not personal_expenses_df.empty:
+            st.dataframe(personal_expenses_df, use_container_width=True)
+        else:
+            st.info("No personal expenses recorded yet.")
+            
+    except Exception as e:
+        st.error(f"Error loading personal expenses: {e}")
+
 def page_salary_management():
     st.title("Salary Management")
 
@@ -718,7 +835,6 @@ def page_salary_management():
     st.divider()
 
     st.subheader("2. View & Download Salary Sheet")
-    # FIXED: Changed st.help() to st.markdown()
     st.markdown("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
     
     if st.button("Generate Salary Sheet"):
@@ -947,7 +1063,6 @@ def page_reporting():
     st.title("Download Reports")
     
     st.header("Company Expense Report")
-    # FIXED: Changed st.help() to st.markdown()
     st.markdown("Full report of all company expenses, filterable by date and category.")
     
     categories_df = get_all_categories()
@@ -964,7 +1079,7 @@ def page_reporting():
         category_list_with_all.update(category_list)
         
         selected_cat_id = st.selectbox(
-            "Filter by Category (Req 6)", 
+            "Filter by Category", 
             options=list(category_list_with_all.keys()), 
             format_func=lambda x: category_list_with_all[x]
         )
@@ -1019,7 +1134,6 @@ def page_reporting():
     st.divider()
 
     st.header("Expense Category Sheet")
-    # FIXED: Changed st.help() to st.markdown()
     st.markdown("Downloads a simple list of all defined expense categories.")
     
     if st.button("Generate Category Sheet (PDF)"):
@@ -1114,7 +1228,6 @@ def page_data_import():
 
     with tab3:
         st.subheader("1. Download Expense Template")
-        # FIXED: Changed st.help() to st.markdown()
         st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
         cols = ["expense_date", "description", "amount", "category_name", "employee_name"]
         excel_data, file_name = generate_excel_template(cols, "expense_import_template.xlsx")
@@ -1184,7 +1297,6 @@ def page_data_import():
 
     with tab4:
         st.subheader("1. Download Ledger Template")
-        # FIXED: Changed st.help() to st.markdown()
         st.markdown("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
         cols = ["employee_name", "entry_date", "description", "debit", "credit"]
         excel_data, file_name = generate_excel_template(cols, "ledger_import_template.xlsx")
@@ -1245,10 +1357,17 @@ def main():
     init_db()
 
     st.sidebar.title(f"{COMPANY_NAME} Portal")
+    # Add logo to sidebar
+    try:
+        st.sidebar.image('logo.png', width=150)
+    except:
+        pass
+        
     page_options = {
         "Dashboard": page_dashboard,
         "Employee Management": page_employee_management,
         "Expense Management": page_expense_management,
+        "Employee Personal Expenses": page_employee_personal_expenses,
         "Salary Management": page_salary_management,
         "Employee Ledger": page_employee_ledger,
         "Reporting": page_reporting,
