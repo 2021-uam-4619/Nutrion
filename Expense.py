@@ -337,7 +337,8 @@ def page_dashboard():
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
-    st.image("https.placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
+    # --- REMOVED FAILING IMAGE LINE ---
+    # st.image("https://placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
 
 def page_employee_management():
     st.title("Employee Management")
