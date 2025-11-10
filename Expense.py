@@ -1,4 +1,3 @@
-# code 
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -7,6 +6,7 @@ import os
 from fpdf import FPDF
 import io
 import base64
+import re
 
 # --- Constants ---
 DB_FILE = "nutrion_app.db"
@@ -112,7 +112,8 @@ class PDF(FPDF):
                         if pd.isna(cell_value):
                             cell_text = "N/A"
                         else:
-                            cell_text = f"{float(cell_value):,.2f}"
+                            # REMOVED .00 formatting as requested
+                            cell_text = f"{float(cell_value):,}"
                     except (ValueError, TypeError):
                         pass
                 
@@ -150,7 +151,8 @@ class PDF(FPDF):
                             cell_text = "N/A"
                             align = 'L'
                         else:
-                            cell_text = f"{float(cell_value):,.2f}"
+                            # REMOVED .00 formatting as requested
+                            cell_text = f"{float(cell_value):,}"
                             align = 'R'
                     except (ValueError, TypeError):
                         align = 'L'
@@ -196,7 +198,8 @@ class PDF(FPDF):
                     self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                    # REMOVED .00 formatting as requested
+                    self.cell(col_widths[i], 7, f"{col_total:,}", 1, 0, 'R', 1)
                 else:
                     self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
             self.ln()
@@ -280,7 +283,8 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     pdf.cell(0, 12, pdf._clean_text(f"Employee: {emp_details['name']}"), 0, 1, 'L')
     pdf.set_font('Arial', '', 11)
     pdf.cell(0, 8, pdf._clean_text(f"Designation: {emp_details['designation']}"), 0, 1, 'L')
-    pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
+    # REMOVED .00 formatting as requested
+    pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,}", 0, 1, 'L')
     pdf.ln(8)
 
     # Earnings & Deductions table with improved layout
@@ -315,8 +319,9 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             desc_text = pdf._clean_text(str(row['description']))
             desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
             
-            credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
-            debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
+            # REMOVED .00 formatting as requested
+            credit_text = f"{row['credit']:,}" if row['credit'] > 0 else "0"
+            debit_text = f"{row['debit']:,}" if row['debit'] > 0 else "0"
             
             # Calculate row height based on description lines
             row_height = max(8, len(desc_lines) * 8)
@@ -353,8 +358,9 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     # Totals row
     pdf.set_font('Arial', 'B', 10)
     pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
-    pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
-    pdf.cell(amount_width, 8, f"{total_debits:,.2f}", 1, 1, 'R')
+    # REMOVED .00 formatting as requested
+    pdf.cell(amount_width, 8, f"{total_credits:,}", 1, 0, 'R')
+    pdf.cell(amount_width, 8, f"{total_debits:,}", 1, 1, 'R')
 
     pdf.ln(8)
     
@@ -366,7 +372,8 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     pdf.set_font('Arial', 'B', 14)
     pdf.set_fill_color(210, 210, 210)
     pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
-    pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
+    # REMOVED .00 formatting as requested
+    pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,}", 1, 1, 'R', fill=True)
     
     pdf.ln(12)
     
@@ -480,7 +487,7 @@ def init_db():
     conn.commit()
 
 # --- PDF Generation Function with UTF-8 Support ---
-def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
+def generate_pdf_report(df, title, date_range=None, orientation='P', totals_cols=None):  # Changed to Portrait
     pdf = PDF(orientation=orientation, unit='mm', format='A4')
     pdf.report_title = title
     if date_range:
@@ -552,7 +559,8 @@ def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_ran
             pdf.set_font('Arial', '', 10)
         
         pdf.cell(0, 8, category, 1, 0, 'L')
-        pdf.cell(0, 8, f"{amount:,.2f}", 1, 1, 'R')
+        # REMOVED .00 formatting as requested
+        pdf.cell(0, 8, f"{amount:,}", 1, 1, 'R')
     
     # Check page break before balance
     if pdf.check_page_break(15):
@@ -563,7 +571,8 @@ def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_ran
     pdf.set_fill_color(210, 210, 210)
     balance_text = "Remaining Balance (Payable to Employee)" if summary_data['remaining_balance'] >= 0 else "Remaining Balance (Payable to Company)"
     pdf.cell(0, 10, balance_text, 1, 0, 'L', 1)
-    pdf.cell(0, 10, f"Rs. {abs(summary_data['remaining_balance']):,.2f}", 1, 1, 'R', 1)
+    # REMOVED .00 formatting as requested
+    pdf.cell(0, 10, f"Rs. {abs(summary_data['remaining_balance']):,}", 1, 1, 'R', 1)
     
     pdf.ln(10)
     
@@ -581,9 +590,9 @@ def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_ran
         display_df = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
         display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
         
-        # Format amounts
-        display_df['Debit'] = display_df['Debit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
-        display_df['Credit'] = display_df['Credit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
+        # Format amounts - REMOVED .00 formatting as requested
+        display_df['Debit'] = display_df['Debit'].apply(lambda x: f"{x:,}" if x > 0 else "0")
+        display_df['Credit'] = display_df['Credit'].apply(lambda x: f"{x:,}" if x > 0 else "0")
         
         pdf.add_table(display_df)
     
@@ -641,6 +650,127 @@ def generate_excel_template(columns, file_name):
         worksheet.write_comment('A1', 'Do not change the column names. Fill data in rows below.')
     output.seek(0)
     return output, file_name
+
+# --- Data Validation Functions ---
+def validate_employee_data(df):
+    """Validate employee data before import"""
+    errors = []
+    
+    # Check required columns
+    required_cols = ['name', 'designation', 'salary']
+    for col in required_cols:
+        if col not in df.columns:
+            errors.append(f"Missing required column: {col}")
+    
+    if errors:
+        return False, errors
+    
+    # Check data types and values
+    for idx, row in df.iterrows():
+        # Check name
+        if pd.isna(row['name']) or str(row['name']).strip() == '':
+            errors.append(f"Row {idx+2}: Name is required")
+        
+        # Check designation
+        if pd.isna(row['designation']) or str(row['designation']).strip() == '':
+            errors.append(f"Row {idx+2}: Designation is required")
+        
+        # Check salary
+        try:
+            salary = float(row['salary'])
+            if salary < 0:
+                errors.append(f"Row {idx+2}: Salary cannot be negative")
+        except (ValueError, TypeError):
+            errors.append(f"Row {idx+2}: Invalid salary value")
+    
+    return len(errors) == 0, errors
+
+def validate_expense_data(df):
+    """Validate expense data before import"""
+    errors = []
+    
+    # Check required columns
+    required_cols = ['expense_date', 'description', 'amount', 'category_name']
+    for col in required_cols:
+        if col not in df.columns:
+            errors.append(f"Missing required column: {col}")
+    
+    if errors:
+        return False, errors
+    
+    # Check data types and values
+    for idx, row in df.iterrows():
+        # Check expense_date
+        try:
+            pd.to_datetime(row['expense_date'])
+        except:
+            errors.append(f"Row {idx+2}: Invalid expense date")
+        
+        # Check description
+        if pd.isna(row['description']) or str(row['description']).strip() == '':
+            errors.append(f"Row {idx+2}: Description is required")
+        
+        # Check amount
+        try:
+            amount = float(row['amount'])
+            if amount <= 0:
+                errors.append(f"Row {idx+2}: Amount must be positive")
+        except (ValueError, TypeError):
+            errors.append(f"Row {idx+2}: Invalid amount value")
+        
+        # Check category_name
+        if pd.isna(row['category_name']) or str(row['category_name']).strip() == '':
+            errors.append(f"Row {idx+2}: Category name is required")
+    
+    return len(errors) == 0, errors
+
+def validate_ledger_data(df):
+    """Validate ledger data before import"""
+    errors = []
+    
+    # Check required columns
+    required_cols = ['employee_name', 'entry_date', 'description', 'debit', 'credit', 'entry_type']
+    for col in required_cols:
+        if col not in df.columns:
+            errors.append(f"Missing required column: {col}")
+    
+    if errors:
+        return False, errors
+    
+    # Check data types and values
+    valid_entry_types = ['SALARY', 'EXPENSE', 'ADVANCE', 'PAYMENT', 'REGULAR']
+    
+    for idx, row in df.iterrows():
+        # Check employee_name
+        if pd.isna(row['employee_name']) or str(row['employee_name']).strip() == '':
+            errors.append(f"Row {idx+2}: Employee name is required")
+        
+        # Check entry_date
+        try:
+            pd.to_datetime(row['entry_date'])
+        except:
+            errors.append(f"Row {idx+2}: Invalid entry date")
+        
+        # Check description
+        if pd.isna(row['description']) or str(row['description']).strip() == '':
+            errors.append(f"Row {idx+2}: Description is required")
+        
+        # Check debit and credit
+        try:
+            debit = float(row['debit'])
+            credit = float(row['credit'])
+            if debit < 0 or credit < 0:
+                errors.append(f"Row {idx+2}: Debit and credit cannot be negative")
+            if debit > 0 and credit > 0:
+                errors.append(f"Row {idx+2}: Both debit and credit cannot be positive in same row")
+        except (ValueError, TypeError):
+            errors.append(f"Row {idx+2}: Invalid debit or credit value")
+        
+        # Check entry_type
+        if row['entry_type'] not in valid_entry_types:
+            errors.append(f"Row {idx+2}: Invalid entry type. Must be one of: {', '.join(valid_entry_types)}")
+    
+    return len(errors) == 0, errors
 
 # --- Data Management Functions ---
 def clean_database_text():
@@ -1130,7 +1260,8 @@ def page_dashboard():
         with cols[0]:
             st.metric("Total Employees", f"{emp_count}")
         with cols[1]:
-            st.metric("Expenses (This Month)", f"Rs. {exp_total:,.2f}")
+            # REMOVED .00 formatting as requested
+            st.metric("Expenses (This Month)", f"Rs. {exp_total:,}")
         with cols[2]:
             st.metric("Expense Categories", f"{cat_count}")
     
@@ -1150,8 +1281,6 @@ def page_dashboard():
     - **User Settings**: Database maintenance and data management tools.
     """)
 
-# ... [Keep all the existing page functions exactly as they were: page_employee_management, page_expense_management, page_employee_personal_expenses, page_salary_management, page_employee_ledger, page_reporting, page_data_import] ...
-
 def page_employee_management():
     st.title("Employee Management")
     
@@ -1160,7 +1289,7 @@ def page_employee_management():
         cols = st.columns(2)
         with cols[0]:
             name = st.text_input("Name", placeholder="e.g., Alice Smith")
-            salary = st.number_input("Base Salary (Monthly)", min_value=0.0, step=1000.0)
+            salary = st.number_input("Base Salary (Monthly)", min_value=0.0, step=1000.0, format="%.0f")  # Remove decimal places
             bank = st.text_input("Bank", placeholder="e.g., HBL")
             join_date = st.date_input("Joining Date", date.today())
         with cols[1]:
@@ -1214,7 +1343,8 @@ def page_employee_management():
             use_container_width=True,
             column_config={
                 "id": st.column_config.NumberColumn("ID", disabled=True),
-                "join_date": st.column_config.TextColumn("Join Date")
+                "join_date": st.column_config.TextColumn("Join Date"),
+                "salary": st.column_config.NumberColumn("Salary", format="%d")  # Remove decimal places
             },
             key="employee_editor"
         )
@@ -1283,7 +1413,7 @@ def page_expense_management():
         with cols[0]:
             expense_date = st.date_input("Expense Date", date.today())
         with cols[1]:
-            amount = st.number_input("Amount", min_value=0.01, step=100.0)
+            amount = st.number_input("Amount", min_value=0.01, step=100.0, format="%.0f")  # Remove decimal places
         with cols[2]:
             category_id = st.selectbox("Category", options=list(category_list.keys()), format_func=lambda x: category_list[x], disabled=not category_list)
         
@@ -1318,7 +1448,7 @@ def page_expense_management():
                             """,
                             (employee_id, str(expense_date), clean_text(ledger_desc), amount, expense_id)
                         )
-                        st.success(f"Company expense logged and Rs. {amount:,.2f} added to {employee_list[employee_id]}'s ledger.")
+                        st.success(f"Company expense logged and Rs. {amount:,.0f} added to {employee_list[employee_id]}'s ledger.")  # Remove decimal places
                     else:
                         st.success("Company expense logged successfully.")
                     
@@ -1462,7 +1592,7 @@ def page_expense_management():
                 
                 with st.form("edit_expense_form"):
                     edit_date = st.date_input("Expense Date", value=pd.to_datetime(expense_details['expense_date']))
-                    edit_amount = st.number_input("Amount", value=expense_details['amount'])
+                    edit_amount = st.number_input("Amount", value=expense_details['amount'], format="%.0f")  # Remove decimal places
                     
                     cols = st.columns(3)
                     with cols[0]:
@@ -1657,7 +1787,7 @@ def page_salary_management():
                 salary_df, 
                 f"Salary Sheet - {selected_month.strftime('%B %Y')}", 
                 date_range=(first_day, last_day),
-                orientation='L',
+                orientation='P',  # Changed to Portrait
                 totals_cols=["Base Salary", "Salary Credits", "Expense Deductions", "Advance Deductions", "Total Credits", "Total Deductions", "Net Salary"]
             )
             
@@ -1783,24 +1913,25 @@ def page_employee_ledger():
             col1, col2, col3, col4 = st.columns(4)
             
             with col1:
-                st.metric("Total Expenses", f"Rs. {summary_data['total_expenses']:,.2f}")
+                # REMOVED .00 formatting as requested
+                st.metric("Total Expenses", f"Rs. {summary_data['total_expenses']:,}")
             with col2:
-                st.metric("Total Advances", f"Rs. {summary_data['total_advances']:,.2f}")
+                st.metric("Total Advances", f"Rs. {summary_data['total_advances']:,}")
             with col3:
-                st.metric("Total Salary", f"Rs. {summary_data['total_salary']:,.2f}")
+                st.metric("Total Salary", f"Rs. {summary_data['total_salary']:,}")
             with col4:
-                st.metric("Total Payments", f"Rs. {summary_data['total_payments']:,.2f}")
+                st.metric("Total Payments", f"Rs. {summary_data['total_payments']:,}")
             
             # Display remaining balance with appropriate color
             balance_col1, balance_col2 = st.columns([1, 1])
             with balance_col1:
                 if summary_data['remaining_balance'] >= 0:
-                    st.success(f"**Balance Payable to Employee: Rs. {summary_data['remaining_balance']:,.2f}**")
+                    st.success(f"**Balance Payable to Employee: Rs. {summary_data['remaining_balance']:,}**")
                 else:
-                    st.error(f"**Balance Payable to Company: Rs. {abs(summary_data['remaining_balance']):,.2f}**")
+                    st.error(f"**Balance Payable to Company: Rs. {abs(summary_data['remaining_balance']):,}**")
             
             with balance_col2:
-                st.metric("Net Balance", f"Rs. {summary_data['remaining_balance']:,.2f}")
+                st.metric("Net Balance", f"Rs. {summary_data['remaining_balance']:,}")
         
         except Exception as e:
             st.error(f"Error fetching ledger summary: {e}")
@@ -1851,7 +1982,7 @@ def page_employee_ledger():
                             detailed_df, 
                             f"Detailed Ledger - {employee_list[selected_emp_id]}", 
                             date_range=None if show_all_time else (start_date, end_date),
-                            orientation='L',
+                            orientation='P',  # Changed to Portrait
                             totals_cols=["Credit", "Debit"]
                         )
                         
@@ -2042,7 +2173,7 @@ def page_reporting():
                     report_df, 
                     report_title,
                     date_range=(report_start_date, report_end_date),
-                    orientation='P',
+                    orientation='P',  # Changed to Portrait
                     totals_cols=["Amount"]
                 )
                 
@@ -2068,7 +2199,7 @@ def page_reporting():
             pdf_bytes = generate_pdf_report(
                 cat_df, 
                 "Expense Category Sheet",
-                orientation='P'
+                orientation='P'  # Changed to Portrait
             )
             
             st.download_button(
@@ -2110,6 +2241,15 @@ def page_data_import():
                 st.dataframe(df)
                 
                 if st.button("Import Employees"):
+                    # Validate data before import
+                    is_valid, errors = validate_employee_data(df)
+                    
+                    if not is_valid:
+                        st.error("Data validation failed. Please fix the following errors:")
+                        for error in errors:
+                            st.error(error)
+                        return
+                    
                     conn = get_db_connection()
                     try:
                         with st.spinner("Importing..."):
@@ -2187,6 +2327,15 @@ def page_data_import():
                 st.dataframe(df)
                 
                 if st.button("Import Expenses"):
+                    # Validate data before import
+                    is_valid, errors = validate_expense_data(df)
+                    
+                    if not is_valid:
+                        st.error("Data validation failed. Please fix the following errors:")
+                        for error in errors:
+                            st.error(error)
+                        return
+                    
                     cat_df = get_all_categories()
                     cat_map = {row['name']: row['id'] for _, row in cat_df.iterrows()}
                     emp_df = get_all_employees()
@@ -2265,6 +2414,15 @@ def page_data_import():
                 st.dataframe(df)
 
                 if st.button("Import Ledger Entries"):
+                    # Validate data before import
+                    is_valid, errors = validate_ledger_data(df)
+                    
+                    if not is_valid:
+                        st.error("Data validation failed. Please fix the following errors:")
+                        for error in errors:
+                            st.error(error)
+                        return
+                    
                     emp_df = get_all_employees()
                     emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
 
