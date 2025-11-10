@@ -71,9 +71,15 @@ class PDF(FPDF):
                 # Check if this column is numeric for right alignment
                 if pd.api.types.is_numeric_dtype(df[col]):
                     try:
-                        # Format numbers nicely
-                        cell_text = f"{float(row[col]):,.2f}"
-                        self.cell(col_width, 6, cell_text, 'LR', 0, 'R', fill)
+                        # --- FIX: Handle potential None or NaN values ---
+                        cell_value = row[col]
+                        if pd.isna(cell_value):
+                            cell_text = "N/A"
+                            align = 'L'
+                        else:
+                            cell_text = f"{float(cell_value):,.2f}"
+                            align = 'R'
+                        self.cell(col_width, 6, cell_text, 'LR', 0, align, fill)
                     except (ValueError, TypeError):
                         self.cell(col_width, 6, cell_text, 'LR', 0, 'L', fill)
                 else:
@@ -94,7 +100,8 @@ class PDF(FPDF):
                 if i == 0:
                     self.cell(col_width, 7, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
-                    col_total = df[col].sum()
+                    # --- FIX: Use .sum() on clean data ---
+                    col_total = pd.to_numeric(df[col], errors='coerce').sum()
                     self.cell(col_width, 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
                     self.cell(col_width, 7, "", 1, 0, 'C', 1)
@@ -156,7 +163,9 @@ def init_db():
             description TEXT,
             debit REAL DEFAULT 0,
             credit REAL DEFAULT 0,
-            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
+            related_expense_id INTEGER, -- NEW: To link ledger debit to expense
+            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
+            FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
     ''')
     
@@ -328,7 +337,7 @@ def page_dashboard():
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
-    st.image("https://placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
+    st.image("https.placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
 
 def page_employee_management():
     st.title("Employee Management")
@@ -359,7 +368,7 @@ def page_employee_management():
                         INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (name, designation, salary, bank, account_title, account_no, str(join_date))
+                        (name, designation, salary, bank, account_title, str(join_date))
                     )
                     conn.commit()
                     st.success(f"Employee '{name}' added successfully.")
@@ -371,6 +380,15 @@ def page_employee_management():
 
     # --- Manage Existing Employees (Req 4) ---
     st.subheader("Manage Employees")
+    # --- NEW: Added help text for data editor ---
+    st.help("""
+    Use the table below to edit or delete employees.
+    - **To Edit:** Click on any cell, make your change, and press Enter.
+    - **To Delete:** Click the `x` icon at the end of a row.
+    - **To Add:** Click the `+` icon at the bottom to add a new row.
+    
+    **You must click the 'Save Changes' button below the table to apply all edits.**
+    """)
     try:
         employees_df = get_all_employees()
         if employees_df.empty:
@@ -407,6 +425,9 @@ def page_employee_management():
 
             # Updates & Additions
             for _, row in edited_df.iterrows():
+                # --- FIX: Cast date to string to prevent type errors ---
+                join_date_str = str(row['join_date']) if pd.notna(row['join_date']) else None
+                
                 if pd.isna(row['id']):
                     # New Row (Addition)
                     if row['name']: # Only add if name is present
@@ -415,7 +436,7 @@ def page_employee_management():
                             INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                             """,
-                            (row['name'], row['designation'], row['salary'], row['bank'], row['account_title'], row['account_no'], row['join_date'])
+                            (row['name'], row['designation'], row['salary'], row['bank'], row['account_title'], row['account_no'], join_date_str)
                         )
                 else:
                     # Existing Row (Update)
@@ -425,7 +446,7 @@ def page_employee_management():
                         name = ?, designation = ?, salary = ?, bank = ?, account_title = ?, account_no = ?, join_date = ?
                         WHERE id = ?
                         """,
-                        (row['name'], row['designation'], row['salary'], row['bank'], row['account_title'], row['account_no'], row['join_date'], int(row['id']))
+                        (row['name'], row['designation'], row['salary'], row['bank'], row['account_title'], row['account_no'], join_date_str, int(row['id']))
                     )
             
             conn.commit()
@@ -488,15 +509,18 @@ def page_expense_management():
                         (description, amount, str(expense_date), category_id, employee_id if employee_id != 0 else None)
                     )
                     
+                    # Get the ID of the expense we just inserted
+                    expense_id = cursor.lastrowid
+                    
                     # 2. (Req 11) If linked to employee, add as a DEBIT to their ledger
                     if employee_id != 0:
-                        ledger_desc = f"Expense: {description}"
+                        ledger_desc = f"Expense: {description} (Ref ID: {expense_id})"
                         cursor.execute(
                             """
-                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                            VALUES (?, ?, ?, ?, 0)
+                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
+                            VALUES (?, ?, ?, ?, 0, ?)
                             """,
-                            (employee_id, str(expense_date), ledger_desc, amount)
+                            (employee_id, str(expense_date), ledger_desc, amount, expense_id)
                         )
                         st.success(f"Expense logged and Rs. {amount} debited from {employee_list[employee_id]}'s ledger.")
                     else:
@@ -513,6 +537,15 @@ def page_expense_management():
     
     # --- Manage Expense Categories (Req 3, 10) ---
     st.subheader("Manage Expense Categories")
+    # --- NEW: Added help text for data editor ---
+    st.help("""
+    Use the table below to edit or delete categories.
+    - **To Edit:** Click on the 'name' cell, make your change, and press Enter.
+    - **To Delete:** Click the `x` icon at the end of a row.
+    - **To Add:** Click the `+` icon at the bottom and add a new name.
+    
+    **You must click the 'Save Category Changes' button below the table to apply all edits.**
+    """)
     try:
         categories_df = get_all_categories()
         
@@ -598,10 +631,20 @@ def page_expense_management():
             if st.button(f"Delete Expense ID {expense_to_edit}", type="primary"):
                 try:
                     conn = get_db_connection()
-                    conn.execute("DELETE FROM company_expenses WHERE id = ?", (int(expense_to_edit),))
-                    # Note: This does not auto-reverse the ledger entry (complex operation)
+                    cursor = conn.cursor()
+                    
+                    # --- CRITICAL FIX: Also delete the related ledger entry ---
+                    if pd.notna(expense_details['employee_id']):
+                        cursor.execute(
+                            "DELETE FROM employee_ledger WHERE related_expense_id = ?",
+                            (int(expense_to_edit),)
+                        )
+                        st.info("Removed corresponding debit from employee's ledger.")
+                    # --- END FIX ---
+
+                    cursor.execute("DELETE FROM company_expenses WHERE id = ?", (int(expense_to_edit),))
                     conn.commit()
-                    st.success(f"Expense ID {expense_to_edit} deleted. (Ledger entry not auto-reversed)")
+                    st.success(f"Expense ID {expense_to_edit} and its related ledger entry deleted.")
                     clear_cache()
                     st.rerun()
                 except Exception as e:
@@ -609,25 +652,31 @@ def page_expense_management():
             
             # Edit Form
             with st.expander("Edit Expense Details"):
+                # --- NEW: Add warning about editing employee-linked expenses ---
+                if pd.notna(expense_details['employee_id']):
+                    st.warning("""
+                    **Accounting Warning:** This expense is linked to an employee's ledger. 
+                    Editing the amount here will **NOT** automatically update their ledger, which may cause accounting errors.
+                    
+                    **Recommendation:** To change the amount, please **delete** this expense (which will also remove the ledger debit) and **create a new one** with the correct amount.
+                    """, icon="⚠️")
+                # --- END WARNING ---
+
                 # Get category list for form
                 categories_df = get_all_categories()
                 category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
                 cat_ids = list(category_list.keys())
                 
                 # --- FIX for deleted category bug ---
-                # Check if the expense's category still exists
                 current_cat_id = expense_details['category_id']
                 if pd.notna(current_cat_id) and current_cat_id not in cat_ids:
-                    # The category was deleted!
                     st.error(f"Error: The original category (ID: {current_cat_id}) for this expense was deleted. Please select a new, valid category.")
-                    # Add the (now invalid) ID to the list just to prevent a crash, but default to the first valid one
                     cat_ids.append(current_cat_id)
                     category_list[current_cat_id] = f"INVALID CATEGORY (ID: {current_cat_id})"
                     default_index = 0 
                 elif pd.notna(current_cat_id):
                     default_index = cat_ids.index(current_cat_id)
                 else:
-                    # Expense had no category to begin with
                     default_index = 0
                 # --- END FIX ---
                 
@@ -642,12 +691,10 @@ def page_expense_management():
                         edit_category_id = st.selectbox("Category", 
                             options=cat_ids, 
                             format_func=lambda x: category_list[x], 
-                            index=default_index # Use the safe default_index
+                            index=default_index
                         )
                     with cols[2]:
-                        # Note: Editing employee link is complex as it affects ledgers. Disabled for simplicity.
                         st.text_input("Employee (Read-only)", value=expense_details.get('employee', 'N/A'), disabled=True)
-                        st.help("To change an employee-linked expense, please delete this and create a new one. This prevents ledger errors.")
 
                     update_submitted = st.form_submit_button("Save Changes")
                     if update_submitted:
@@ -801,12 +848,10 @@ def page_salary_management():
     employees_df = get_all_employees()
     employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
     
-    # *** ADDED CHECK FOR EMPTY EMPLOYEE LIST ***
     if not employee_list:
         st.warning("Cannot generate slip: No employees found in the system. Please add employees first.", icon="⚠️")
-        return # Stop this part of the page from rendering
+        return
     
-    # --- START: CORRECTED CODE FOR INDIVIDUAL SLIP ---
     cols = st.columns(2)
     with cols[0]:
         emp_ids = list(employee_list.keys())
@@ -829,7 +874,7 @@ def page_salary_management():
                     params=(selected_emp_id,)
                 )
                 if emp_details_df.empty:
-                    st.error(f"Employee ID {selected_emp_id} not found.")
+                    st.error(f"Employee ID {selected_em_id} not found.")
                     return
                 emp_details = emp_details_df.iloc[0]
 
@@ -870,8 +915,6 @@ def page_salary_management():
         except Exception as e:
             st.error(f"Error generating individual slip: {e}")
             st.error("Please ensure the selected employee exists and data is available.")
-    
-    # --- END: CORRECTED CODE ---
 
 
 # --- Page: Employee Ledger (Requirement 5) ---
@@ -891,21 +934,24 @@ def page_employee_ledger():
         options=emp_ids, 
         format_func=lambda x: employee_list[x]
     )
+    
+    # --- NEW: All-Time Ledger Toggle ---
+    show_all_time = st.checkbox("Show All-Time Ledger? (Disables date filter)", key="all_time_toggle")
 
     # Date Range Filter
     cols = st.columns(2)
     today = date.today()
     with cols[0]:
-        start_date = st.date_input("Start Date", today.replace(day=1))
+        start_date = st.date_input("Start Date", today.replace(day=1), disabled=show_all_time)
     with cols[1]:
-        end_date = st.date_input("End Date", today)
+        end_date = st.date_input("End Date", today, disabled=show_all_time)
 
-    if selected_emp_id and start_date and end_date:
-        if start_date > end_date:
+    if selected_emp_id:
+        if not show_all_time and start_date > end_date:
             st.error("Start Date cannot be after End Date.")
             return
 
-        # --- NEW: Get All-Time Balance ---
+        # --- Get All-Time Balance (Always shows) ---
         try:
             conn = get_db_connection()
             all_time_df = pd.read_sql_query(
@@ -920,22 +966,45 @@ def page_employee_ledger():
             st.error(f"Error fetching all-time balance: {e}")
         
         st.divider()
-        st.subheader(f"Ledger History (for date range)")
-        # --- END NEW ---
+        st.subheader(f"Ledger History")
 
         try:
             conn = get_db_connection()
-            query = """
-                SELECT 
-                    entry_date AS "Date",
-                    description AS "Description",
-                    credit AS "Credit",
-                    debit AS "Debit"
-                FROM employee_ledger
-                WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
-                ORDER BY entry_date ASC
-            """
-            ledger_df = pd.read_sql_query(conn=conn, sql=query, params=(selected_emp_id, str(start_date), str(end_date)))
+            
+            # --- MODIFIED: Use toggle to build query ---
+            if show_all_time:
+                query = """
+                    SELECT 
+                        entry_date AS "Date",
+                        description AS "Description",
+                        credit AS "Credit",
+                        debit AS "Debit"
+                    FROM employee_ledger
+                    WHERE employee_id = ?
+                    ORDER BY entry_date ASC
+                """
+                params = (selected_emp_id,)
+                date_range = (None, None) # For PDF
+                pdf_title_date_range = (
+                    pd.to_datetime(get_all_employees()['join_date'].min()), # A bit of a hack, find earliest date
+                    date.today()
+                )
+            else:
+                query = """
+                    SELECT 
+                        entry_date AS "Date",
+                        description AS "Description",
+                        credit AS "Credit",
+                        debit AS "Debit"
+                    FROM employee_ledger
+                    WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
+                    ORDER BY entry_date ASC
+                """
+                params = (selected_emp_id, str(start_date), str(end_date))
+                date_range = (start_date, end_date) # For PDF
+            # --- END MODIFICATION ---
+
+            ledger_df = pd.read_sql_query(conn=conn, sql=query, params=params)
 
             # Calculate running balance
             balance_df = ledger_df.copy()
@@ -945,14 +1014,15 @@ def page_employee_ledger():
             
             # Show final balance
             final_balance = balance_df['Balance'].iloc[-1] if not balance_df.empty else 0
-            st.metric(label="Current Balance (in range)", value=f"Rs. {final_balance:,.2f}")
+            if not show_all_time:
+                st.metric(label="Balance (in selected date range)", value=f"Rs. {final_balance:,.2f}")
 
             # Download PDF (Req 5)
             if st.button("Download Ledger (PDF)"):
                 pdf_bytes = generate_pdf_report(
                     balance_df, 
                     f"Ledger for {employee_list[selected_emp_id]}", 
-                    date_range=(start_date, end_date),
+                    date_range=date_range if not show_all_time else None, # Use date_range
                     orientation='P',
                     totals_cols=["Credit", "Debit"]
                 )
@@ -1193,14 +1263,16 @@ def page_data_import():
                                 (row['expense_date'], row['description'], row['amount'], cat_id, emp_id)
                             )
                             
+                            expense_id = cursor.lastrowid
+                            
                             # Also add to ledger if employee is linked
                             if emp_id:
                                 cursor.execute(
                                     """
-                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                    VALUES (?, ?, ?, ?, 0)
+                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
+                                    VALUES (?, ?, ?, ?, 0, ?)
                                     """,
-                                    (emp_id, row['expense_date'], f"Imported Expense: {row['description']}", row['amount'])
+                                    (emp_id, row['expense_date'], f"Imported Expense: {row['description']}", row['amount'], expense_id)
                                 )
                             imported_count += 1
                     
@@ -1251,6 +1323,7 @@ def page_data_import():
                                 error_list.append(f"Employee '{row['employee_name']}' not found.")
                                 continue
                             
+                            # Note: related_expense_id is not set for generic ledger imports
                             cursor.execute(
                                 """
                                 INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
