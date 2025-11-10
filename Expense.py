@@ -41,7 +41,7 @@ class PDF(FPDF):
         
         # Add signature image
         try:
-            self.image('Asim Siganture.jpg', self.l_margin, self.get_y(), 40)
+            self.image('', self.l_margin, self.get_y(), 40)
             self.ln(15)
         except:
             self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
@@ -234,7 +234,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     
     col_width = (pdf.w - 2 * pdf.l_margin) / 3
     pdf.set_font('Arial', 'B', 10)
-    pdf.cell(col_width * 1.5, 7, "Description", 1, 0, 'C')
+    pdf.cell(col_width * 4, 9, "Description", 1, 0, 'C')
     pdf.cell(col_width * 0.75, 7, "Credits (Rs.)", 1, 0, 'C')
     pdf.cell(col_width * 0.75, 7, "Debits (Rs.)", 1, 1, 'C')
 
@@ -243,7 +243,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         pdf.cell(0, 7, "No ledger activity found for this month.", 1, 1, 'C')
     else:
         for _, row in ledger_df.iterrows():
-            pdf.cell(col_width * 1.5, 7, str(row['description']), 1, 0, 'L')
+            pdf.cell(col_width * 3, 7, str(row['description']), 1, 0, 'L')
             pdf.cell(col_width * 0.75, 7, f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00", 1, 0, 'R')
             pdf.cell(col_width * 0.75, 7, f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00", 1, 1, 'R')
 
