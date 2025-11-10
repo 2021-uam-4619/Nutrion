@@ -1,3 +1,4 @@
+# code 
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -372,6 +373,7 @@ def init_db():
             debit REAL DEFAULT 0,
             credit REAL DEFAULT 0,
             related_expense_id INTEGER,
+            entry_type TEXT DEFAULT 'REGULAR',  -- REGULAR, ADVANCE, SALARY, PAYMENT, EXPENSE
             FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
             FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
@@ -463,6 +465,101 @@ def generate_excel_template(columns, file_name):
     output.seek(0)
     return output, file_name
 
+# --- Enhanced Employee Ledger Functions ---
+def add_employee_advance():
+    st.subheader("Add Employee Advance")
+    
+    employees_df = get_all_employees()
+    if employees_df.empty:
+        st.warning("No employees found. Please add employees first.")
+        return
+        
+    employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
+    
+    with st.form("employee_advance_form"):
+        cols = st.columns(2)
+        with cols[0]:
+            employee_id = st.selectbox(
+                "Select Employee",
+                options=list(employee_list.keys()),
+                format_func=lambda x: employee_list[x]
+            )
+            advance_date = st.date_input("Advance Date", date.today())
+        with cols[1]:
+            amount = st.number_input("Advance Amount", min_value=0.01, step=100.0)
+            description = st.text_input("Description", placeholder="e.g., Salary advance, Emergency advance")
+        
+        submitted = st.form_submit_button("Add Advance")
+        if submitted:
+            if employee_id and amount > 0 and description:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    # Add advance to employee ledger with entry_type 'ADVANCE'
+                    cursor.execute(
+                        """
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
+                        VALUES (?, ?, ?, ?, 0, 'ADVANCE')
+                        """,
+                        (employee_id, str(advance_date), f"Advance: {description}", amount)
+                    )
+                    
+                    conn.commit()
+                    st.success(f"Advance of Rs. {amount:,.2f} added to {employee_list[employee_id]}'s ledger.")
+                    clear_cache()
+                except sqlite3.Error as e:
+                    st.error(f"Database error: {e}")
+            else:
+                st.error("Please fill in all fields.")
+
+def add_employee_payment():
+    st.subheader("Add Employee Payment")
+    
+    employees_df = get_all_employees()
+    if employees_df.empty:
+        st.warning("No employees found. Please add employees first.")
+        return
+        
+    employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
+    
+    with st.form("employee_payment_form"):
+        cols = st.columns(2)
+        with cols[0]:
+            employee_id = st.selectbox(
+                "Select Employee",
+                options=list(employee_list.keys()),
+                format_func=lambda x: employee_list[x]
+            )
+            payment_date = st.date_input("Payment Date", date.today())
+        with cols[1]:
+            amount = st.number_input("Payment Amount", min_value=0.01, step=100.0)
+            description = st.text_input("Description", placeholder="e.g., Salary payment, Expense reimbursement")
+        
+        submitted = st.form_submit_button("Add Payment")
+        if submitted:
+            if employee_id and amount > 0 and description:
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    # Add payment to employee ledger with entry_type 'PAYMENT'
+                    cursor.execute(
+                        """
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
+                        VALUES (?, ?, ?, 0, ?, 'PAYMENT')
+                        """,
+                        (employee_id, str(payment_date), f"Payment: {description}", amount)
+                    )
+                    
+                    conn.commit()
+                    st.success(f"Payment of Rs. {amount:,.2f} added to {employee_list[employee_id]}'s ledger.")
+                    clear_cache()
+                except sqlite3.Error as e:
+                    st.error(f"Database error: {e}")
+            else:
+                st.error("Please fill in all fields.")
+
 # --- Employee Personal Expense Function ---
 def add_employee_personal_expense():
     st.subheader("Add Employee Personal Expense")
@@ -494,11 +591,11 @@ def add_employee_personal_expense():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # Add debit to employee ledger
+                    # Add debit to employee ledger with entry_type 'EXPENSE'
                     cursor.execute(
                         """
-                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                        VALUES (?, ?, ?, ?, 0)
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
+                        VALUES (?, ?, ?, ?, 0, 'EXPENSE')
                         """,
                         (employee_id, str(expense_date), f"Personal Expense: {description}", amount)
                     )
@@ -510,6 +607,116 @@ def add_employee_personal_expense():
                     st.error(f"Database error: {e}")
             else:
                 st.error("Please fill in all fields.")
+
+# --- Enhanced Ledger Summary Function ---
+def get_employee_ledger_summary(employee_id, start_date=None, end_date=None):
+    """Get comprehensive ledger summary for an employee"""
+    conn = get_db_connection()
+    
+    # Base query
+    query = """
+        SELECT 
+            entry_type,
+            SUM(debit) as total_debit,
+            SUM(credit) as total_credit
+        FROM employee_ledger 
+        WHERE employee_id = ?
+    """
+    params = [employee_id]
+    
+    # Add date filter if provided
+    if start_date and end_date:
+        query += " AND entry_date BETWEEN ? AND ?"
+        params.extend([str(start_date), str(end_date)])
+    
+    query += " GROUP BY entry_type"
+    
+    summary_df = pd.read_sql_query(query, conn, params=params)
+    
+    # Calculate totals
+    total_expenses = summary_df[summary_df['entry_type'].isin(['EXPENSE', 'REGULAR'])]['total_debit'].sum()
+    total_advances = summary_df[summary_df['entry_type'] == 'ADVANCE']['total_debit'].sum()
+    total_salary = summary_df[summary_df['entry_type'] == 'SALARY']['total_credit'].sum()
+    total_payments = summary_df[summary_df['entry_type'] == 'PAYMENT']['total_credit'].sum()
+    
+    # Calculate remaining balance
+    total_credits = total_salary + total_payments
+    total_debits = total_expenses + total_advances
+    remaining_balance = total_credits - total_debits
+    
+    return {
+        'total_expenses': total_expenses,
+        'total_advances': total_advances,
+        'total_salary': total_salary,
+        'total_payments': total_payments,
+        'total_credits': total_credits,
+        'total_debits': total_debits,
+        'remaining_balance': remaining_balance
+    }
+
+# --- Enhanced PDF for Ledger Summary ---
+def generate_ledger_summary_pdf(employee_name, ledger_df, summary_data, date_range=None):
+    pdf = PDF(orientation='P', unit='mm', format='A4')
+    pdf.report_title = f"Employee Ledger Summary - {employee_name}"
+    
+    if date_range:
+        pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+    else:
+        pdf.date_range_str = "All Time Records"
+        
+    pdf.add_page()
+    
+    # Summary Section
+    pdf.set_font('Arial', 'B', 14)
+    pdf.cell(0, 10, "Ledger Summary", 0, 1, 'L')
+    pdf.ln(5)
+    
+    # Summary table
+    pdf.set_font('Arial', 'B', 11)
+    pdf.set_fill_color(224, 235, 255)
+    pdf.cell(0, 8, "Category", 1, 0, 'L', 1)
+    pdf.cell(0, 8, "Amount (Rs.)", 1, 1, 'R', 1)
+    
+    pdf.set_font('Arial', '', 10)
+    categories = [
+        ("Total Expenses", summary_data['total_expenses']),
+        ("Total Advances", summary_data['total_advances']),
+        ("Total Salary", summary_data['total_salary']),
+        ("Total Payments", summary_data['total_payments']),
+        ("Total Credits", summary_data['total_credits']),
+        ("Total Debits", summary_data['total_debits'])
+    ]
+    
+    for category, amount in categories:
+        pdf.cell(0, 8, category, 1, 0, 'L')
+        pdf.cell(0, 8, f"{amount:,.2f}", 1, 1, 'R')
+    
+    # Remaining Balance (highlighted)
+    pdf.set_font('Arial', 'B', 12)
+    pdf.set_fill_color(210, 210, 210)
+    balance_text = "Remaining Balance (Payable to Employee)" if summary_data['remaining_balance'] >= 0 else "Remaining Balance (Payable to Company)"
+    pdf.cell(0, 10, balance_text, 1, 0, 'L', 1)
+    pdf.cell(0, 10, f"Rs. {abs(summary_data['remaining_balance']):,.2f}", 1, 1, 'R', 1)
+    
+    pdf.ln(10)
+    
+    # Detailed Ledger
+    if not ledger_df.empty:
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 10, "Detailed Ledger Entries", 0, 1, 'L')
+        pdf.ln(5)
+        
+        # Prepare data for table
+        display_df = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
+        display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
+        
+        # Format amounts
+        display_df['Debit'] = display_df['Debit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
+        display_df['Credit'] = display_df['Credit'].apply(lambda x: f"{x:,.2f}" if x > 0 else "0.00")
+        
+        pdf.add_table(display_df)
+    
+    return pdf.output(dest='S').encode('latin-1')
 
 # --- Main App Pages ---
 def page_dashboard():
@@ -543,7 +750,7 @@ def page_dashboard():
     - **Expense Management**: Log company expenses and manage expense categories.
     - **Employee Personal Expenses**: Add personal expenses that will be deducted from employee salary.
     - **Salary Management**: Generate monthly salary sheets and individual pay slips.
-    - **Employee Ledger**: View detailed financial ledgers for each employee.
+    - **Employee Ledger**: View detailed financial ledgers for each employee with comprehensive summary.
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
@@ -686,7 +893,7 @@ def page_expense_management():
         
         description = st.text_input("Description", placeholder="e.g., Office electricity bill")
         
-        st.info("If this expense is an advance or deduction for an employee, select their name. This amount will be deducted from their salary.")
+        st.info("If this expense is an advance or deduction for an employee, select their name. This amount will be added to their ledger.")
         employee_id = st.selectbox("Employee (Optional)", options=list(employee_list_with_none.keys()), format_func=lambda x: employee_list_with_none[x])
 
         submitted = st.form_submit_button("Log Expense")
@@ -710,12 +917,12 @@ def page_expense_management():
                         ledger_desc = f"Company Expense: {description} (Ref ID: {expense_id})"
                         cursor.execute(
                             """
-                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
-                            VALUES (?, ?, ?, ?, 0, ?)
+                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, entry_type)
+                            VALUES (?, ?, ?, ?, 0, ?, 'EXPENSE')
                             """,
                             (employee_id, str(expense_date), ledger_desc, amount, expense_id)
                         )
-                        st.success(f"Company expense logged and Rs. {amount:,.2f} will be deducted from {employee_list[employee_id]}'s salary.")
+                        st.success(f"Company expense logged and Rs. {amount:,.2f} added to {employee_list[employee_id]}'s ledger.")
                     else:
                         st.success("Company expense logged successfully.")
                     
@@ -898,42 +1105,55 @@ def page_expense_management():
 
 # --- Employee Personal Expenses Page ---
 def page_employee_personal_expenses():
-    st.title("Employee Personal Expenses")
+    st.title("Employee Personal Expenses & Advances")
     
     st.info("""
-    Use this page to add personal expenses for employees. These expenses will be deducted from their salary.
-    Examples: Travel allowance, meal expenses, phone bills, etc.
+    Use this page to manage employee financial transactions:
+    - **Personal Expenses**: These expenses will be recorded in employee ledger
+    - **Advances**: Employee advances that will be tracked separately
+    - **Payments**: Direct payments to employees
     """)
     
-    add_employee_personal_expense()
+    tab1, tab2, tab3 = st.tabs(["Personal Expenses", "Employee Advances", "Employee Payments"])
+    
+    with tab1:
+        add_employee_personal_expense()
+    
+    with tab2:
+        add_employee_advance()
+    
+    with tab3:
+        add_employee_payment()
     
     st.divider()
     
-    st.subheader("Recent Personal Expenses")
+    st.subheader("Recent Financial Transactions")
     try:
         conn = get_db_connection()
-        personal_expenses_df = pd.read_sql_query(
+        transactions_df = pd.read_sql_query(
             """
             SELECT 
                 el.entry_date as "Date",
                 e.name as "Employee",
+                el.entry_type as "Type",
                 el.description as "Description",
-                el.debit as "Amount"
+                el.debit as "Debit",
+                el.credit as "Credit"
             FROM employee_ledger el
             JOIN employees e ON el.employee_id = e.id
-            WHERE el.description LIKE 'Personal Expense:%'
+            WHERE el.entry_type IN ('EXPENSE', 'ADVANCE', 'PAYMENT')
             ORDER BY el.entry_date DESC
             LIMIT 50
             """, conn
         )
         
-        if not personal_expenses_df.empty:
-            st.dataframe(personal_expenses_df, use_container_width=True)
+        if not transactions_df.empty:
+            st.dataframe(transactions_df, use_container_width=True)
         else:
-            st.info("No personal expenses recorded yet.")
+            st.info("No financial transactions recorded yet.")
             
     except Exception as e:
-        st.error(f"Error loading personal expenses: {e}")
+        st.error(f"Error loading transactions: {e}")
 
 def page_salary_management():
     st.title("Salary Management")
@@ -975,7 +1195,7 @@ def page_salary_management():
                     cursor.execute(
                         """
                         SELECT 1 FROM employee_ledger 
-                        WHERE employee_id = ? AND description = ?
+                        WHERE employee_id = ? AND description = ? AND entry_type = 'SALARY'
                         """,
                         (emp['id'], description)
                     )
@@ -985,8 +1205,8 @@ def page_salary_management():
                         
                     cursor.execute(
                         """
-                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                        VALUES (?, ?, ?, 0, ?)
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
+                        VALUES (?, ?, ?, 0, ?, 'SALARY')
                         """,
                         (emp['id'], str(first_day), description, salary)
                     )
@@ -1015,6 +1235,9 @@ def page_salary_management():
                 e.name AS "Employee Name",
                 e.designation AS "Designation",
                 e.salary AS "Base Salary",
+                COALESCE(SUM(CASE WHEN l.entry_type = 'SALARY' THEN l.credit ELSE 0 END), 0) AS "Salary Credits",
+                COALESCE(SUM(CASE WHEN l.entry_type = 'EXPENSE' THEN l.debit ELSE 0 END), 0) AS "Expense Deductions",
+                COALESCE(SUM(CASE WHEN l.entry_type = 'ADVANCE' THEN l.debit ELSE 0 END), 0) AS "Advance Deductions",
                 COALESCE(SUM(l.credit), 0) AS "Total Credits",
                 COALESCE(SUM(l.debit), 0) AS "Total Deductions",
                 (COALESCE(SUM(l.credit), 0) - COALESCE(SUM(l.debit), 0)) AS "Net Salary",
@@ -1040,7 +1263,7 @@ def page_salary_management():
                 f"Salary Sheet - {selected_month.strftime('%B %Y')}", 
                 date_range=(first_day, last_day),
                 orientation='L',
-                totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"]
+                totals_cols=["Base Salary", "Salary Credits", "Expense Deductions", "Advance Deductions", "Total Credits", "Total Deductions", "Net Salary"]
             )
             
             st.download_button(
@@ -1093,7 +1316,7 @@ def page_salary_management():
             with get_db_connection() as conn:
                 ledger_df = pd.read_sql_query(
                     """
-                    SELECT description, credit, debit 
+                    SELECT description, credit, debit, entry_type
                     FROM employee_ledger 
                     WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
                     ORDER BY entry_date
@@ -1138,7 +1361,7 @@ def page_employee_ledger():
         format_func=lambda x: employee_list[x]
     )
     
-    show_all_time = st.checkbox("Show All-Time Ledger? (Disables date filter)", key="all_time_toggle")
+    show_all_time = st.checkbox("Show All-Time Ledger? (Disables date filter)", value=True, key="all_time_toggle")
 
     cols = st.columns(2)
     today = date.today()
@@ -1153,20 +1376,42 @@ def page_employee_ledger():
             return
 
         try:
-            conn = get_db_connection()
-            all_time_df = pd.read_sql_query(
-                "SELECT (COALESCE(SUM(credit), 0) - COALESCE(SUM(debit), 0)) as balance FROM employee_ledger WHERE employee_id = ?",
-                conn,
-                params=(selected_emp_id,)
+            # Get comprehensive ledger summary
+            summary_data = get_employee_ledger_summary(
+                selected_emp_id, 
+                None if show_all_time else start_date, 
+                None if show_all_time else end_date
             )
-            all_time_balance = all_time_df['balance'].iloc[0] if not all_time_df.empty else 0
-            st.metric(label=f"All-Time Balance for {employee_list[selected_emp_id]}", value=f"Rs. {all_time_balance:,.2f}")
+            
+            # Display summary metrics
+            st.subheader("Ledger Summary")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Expenses", f"Rs. {summary_data['total_expenses']:,.2f}")
+            with col2:
+                st.metric("Total Advances", f"Rs. {summary_data['total_advances']:,.2f}")
+            with col3:
+                st.metric("Total Salary", f"Rs. {summary_data['total_salary']:,.2f}")
+            with col4:
+                st.metric("Total Payments", f"Rs. {summary_data['total_payments']:,.2f}")
+            
+            # Display remaining balance with appropriate color
+            balance_col1, balance_col2 = st.columns([1, 1])
+            with balance_col1:
+                if summary_data['remaining_balance'] >= 0:
+                    st.success(f"**Balance Payable to Employee: Rs. {summary_data['remaining_balance']:,.2f}**")
+                else:
+                    st.error(f"**Balance Payable to Company: Rs. {abs(summary_data['remaining_balance']):,.2f}**")
+            
+            with balance_col2:
+                st.metric("Net Balance", f"Rs. {summary_data['remaining_balance']:,.2f}")
         
         except Exception as e:
-            st.error(f"Error fetching all-time balance: {e}")
+            st.error(f"Error fetching ledger summary: {e}")
         
         st.divider()
-        st.subheader(f"Ledger History")
+        st.subheader(f"Ledger History - {employee_list[selected_emp_id]}")
 
         try:
             conn = get_db_connection()
@@ -1177,6 +1422,7 @@ def page_employee_ledger():
                         id,
                         entry_date AS "Date",
                         description AS "Description",
+                        entry_type AS "Type",
                         credit AS "Credit",
                         debit AS "Debit"
                     FROM employee_ledger
@@ -1191,6 +1437,7 @@ def page_employee_ledger():
                         id,
                         entry_date AS "Date",
                         description AS "Description",
+                        entry_type AS "Type",
                         credit AS "Credit",
                         debit AS "Debit"
                     FROM employee_ledger
@@ -1202,39 +1449,61 @@ def page_employee_ledger():
 
             ledger_df = pd.read_sql_query(query, conn, params=params)
 
-            balance_df = ledger_df.copy()
-            balance_df['Balance'] = (balance_df['Credit'] - balance_df['Debit']).cumsum()
-            
-            # Display without the ID column
-            display_df = balance_df.drop('id', axis=1) if 'id' in balance_df.columns else balance_df
-            st.dataframe(display_df, use_container_width=True)
-            
-            final_balance = balance_df['Balance'].iloc[-1] if not balance_df.empty else 0
-            if not show_all_time:
-                st.metric(label="Balance (in selected date range)", value=f"Rs. {final_balance:,.2f}")
-
-            if st.button("Download Ledger (PDF)"):
-                pdf_bytes = generate_pdf_report(
-                    display_df, 
-                    f"Ledger for {employee_list[selected_emp_id]}", 
-                    date_range=date_range if not show_all_time else None,
-                    orientation='P',
-                    totals_cols=["Credit", "Debit"]
-                )
+            if not ledger_df.empty:
+                # Calculate running balance
+                ledger_df['Balance'] = (ledger_df['Credit'] - ledger_df['Debit']).cumsum()
                 
-                st.download_button(
-                    label="Download Ledger PDF",
-                    data=pdf_bytes,
-                    file_name=f"Ledger_{employee_list[selected_emp_id].replace(' ', '_')}.pdf",
-                    mime="application/pdf"
-                )
+                # Display without the ID column
+                display_df = ledger_df.drop('id', axis=1) if 'id' in ledger_df.columns else ledger_df
+                st.dataframe(display_df, use_container_width=True)
+                
+                # Download buttons
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("Download Ledger (PDF)"):
+                        pdf_bytes = generate_ledger_summary_pdf(
+                            employee_list[selected_emp_id],
+                            ledger_df,
+                            summary_data,
+                            date_range=None if show_all_time else date_range
+                        )
+                        
+                        st.download_button(
+                            label="Download Ledger PDF",
+                            data=pdf_bytes,
+                            file_name=f"Ledger_Summary_{employee_list[selected_emp_id].replace(' ', '_')}.pdf",
+                            mime="application/pdf"
+                        )
+                
+                with col2:
+                    if st.button("Download Detailed Ledger (PDF)"):
+                        detailed_df = display_df.copy()
+                        detailed_df.columns = [col.replace('_', ' ').title() for col in detailed_df.columns]
+                        
+                        pdf_bytes = generate_pdf_report(
+                            detailed_df, 
+                            f"Detailed Ledger - {employee_list[selected_emp_id]}", 
+                            date_range=date_range if not show_all_time else None,
+                            orientation='L',
+                            totals_cols=["Credit", "Debit"]
+                        )
+                        
+                        st.download_button(
+                            label="Download Detailed PDF",
+                            data=pdf_bytes,
+                            file_name=f"Detailed_Ledger_{employee_list[selected_emp_id].replace(' ', '_')}.pdf",
+                            mime="application/pdf"
+                        )
+            else:
+                st.info("No ledger entries found for the selected criteria.")
 
         except Exception as e:
             st.error(f"Error fetching ledger: {e}")
 
         st.divider()
         
-        # --- NEW: Delete Ledger Entries Section ---
+        # Delete Ledger Entries Section
         st.subheader("Manage Ledger Entries")
         st.warning("""
         **Warning:** Deleting ledger entries can affect salary calculations and accounting records. 
@@ -1251,6 +1520,7 @@ def page_employee_ledger():
                         id,
                         entry_date AS "Date",
                         description AS "Description",
+                        entry_type AS "Type",
                         credit AS "Credit",
                         debit AS "Debit",
                         related_expense_id
@@ -1265,6 +1535,7 @@ def page_employee_ledger():
                         id,
                         entry_date AS "Date",
                         description AS "Description",
+                        entry_type AS "Type",
                         credit AS "Credit",
                         debit AS "Debit",
                         related_expense_id
@@ -1279,7 +1550,7 @@ def page_employee_ledger():
             if not delete_df.empty:
                 # Create a user-friendly display for selection
                 delete_df['Display'] = delete_df.apply(
-                    lambda row: f"ID: {row['id']} | {row['Date']} | {row['Description']} | Credit: {row['Credit']} | Debit: {row['Debit']}", 
+                    lambda row: f"ID: {row['id']} | {row['Date']} | {row['Type']} | {row['Description']} | Credit: {row['Credit']} | Debit: {row['Debit']}", 
                     axis=1
                 )
                 
@@ -1579,8 +1850,8 @@ def page_data_import():
                             if emp_id:
                                 cursor.execute(
                                     """
-                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
-                                    VALUES (?, ?, ?, ?, 0, ?)
+                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, entry_type)
+                                    VALUES (?, ?, ?, ?, 0, ?, 'EXPENSE')
                                     """,
                                     (emp_id, row['expense_date'], f"Imported Expense: {row['description']}", row['amount'], expense_id)
                                 )
@@ -1597,8 +1868,8 @@ def page_data_import():
 
     with tab4:
         st.subheader("1. Download Ledger Template")
-        st.markdown("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
-        cols = ["employee_name", "entry_date", "description", "debit", "credit"]
+        st.markdown("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both. Add entry_type: SALARY, EXPENSE, ADVANCE, or PAYMENT.")
+        cols = ["employee_name", "entry_date", "description", "debit", "credit", "entry_type"]
         excel_data, file_name = generate_excel_template(cols, "ledger_import_template.xlsx")
         st.download_button(
             label="Download Ledger Template",
@@ -1639,10 +1910,10 @@ def page_data_import():
                             
                             cursor.execute(
                                 """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                VALUES (?, ?, ?, ?, ?)
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, entry_type)
+                                VALUES (?, ?, ?, ?, ?, ?)
                                 """,
-                                (emp_id, row['entry_date'], row['description'], row['debit'], row['credit'])
+                                (emp_id, row['entry_date'], row['description'], row['debit'], row['credit'], row['entry_type'])
                             )
                             imported_count += 1
                     
