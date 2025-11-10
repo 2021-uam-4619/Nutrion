@@ -8,3 +8,4 @@ openpyxl
 reportlab
 fpdf
 plotly
+streamlit-option-menu
