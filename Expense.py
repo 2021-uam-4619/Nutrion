@@ -21,9 +21,9 @@ class PDF(FPDF):
     def header(self):
         # Add company logo
         try:
-            self.image('logo.png', 10, 8, 25)  # x=10, y=8, width=25mm
+            self.image('logo.png', 10, 8, 25)
         except:
-            pass  # If logo doesn't exist, continue without it
+            pass
         
         self.set_font('Arial', 'B', 15)
         self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
@@ -41,10 +41,9 @@ class PDF(FPDF):
         
         # Add signature image
         try:
-            self.image('Asim Siganture.jpg', self.l_margin, self.get_y(), 40)  # Adjust width as needed
-            self.ln(15)  # Add space after signature
+            self.image('Asim Siganture.jpg', self.l_margin, self.get_y(), 40)
+            self.ln(15)
         except:
-            # If signature doesn't exist, show text
             self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
         
         self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
@@ -117,15 +116,23 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Check if employees table has join_date column, if not, alter table
+    # Check and update employees table
     c.execute("PRAGMA table_info(employees)")
     columns = [column[1] for column in c.fetchall()]
     
     if 'join_date' not in columns:
         c.execute("ALTER TABLE employees ADD COLUMN join_date DATE")
-        st.info("Updated employees table with join_date column.")
+        st.success("Updated employees table with join_date column.")
     
-    # Create tables if they don't exist with updated schema
+    # Check and update employee_ledger table
+    c.execute("PRAGMA table_info(employee_ledger)")
+    ledger_columns = [column[1] for column in c.fetchall()]
+    
+    if 'related_expense_id' not in ledger_columns:
+        c.execute("ALTER TABLE employee_ledger ADD COLUMN related_expense_id INTEGER")
+        st.success("Updated employee_ledger table with related_expense_id column.")
+    
+    # Create tables if they don't exist
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -265,7 +272,11 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
 @st.cache_data(ttl=60)
 def get_all_employees():
     conn = get_db_connection()
-    return pd.read_sql_query("SELECT * FROM employees ORDER BY name", conn)
+    df = pd.read_sql_query("SELECT * FROM employees ORDER BY name", conn)
+    # Convert join_date to string for compatibility with data editor
+    if 'join_date' in df.columns:
+        df['join_date'] = df['join_date'].astype(str)
+    return df
 
 @st.cache_data(ttl=60)
 def get_all_categories():
@@ -308,7 +319,7 @@ def generate_excel_template(columns, file_name):
     output.seek(0)
     return output, file_name
 
-# --- NEW: Employee Personal Expense Function ---
+# --- Employee Personal Expense Function ---
 def add_employee_personal_expense():
     st.subheader("Add Employee Personal Expense")
     
@@ -443,13 +454,17 @@ def page_employee_management():
             st.info("No employees found. Add employees using the form above.")
             return
 
+        # Convert join_date to string for data editor compatibility
+        if 'join_date' in employees_df.columns:
+            employees_df['join_date'] = employees_df['join_date'].astype(str)
+
         edited_df = st.data_editor(
             employees_df,
             num_rows="dynamic",
             use_container_width=True,
             column_config={
                 "id": st.column_config.NumberColumn("ID", disabled=True),
-                "join_date": st.column_config.DateColumn("Join Date", format="YYYY-MM-DD")
+                "join_date": st.column_config.TextColumn("Join Date")
             },
             key="employee_editor"
         )
@@ -524,7 +539,7 @@ def page_expense_management():
         
         description = st.text_input("Description", placeholder="e.g., Office electricity bill")
         
-        st.info("If this expense is an advance or deduction for an employee, select their name.")
+        st.info("If this expense is an advance or deduction for an employee, select their name. This amount will be deducted from their salary.")
         employee_id = st.selectbox("Employee (Optional)", options=list(employee_list_with_none.keys()), format_func=lambda x: employee_list_with_none[x])
 
         submitted = st.form_submit_button("Log Expense")
@@ -553,7 +568,7 @@ def page_expense_management():
                             """,
                             (employee_id, str(expense_date), ledger_desc, amount, expense_id)
                         )
-                        st.success(f"Expense logged and Rs. {amount} debited from {employee_list[employee_id]}'s ledger.")
+                        st.success(f"Company expense logged and Rs. {amount:,.2f} will be deducted from {employee_list[employee_id]}'s salary.")
                     else:
                         st.success("Company expense logged successfully.")
                     
@@ -658,13 +673,12 @@ def page_expense_management():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    if pd.notna(expense_details['employee_id']):
-                        cursor.execute(
-                            "DELETE FROM employee_ledger WHERE related_expense_id = ?",
-                            (int(expense_to_edit),)
-                        )
-                        st.info("Removed corresponding debit from employee's ledger.")
-
+                    # Delete related ledger entry if exists
+                    cursor.execute(
+                        "DELETE FROM employee_ledger WHERE related_expense_id = ?",
+                        (int(expense_to_edit),)
+                    )
+                    
                     cursor.execute("DELETE FROM company_expenses WHERE id = ?", (int(expense_to_edit),))
                     conn.commit()
                     st.success(f"Expense ID {expense_to_edit} and its related ledger entry deleted.")
@@ -735,7 +749,7 @@ def page_expense_management():
     except Exception as e:
         st.error(f"Error loading expenses: {e}")
 
-# --- NEW PAGE: Employee Personal Expenses ---
+# --- Employee Personal Expenses Page ---
 def page_employee_personal_expenses():
     st.title("Employee Personal Expenses")
     
@@ -959,7 +973,6 @@ def page_salary_management():
         
         except Exception as e:
             st.error(f"Error generating individual slip: {e}")
-            st.error("Please ensure the selected employee exists and data is available.")
 
 def page_employee_ledger():
     st.title("Employee Ledger Management")
