@@ -369,7 +369,7 @@ def page_employee_management():
                         INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
                         """,
-                        (name, designation, salary, bank, account_title, str(join_date))
+                        (name, designation, salary, bank, account_title, account_no, str(join_date))
                     )
                     conn.commit()
                     st.success(f"Employee '{name}' added successfully.")
@@ -1005,7 +1005,8 @@ def page_employee_ledger():
                 date_range = (start_date, end_date) # For PDF
             # --- END MODIFICATION ---
 
-            ledger_df = pd.read_sql_query(conn=conn, sql=query, params=params)
+            # --- FIX: Changed 'conn' to 'con' ---
+            ledger_df = pd.read_sql_query(con=conn, sql=query, params=params)
 
             # Calculate running balance
             balance_df = ledger_df.copy()
@@ -1095,7 +1096,8 @@ def page_reporting():
 
                 query += " ORDER BY ce.expense_date"
                 
-                report_df = pd.read_sql_query(conn=conn, sql=query, params=params)
+                # --- FIX: Changed 'conn' to 'con' ---
+                report_df = pd.read_sql_query(con=conn, sql=query, params=params)
                 
                 pdf_bytes = generate_pdf_report(
                     report_df, 
