@@ -19,59 +19,47 @@ class PDF(FPDF):
         self.date_range_str = ""
 
     def header(self):
-        # Logo (optional - requires image file)
-        # self.image('logo.png', 10, 8, 33)
         self.set_font('Arial', 'B', 15)
         self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
         self.set_font('Arial', 'B', 12)
         self.cell(0, 10, self.report_title, 0, 1, 'C')
         self.set_font('Arial', '', 10)
         self.cell(0, 7, self.date_range_str, 0, 1, 'C')
-        self.ln(5) # Line break
+        self.ln(5)
 
     def footer(self):
-        self.set_y(-35) # Position 3.5 cm from bottom
+        self.set_y(-35)
         self.set_font('Arial', '', 10)
         
-        # --- Signature Lines ---
         footer_width = self.w - self.l_margin - self.r_margin
-        # --- MODIFIED: Added computerized signature ---
         self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
         self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
         self.ln(10)
 
-        # --- Page Number and Developer Info ---
         self.set_font('Arial', 'I', 8)
         self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
         self.set_font('Arial', 'B', 9)
-        self.set_fill_color(224, 235, 255) # Light blue header
+        self.set_fill_color(224, 235, 255)
         
-        # Calculate column widths
         num_cols = len(df.columns)
         total_width = self.w - self.l_margin - self.r_margin
-        
-        # Simple equal width for all columns
         col_width = total_width / num_cols
         
-        # Render Headers
         for col in df.columns:
             self.cell(col_width, 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
-        # Render Data
         self.set_font('Arial', '', 8)
         self.set_fill_color(255)
         fill = False
         for index, row in df.iterrows():
             for col in df.columns:
                 cell_text = str(row[col])
-                # Check if this column is numeric for right alignment
                 if pd.api.types.is_numeric_dtype(df[col]):
                     try:
-                        # --- FIX: Handle potential None or NaN values ---
                         cell_value = row[col]
                         if pd.isna(cell_value):
                             cell_text = "N/A"
@@ -87,20 +75,17 @@ class PDF(FPDF):
             self.ln()
             fill = not fill
         
-        # Draw bottom line of the table
         self.cell(total_width, 0, '', 'T', 1)
         
-        # --- Add Totals Row ---
         if totals_cols:
             self.set_font('Arial', 'B', 9)
-            self.set_fill_color(240, 240, 240) # Light grey for total
+            self.set_fill_color(240, 240, 240)
             grand_total = 0.0
             
             for i, col in enumerate(df.columns):
                 if i == 0:
                     self.cell(col_width, 7, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
-                    # --- FIX: Use .sum() on clean data ---
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
                     self.cell(col_width, 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
@@ -118,7 +103,6 @@ def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Employee Table (Req 2, 5)
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -132,7 +116,6 @@ def init_db():
         )
     ''')
     
-    # Expense Categories Table (Req 3, 6, 10)
     c.execute('''
         CREATE TABLE IF NOT EXISTS expense_categories (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,7 +123,6 @@ def init_db():
         )
     ''')
     
-    # Company Expenses Table (Req 3)
     c.execute('''
         CREATE TABLE IF NOT EXISTS company_expenses (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,13 +130,12 @@ def init_db():
             amount REAL NOT NULL,
             expense_date DATE NOT NULL,
             category_id INTEGER,
-            employee_id INTEGER, -- For Req 11
+            employee_id INTEGER,
             FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL,
             FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
         )
     ''')
     
-    # Employee Ledger Table (Req 5, 11)
     c.execute('''
         CREATE TABLE IF NOT EXISTS employee_ledger (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -163,7 +144,7 @@ def init_db():
             description TEXT,
             debit REAL DEFAULT 0,
             credit REAL DEFAULT 0,
-            related_expense_id INTEGER, -- NEW: To link ledger debit to expense
+            related_expense_id INTEGER,
             FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
             FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
@@ -173,7 +154,6 @@ def init_db():
 
 # --- PDF Generation Function ---
 def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
-    """Generates a professional PDF report from a DataFrame."""
     pdf = PDF(orientation=orientation, unit='mm', format='A4')
     pdf.report_title = title
     if date_range:
@@ -186,22 +166,18 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     pdf.set_right_margin(10)
     pdf.add_page()
     
-    # Add Table
     if df.empty:
         pdf.set_font('Arial', 'I', 10)
         pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
     else:
         pdf.add_table(df, totals_cols=totals_cols)
     
-    # Return PDF as bytes
     return pdf.output(dest='S').encode('latin-1')
 
-# --- NEW FUNCTION for Individual Salary Slips ---
 def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
-    """Generates a formatted PDF for a single employee's salary slip."""
     pdf = PDF(orientation='P', unit='mm', format='A4')
     pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
-    pdf.date_range_str = "" # No date range needed
+    pdf.date_range_str = ""
     pdf.add_page()
     
     pdf.set_font('Arial', 'B', 12)
@@ -211,7 +187,6 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     pdf.cell(0, 7, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
     pdf.ln(5)
 
-    # --- Earnings ---
     pdf.set_font('Arial', 'B', 11)
     pdf.set_fill_color(224, 235, 255)
     pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
@@ -231,20 +206,17 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             pdf.cell(col_width * 0.75, 7, f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00", 1, 0, 'R')
             pdf.cell(col_width * 0.75, 7, f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00", 1, 1, 'R')
 
-    # --- Totals ---
     pdf.set_font('Arial', 'B', 10)
     pdf.cell(col_width * 1.5, 7, "Total", 1, 0, 'R')
     pdf.cell(col_width * 0.75, 7, f"{total_credits:,.2f}", 1, 0, 'R')
     pdf.cell(col_width * 0.75, 7, f"{total_debits:,.2f}", 1, 1, 'R')
 
-    # --- Net Salary ---
     pdf.ln(5)
     pdf.set_font('Arial', 'B', 12)
     pdf.set_fill_color(210, 210, 210)
     pdf.cell(col_width * 1.5, 10, "Net Salary Payable", 1, 0, 'R', fill=True)
     pdf.cell(col_width * 1.5, 10, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
     
-    # Add bank details
     pdf.ln(10)
     pdf.set_font('Arial', 'B', 10)
     pdf.cell(0, 7, "Bank Details", 0, 1, 'L')
@@ -254,7 +226,6 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
     pdf.cell(0, 7, f"  Account No: {emp_details['account_no']}", 0, 1, 'L')
 
     return pdf.output(dest='S').encode('latin-1')
-
 
 # --- Helper Functions ---
 @st.cache_data(ttl=60)
@@ -267,17 +238,13 @@ def get_all_categories():
     conn = get_db_connection()
     return pd.read_sql_query("SELECT * FROM expense_categories ORDER BY name", conn)
 
-# --- NEW: Helper for Dashboard Stats ---
 @st.cache_data(ttl=60)
 def get_dashboard_stats():
-    """Fetches key stats for the dashboard."""
     conn = get_db_connection()
     
-    # 1. Total Employees
     emp_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM employees", conn)
     emp_count = emp_count_df['count'].iloc[0] if not emp_count_df.empty else 0
     
-    # 2. Total Expenses (Current Month)
     today = date.today()
     first_day_month = today.replace(day=1)
     last_day_month = (first_day_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
@@ -289,7 +256,6 @@ def get_dashboard_stats():
     )
     exp_total = exp_total_df['total'].iloc[0] if not exp_total_df.empty and exp_total_df['total'].iloc[0] else 0.0
     
-    # 3. Total Categories
     cat_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM expense_categories", conn)
     cat_count = cat_count_df['count'].iloc[0] if not cat_count_df.empty else 0
     
@@ -299,13 +265,11 @@ def clear_cache():
     st.cache_data.clear()
 
 def generate_excel_template(columns, file_name):
-    """Creates a downloadable empty Excel template."""
     df_template = pd.DataFrame(columns=columns)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_template.to_excel(writer, index=False, sheet_name='Sheet1')
         worksheet = writer.sheets['Sheet1']
-        # Add comments as instructions
         worksheet.write_comment('A1', 'Do not change the column names. Fill data in rows below.')
     output.seek(0)
     return output, file_name
@@ -314,7 +278,6 @@ def generate_excel_template(columns, file_name):
 def page_dashboard():
     st.title(f"Welcome to {COMPANY_NAME} HR & Expense Manager")
     
-    # --- NEW: Dashboard Stats ---
     try:
         emp_count, exp_total, cat_count = get_dashboard_stats()
         
@@ -337,13 +300,10 @@ def page_dashboard():
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
-    # --- REMOVED FAILING IMAGE LINE ---
-    # st.image("https://placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
 
 def page_employee_management():
     st.title("Employee Management")
     
-    # --- Add New Employee Form ---
     st.subheader("Add New Employee")
     with st.form("new_employee_form", clear_on_submit=True):
         cols = st.columns(2)
@@ -379,9 +339,7 @@ def page_employee_management():
 
     st.divider()
 
-    # --- Manage Existing Employees (Req 4) ---
     st.subheader("Manage Employees")
-    # --- NEW: Added help text for data editor ---
     st.help("""
     Use the table below to edit or delete employees.
     - **To Edit:** Click on any cell, make your change, and press Enter.
@@ -396,7 +354,6 @@ def page_employee_management():
             st.info("No employees found. Add employees using the form above.")
             return
 
-        # Use st.data_editor for CRUD
         edited_df = st.data_editor(
             employees_df,
             num_rows="dynamic",
@@ -408,30 +365,24 @@ def page_employee_management():
             key="employee_editor"
         )
 
-        # Detect changes and update DB
         if st.button("Save Changes"):
             conn = get_db_connection()
             cursor = conn.cursor()
             
-            # 1. Detect Updates/Deletions
             original_ids = set(employees_df['id'])
-            current_ids = set(edited_df['id'].dropna()) # Get IDs from edited df
+            current_ids = set(edited_df['id'].dropna())
             
-            # Deletions
             deleted_ids = original_ids - current_ids
             if deleted_ids:
                 for del_id in deleted_ids:
                     cursor.execute("DELETE FROM employees WHERE id = ?", (int(del_id),))
                 st.success(f"Deleted {len(deleted_ids)} employee(s).")
 
-            # Updates & Additions
             for _, row in edited_df.iterrows():
-                # --- FIX: Cast date to string to prevent type errors ---
                 join_date_str = str(row['join_date']) if pd.notna(row['join_date']) else None
                 
                 if pd.isna(row['id']):
-                    # New Row (Addition)
-                    if row['name']: # Only add if name is present
+                    if row['name']:
                         cursor.execute(
                             """
                             INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
@@ -440,7 +391,6 @@ def page_employee_management():
                             (row['name'], row['designation'], row['salary'], row['bank'], row['account_title'], row['account_no'], join_date_str)
                         )
                 else:
-                    # Existing Row (Update)
                     cursor.execute(
                         """
                         UPDATE employees SET
@@ -453,26 +403,21 @@ def page_employee_management():
             conn.commit()
             st.success("Changes saved successfully.")
             clear_cache()
-            st.rerun() # Rerun to show fresh data
+            st.rerun()
 
     except Exception as e:
         st.error(f"Error loading employees: {e}")
 
-
 def page_expense_management():
     st.title("Expense Management")
 
-    # --- Log New Expense (Req 3) ---
     st.subheader("Log New Company Expense")
     
-    # Get categories for dropdown
     categories_df = get_all_categories()
     category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
     
-    # Get employees for dropdown (Req 11)
     employees_df = get_all_employees()
     employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
-    # Add a "None" option for expenses not tied to an employee
     employee_list_with_none = {0: "N/A (General Company Expense)"}
     employee_list_with_none.update(employee_list)
 
@@ -490,8 +435,7 @@ def page_expense_management():
         
         description = st.text_input("Description", placeholder="e.g., Office electricity bill")
         
-        # Req 11: Link expense to employee
-        st.info("If this expense is an advance or deduction for an employee, select their name. (Req 11)")
+        st.info("If this expense is an advance or deduction for an employee, select their name.")
         employee_id = st.selectbox("Employee (Optional)", options=list(employee_list_with_none.keys()), format_func=lambda x: employee_list_with_none[x])
 
         submitted = st.form_submit_button("Log Expense")
@@ -501,7 +445,6 @@ def page_expense_management():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # 1. Log the company expense
                     cursor.execute(
                         """
                         INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id)
@@ -510,10 +453,8 @@ def page_expense_management():
                         (description, amount, str(expense_date), category_id, employee_id if employee_id != 0 else None)
                     )
                     
-                    # Get the ID of the expense we just inserted
                     expense_id = cursor.lastrowid
                     
-                    # 2. (Req 11) If linked to employee, add as a DEBIT to their ledger
                     if employee_id != 0:
                         ledger_desc = f"Expense: {description} (Ref ID: {expense_id})"
                         cursor.execute(
@@ -536,9 +477,7 @@ def page_expense_management():
 
     st.divider()
     
-    # --- Manage Expense Categories (Req 3, 10) ---
     st.subheader("Manage Expense Categories")
-    # --- NEW: Added help text for data editor ---
     st.help("""
     Use the table below to edit or delete categories.
     - **To Edit:** Click on the 'name' cell, make your change, and press Enter.
@@ -588,7 +527,6 @@ def page_expense_management():
 
     st.divider()
 
-    # --- Manage Logged Expenses (Req 4) ---
     st.subheader("Manage Logged Expenses")
     try:
         conn = get_db_connection()
@@ -601,8 +539,8 @@ def page_expense_management():
                 ce.amount, 
                 ec.name as category,
                 e.name as employee,
-                ce.category_id, -- Keep for editing
-                ce.employee_id -- Keep for editing
+                ce.category_id,
+                ce.employee_id
             FROM company_expenses ce
             LEFT JOIN expense_categories ec ON ce.category_id = ec.id
             LEFT JOIN employees e ON ce.employee_id = e.id
@@ -616,10 +554,8 @@ def page_expense_management():
 
         cols_to_show = ['id', 'expense_date', 'description', 'amount', 'category', 'employee']
         
-        # --- Display in a non-editable table first ---
         st.dataframe(expenses_df[cols_to_show], use_container_width=True)
 
-        # --- Edit/Delete Section ---
         st.markdown("---")
         st.markdown("**Edit or Delete an Expense**")
         expense_ids = expenses_df['id'].tolist()
@@ -628,20 +564,17 @@ def page_expense_management():
         if expense_to_edit:
             expense_details = expenses_df[expenses_df['id'] == expense_to_edit].iloc[0]
             
-            # Delete Button
             if st.button(f"Delete Expense ID {expense_to_edit}", type="primary"):
                 try:
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # --- CRITICAL FIX: Also delete the related ledger entry ---
                     if pd.notna(expense_details['employee_id']):
                         cursor.execute(
                             "DELETE FROM employee_ledger WHERE related_expense_id = ?",
                             (int(expense_to_edit),)
                         )
                         st.info("Removed corresponding debit from employee's ledger.")
-                    # --- END FIX ---
 
                     cursor.execute("DELETE FROM company_expenses WHERE id = ?", (int(expense_to_edit),))
                     conn.commit()
@@ -651,9 +584,7 @@ def page_expense_management():
                 except Exception as e:
                     st.error(f"Error deleting expense: {e}")
             
-            # Edit Form
             with st.expander("Edit Expense Details"):
-                # --- NEW: Add warning about editing employee-linked expenses ---
                 if pd.notna(expense_details['employee_id']):
                     st.warning("""
                     **Accounting Warning:** This expense is linked to an employee's ledger. 
@@ -661,14 +592,11 @@ def page_expense_management():
                     
                     **Recommendation:** To change the amount, please **delete** this expense (which will also remove the ledger debit) and **create a new one** with the correct amount.
                     """, icon="⚠️")
-                # --- END WARNING ---
 
-                # Get category list for form
                 categories_df = get_all_categories()
                 category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
                 cat_ids = list(category_list.keys())
                 
-                # --- FIX for deleted category bug ---
                 current_cat_id = expense_details['category_id']
                 if pd.notna(current_cat_id) and current_cat_id not in cat_ids:
                     st.error(f"Error: The original category (ID: {current_cat_id}) for this expense was deleted. Please select a new, valid category.")
@@ -679,7 +607,6 @@ def page_expense_management():
                     default_index = cat_ids.index(current_cat_id)
                 else:
                     default_index = 0
-                # --- END FIX ---
                 
                 with st.form("edit_expense_form"):
                     edit_date = st.date_input("Expense Date", value=pd.to_datetime(expense_details['expense_date']))
@@ -731,12 +658,10 @@ def page_salary_management():
     
     selected_month = st.date_input("Select Month for Salary Processing", date.today().replace(day=1))
     first_day = selected_month.replace(day=1)
-    # Find last day of the month
     last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
     
     st.divider()
 
-    # --- Step 1: Generate Monthly Credits ---
     st.subheader("1. Generate Monthly Salary Credits")
     if st.button("Generate Credits for All Employees"):
         try:
@@ -757,7 +682,6 @@ def page_salary_management():
                         skipped_count += 1
                         continue
                     
-                    # Check if credit already exists for this month
                     description = f"Monthly Salary Credit - {selected_month.strftime('%B %Y')}"
                     cursor.execute(
                         """
@@ -770,7 +694,6 @@ def page_salary_management():
                         skipped_count += 1
                         continue
                         
-                    # Add credit to ledger
                     cursor.execute(
                         """
                         INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
@@ -792,14 +715,12 @@ def page_salary_management():
 
     st.divider()
 
-    # --- Step 2: Download Salary Sheet (Req 2) ---
     st.subheader("2. View & Download Salary Sheet")
     st.help("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
     
     if st.button("Generate Salary Sheet"):
         try:
             conn = get_db_connection()
-            # This query joins employees with their ledger summary for the month
             query = f"""
             SELECT
                 e.name AS "Employee Name",
@@ -844,7 +765,6 @@ def page_salary_management():
 
     st.divider()
 
-    # --- Individual Salary Slip (Req 2) ---
     st.subheader("3. Generate Individual Salary Slip")
     employees_df = get_all_employees()
     employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
@@ -867,7 +787,6 @@ def page_salary_management():
 
     if st.button("Generate Individual Salary Slip"):
         try:
-            # 1. Get employee details
             with get_db_connection() as conn:
                 emp_details_df = pd.read_sql_query(
                     "SELECT * FROM employees WHERE id = ?", 
@@ -875,17 +794,16 @@ def page_salary_management():
                     params=(selected_emp_id,)
                 )
                 if emp_details_df.empty:
-                    st.error(f"Employee ID {selected_em_id} not found.")
+                    st.error(f"Employee ID {selected_emp_id} not found.")
                     return
                 emp_details = emp_details_df.iloc[0]
 
-            # 2. Get ledger entries for the month
             first_day_slip = slip_month.replace(day=1)
             last_day_slip = (first_day_slip.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
             
             with get_db_connection() as conn:
                 ledger_df = pd.read_sql_query(
-                    f"""
+                    """
                     SELECT description, credit, debit 
                     FROM employee_ledger 
                     WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
@@ -895,12 +813,10 @@ def page_salary_management():
                     params=(selected_emp_id, first_day_slip, last_day_slip)
                 )
 
-            # 3. Calculate totals
             total_credits = ledger_df['credit'].sum()
             total_debits = ledger_df['debit'].sum()
             net_salary = total_credits - total_debits
 
-            # 4. Generate the new PDF
             pdf_bytes = generate_individual_slip_pdf(
                 emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary
             )
@@ -917,8 +833,6 @@ def page_salary_management():
             st.error(f"Error generating individual slip: {e}")
             st.error("Please ensure the selected employee exists and data is available.")
 
-
-# --- Page: Employee Ledger (Requirement 5) ---
 def page_employee_ledger():
     st.title("Employee Ledger Management")
 
@@ -936,10 +850,8 @@ def page_employee_ledger():
         format_func=lambda x: employee_list[x]
     )
     
-    # --- NEW: All-Time Ledger Toggle ---
     show_all_time = st.checkbox("Show All-Time Ledger? (Disables date filter)", key="all_time_toggle")
 
-    # Date Range Filter
     cols = st.columns(2)
     today = date.today()
     with cols[0]:
@@ -952,7 +864,6 @@ def page_employee_ledger():
             st.error("Start Date cannot be after End Date.")
             return
 
-        # --- Get All-Time Balance (Always shows) ---
         try:
             conn = get_db_connection()
             all_time_df = pd.read_sql_query(
@@ -972,7 +883,6 @@ def page_employee_ledger():
         try:
             conn = get_db_connection()
             
-            # --- MODIFIED: Use toggle to build query ---
             if show_all_time:
                 query = """
                     SELECT 
@@ -985,11 +895,7 @@ def page_employee_ledger():
                     ORDER BY entry_date ASC
                 """
                 params = (selected_emp_id,)
-                date_range = (None, None) # For PDF
-                pdf_title_date_range = (
-                    pd.to_datetime(get_all_employees()['join_date'].min()), # A bit of a hack, find earliest date
-                    date.today()
-                )
+                date_range = (None, None)
             else:
                 query = """
                     SELECT 
@@ -1002,29 +908,24 @@ def page_employee_ledger():
                     ORDER BY entry_date ASC
                 """
                 params = (selected_emp_id, str(start_date), str(end_date))
-                date_range = (start_date, end_date) # For PDF
-            # --- END MODIFICATION ---
+                date_range = (start_date, end_date)
 
-            # --- FIX: Changed 'conn' to 'con' ---
-            ledger_df = pd.read_sql_query(con=conn, sql=query, params=params)
+            ledger_df = pd.read_sql_query(query, conn, params=params)
 
-            # Calculate running balance
             balance_df = ledger_df.copy()
             balance_df['Balance'] = (balance_df['Credit'] - balance_df['Debit']).cumsum()
             
             st.dataframe(balance_df, use_container_width=True)
             
-            # Show final balance
             final_balance = balance_df['Balance'].iloc[-1] if not balance_df.empty else 0
             if not show_all_time:
                 st.metric(label="Balance (in selected date range)", value=f"Rs. {final_balance:,.2f}")
 
-            # Download PDF (Req 5)
             if st.button("Download Ledger (PDF)"):
                 pdf_bytes = generate_pdf_report(
                     balance_df, 
                     f"Ledger for {employee_list[selected_emp_id]}", 
-                    date_range=date_range if not show_all_time else None, # Use date_range
+                    date_range=date_range if not show_all_time else None,
                     orientation='P',
                     totals_cols=["Credit", "Debit"]
                 )
@@ -1039,16 +940,12 @@ def page_employee_ledger():
         except Exception as e:
             st.error(f"Error fetching ledger: {e}")
 
-
-# --- Page: Reporting (Requirement 3, 6, 10) ---
 def page_reporting():
     st.title("Download Reports")
     
-    # --- Report 1: Company Expense Report (Req 3) ---
     st.header("Company Expense Report")
     st.help("Full report of all company expenses, filterable by date and category.")
     
-    # Filters
     categories_df = get_all_categories()
     category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
     
@@ -1096,8 +993,7 @@ def page_reporting():
 
                 query += " ORDER BY ce.expense_date"
                 
-                # --- FIX: Changed 'conn' to 'con' ---
-                report_df = pd.read_sql_query(con=conn, sql=query, params=params)
+                report_df = pd.read_sql_query(query, conn, params=params)
                 
                 pdf_bytes = generate_pdf_report(
                     report_df, 
@@ -1118,7 +1014,6 @@ def page_reporting():
 
     st.divider()
 
-    # --- Report 2: Expense Category Sheet (Req 10) ---
     st.header("Expense Category Sheet")
     st.help("Downloads a simple list of all defined expense categories.")
     
@@ -1142,15 +1037,12 @@ def page_reporting():
         except Exception as e:
             st.error(f"Error generating category sheet: {e}")
 
-
-# --- Page: Data Import (Requirement 7) ---
 def page_data_import():
-    st.title("Data Import (Req 7)")
+    st.title("Data Import")
     st.warning("Use this page to import old data. Please use the exact templates provided.", icon="⚠️")
 
     tab1, tab2, tab3, tab4 = st.tabs(["Import Employees", "Import Categories", "Import Expenses", "Import Ledger Entries"])
 
-    # --- Tab 1: Import Employees ---
     with tab1:
         st.subheader("1. Download Employee Template")
         cols = ["name", "designation", "salary", "bank", "account_title", "account_no", "join_date"]
@@ -1182,7 +1074,6 @@ def page_data_import():
             except Exception as e:
                 st.error(f"Error reading Excel file: {e}")
 
-    # --- Tab 2: Import Categories ---
     with tab2:
         st.subheader("1. Download Category Template")
         cols = ["name"]
@@ -1216,7 +1107,6 @@ def page_data_import():
             except Exception as e:
                 st.error(f"Error reading Excel file: {e}")
 
-    # --- Tab 3: Import Expenses ---
     with tab3:
         st.subheader("1. Download Expense Template")
         st.help("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
@@ -1238,7 +1128,6 @@ def page_data_import():
                 st.dataframe(df)
                 
                 if st.button("Import Expenses"):
-                    # Get mappings from names to IDs
                     cat_df = get_all_categories()
                     cat_map = {row['name']: row['id'] for _, row in cat_df.iterrows()}
                     emp_df = get_all_employees()
@@ -1252,7 +1141,7 @@ def page_data_import():
                     with st.spinner("Processing and importing expenses..."):
                         for _, row in df.iterrows():
                             cat_id = cat_map.get(row['category_name'])
-                            emp_id = emp_map.get(row['employee_name']) # Will be None if blank or not found
+                            emp_id = emp_map.get(row['employee_name'])
                             
                             if not cat_id:
                                 error_list.append(f"Category '{row['category_name']}' not found.")
@@ -1268,7 +1157,6 @@ def page_data_import():
                             
                             expense_id = cursor.lastrowid
                             
-                            # Also add to ledger if employee is linked
                             if emp_id:
                                 cursor.execute(
                                     """
@@ -1288,7 +1176,6 @@ def page_data_import():
             except Exception as e:
                 st.error(f"Error processing file: {e}")
 
-    # --- Tab 4: Import Ledger Entries ---
     with tab4:
         st.subheader("1. Download Ledger Template")
         st.help("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
@@ -1306,7 +1193,7 @@ def page_data_import():
 
         if uploaded_file:
             try:
-                df = pd.read_excel(uploaded_file).fillna(0) # Fill NaNs with 0
+                df = pd.read_excel(uploaded_file).fillna(0)
                 st.dataframe(df)
 
                 if st.button("Import Ledger Entries"):
@@ -1326,7 +1213,6 @@ def page_data_import():
                                 error_list.append(f"Employee '{row['employee_name']}' not found.")
                                 continue
                             
-                            # Note: related_expense_id is not set for generic ledger imports
                             cursor.execute(
                                 """
                                 INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
@@ -1349,10 +1235,8 @@ def page_data_import():
 def main():
     st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide")
     
-    # Initialize DB
     init_db()
 
-    # --- Sidebar Navigation ---
     st.sidebar.title(f"{COMPANY_NAME} Portal")
     page_options = {
         "Dashboard": page_dashboard,
@@ -1368,7 +1252,6 @@ def main():
     st.sidebar.divider()
     st.sidebar.info(DEVELOPER_INFO)
     
-    # --- Load Selected Page ---
     page_function = page_options[selected_page]
     page_function()
 
