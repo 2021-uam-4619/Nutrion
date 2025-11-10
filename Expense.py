@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -60,60 +59,18 @@ class PDF(FPDF):
         
         num_cols = len(df.columns)
         total_width = self.w - self.l_margin - self.r_margin
+        col_width = total_width / num_cols
         
-        # Adjust column widths - give more space to description columns
-        col_widths = []
         for col in df.columns:
-            if 'description' in col.lower() or 'remarks' in col.lower() or 'details' in col.lower():
-                col_widths.append(total_width * 0.4)  # 40% for description columns
-            else:
-                col_widths.append(total_width * (0.6 / (num_cols - 1)))  # Remaining space for other columns
-        
-        for i, col in enumerate(df.columns):
-            self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+            self.cell(col_width, 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
         self.set_font('Arial', '', 8)
         self.set_fill_color(255)
         fill = False
-        
         for index, row in df.iterrows():
-            max_height = 6  # Default row height
-            cell_heights = []
-            
-            # Calculate required height for each cell in this row
-            for i, col in enumerate(df.columns):
+            for col in df.columns:
                 cell_text = str(row[col])
-                # Estimate text height - wrap text if too long
-                text_length = len(cell_text)
-                if text_length > 50:  # If text is long, split into multiple lines
-                    lines = (text_length // 30) + 1
-                    cell_height = max(6, lines * 3)
-                else:
-                    cell_height = 6
-                cell_heights.append(cell_height)
-            
-            # Use the maximum height for this row
-            row_height = max(cell_heights)
-            
-            for i, col in enumerate(df.columns):
-                cell_text = str(row[col])
-                
-                # Handle long text by wrapping
-                if len(cell_text) > 50:
-                    # Simple text wrapping
-                    wrapped_text = ""
-                    words = cell_text.split()
-                    current_line = ""
-                    for word in words:
-                        if len(current_line + word) <= 30:
-                            current_line += word + " "
-                        else:
-                            wrapped_text += current_line + "\n"
-                            current_line = word + " "
-                    wrapped_text += current_line
-                    cell_text = wrapped_text
-                
                 if pd.api.types.is_numeric_dtype(df[col]):
                     try:
                         cell_value = row[col]
@@ -123,11 +80,11 @@ class PDF(FPDF):
                         else:
                             cell_text = f"{float(cell_value):,.2f}"
                             align = 'R'
-                        self.cell(col_widths[i], row_height, cell_text, 'LR', 0, align, fill)
+                        self.cell(col_width, 6, cell_text, 'LR', 0, align, fill)
                     except (ValueError, TypeError):
-                        self.cell(col_widths[i], row_height, cell_text, 'LR', 0, 'L', fill)
+                        self.cell(col_width, 6, cell_text, 'LR', 0, 'L', fill)
                 else:
-                    self.cell(col_widths[i], row_height, cell_text, 'LR', 0, 'L', fill)
+                    self.cell(col_width, 6, cell_text, 'LR', 0, 'L', fill)
             self.ln()
             fill = not fill
         
@@ -140,12 +97,12 @@ class PDF(FPDF):
             
             for i, col in enumerate(df.columns):
                 if i == 0:
-                    self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
+                    self.cell(col_width, 7, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                    self.cell(col_width, 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
-                    self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
+                    self.cell(col_width, 7, "", 1, 0, 'C', 1)
             self.ln()
 
 # --- Database Setup ---
@@ -286,11 +243,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         pdf.cell(0, 7, "No ledger activity found for this month.", 1, 1, 'C')
     else:
         for _, row in ledger_df.iterrows():
-            # Handle long descriptions in salary slip
-            description = str(row['description'])
-            if len(description) > 40:
-                description = description[:37] + "..."
-            pdf.cell(col_width * 3, 7, description, 1, 0, 'L')
+            pdf.cell(col_width * 3, 7, str(row['description']), 1, 0, 'L')
             pdf.cell(col_width * 0.75, 7, f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00", 1, 0, 'R')
             pdf.cell(col_width * 0.75, 7, f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00", 1, 1, 'R')
 
@@ -388,8 +341,7 @@ def add_employee_personal_expense():
             expense_date = st.date_input("Expense Date", date.today())
         with cols[1]:
             amount = st.number_input("Amount", min_value=0.01, step=100.0)
-            # Changed from text_input to text_area for more space
-            description = st.text_area("Description", placeholder="e.g., Travel allowance, Meal expense", height=100)
+            description = st.text_input("Description", placeholder="e.g., Travel allowance, Meal expense")
         
         submitted = st.form_submit_button("Add Personal Expense")
         if submitted:
@@ -585,8 +537,7 @@ def page_expense_management():
         with cols[2]:
             category_id = st.selectbox("Category", options=list(category_list.keys()), format_func=lambda x: category_list[x], disabled=not category_list)
         
-        # Changed from text_input to text_area for more space
-        description = st.text_area("Description", placeholder="e.g., Office electricity bill", height=100)
+        description = st.text_input("Description", placeholder="e.g., Office electricity bill")
         
         st.info("If this expense is an advance or deduction for an employee, select their name. This amount will be deducted from their salary.")
         employee_id = st.selectbox("Employee (Optional)", options=list(employee_list_with_none.keys()), format_func=lambda x: employee_list_with_none[x])
@@ -766,8 +717,7 @@ def page_expense_management():
                     
                     cols = st.columns(3)
                     with cols[0]:
-                        # Changed from text_input to text_area for more space
-                        edit_desc = st.text_area("Description", value=expense_details['description'], height=100)
+                        edit_desc = st.text_input("Description", value=expense_details['description'])
                     with cols[1]:
                         edit_category_id = st.selectbox("Category", 
                             options=cat_ids, 
