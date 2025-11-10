@@ -243,7 +243,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         pdf.cell(0, 7, "No ledger activity found for this month.", 1, 1, 'C')
     else:
         for _, row in ledger_df.iterrows():
-            pdf.cell(col_width * 1.5, 7, str(row['description']), 1, 0, 'L')
+            pdf.cell(col_width * 3, 7, str(row['description']), 1, 0, 'L')
             pdf.cell(col_width * 0.75, 7, f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00", 1, 0, 'R')
             pdf.cell(col_width * 0.75, 7, f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00", 1, 1, 'R')
 
