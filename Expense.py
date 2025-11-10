@@ -2042,7 +2042,7 @@ def page_reporting():
                     report_df, 
                     report_title,
                     date_range=(report_start_date, report_end_date),
-                    orientation='L',
+                    orientation='P',
                     totals_cols=["Amount"]
                 )
                 
