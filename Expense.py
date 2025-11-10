@@ -1,7 +1,4 @@
-is code ma just describtion ke space zayad kero jitna marzi text add ho saka overlap na ho 
-baqi date ke app kam ker lo employee ke catagory ke 
-easily baqi dekh ker 
-do not touch another fucntionality of code
+
 import streamlit as st
 import pandas as pd
 import sqlite3
