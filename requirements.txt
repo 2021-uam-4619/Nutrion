@@ -8,5 +8,6 @@ openpyxl
 reportlab
 fpdf
 plotly
+xlsxwriter
 
 
