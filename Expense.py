@@ -44,7 +44,11 @@ class PDF(FPDF):
             # Position it above the "Prepared by" line
             sig_x_pos = self.l_margin + 30 # Indent a bit
             sig_y_pos = -40 # 4cm from bottom
-            self.image('Asim Siganture.jpg', x=sig_x_pos, y=sig_y_pos, w=sig_width)
+            try:
+                self.image('Asim Siganture.jpg', x=sig_x_pos, y=sig_y_pos, w=sig_width)
+            except Exception as e:
+                # Fallback if image is corrupted or invalid
+                pass 
 
         # 2. Place text lines, 3cm from bottom
         self.set_y(-30) 
@@ -508,6 +512,7 @@ def page_expense_management():
     st.text("Select an expense ID from the table to delete or edit it.")
     try:
         conn = get_db_connection()
+        # --- FIX: Removed corrupted comment from SQL query ---
         expenses_df = pd.read_sql_query(
             """
             SELECT 
@@ -517,7 +522,7 @@ def page_expense_management():
                 ce.amount, 
                 ec.name as category,
                 ce.category_id,
-                ce.linked_id -- NEW: Get linked_id
+                ce.linked_id
             FROM company_expenses ce
             LEFT JOIN expense_categories ec ON ce.category_id = ec.id
             ORDER BY ce.expense_date DESC
@@ -528,7 +533,16 @@ def page_expense_management():
             st.info("No expenses logged yet.")
         else:
             cols_to_show = ['id', 'expense_date', 'description', 'amount', 'category']
-            st.dataframe(expenses_df[cols_to_show], use_container_width=True, hide_index=True)
+            
+            # --- FIX: Added column_config to widen description ---
+            st.dataframe(
+                expenses_df[cols_to_show], 
+                use_container_width=True, 
+                hide_index=True,
+                column_config={
+                    "description": st.column_config.TextColumn("Description", width="large")
+                }
+            )
             
             st.subheader("Delete or Edit Expense")
             expense_ids = expenses_df['id'].tolist()
@@ -795,7 +809,7 @@ def page_salary_management():
         st.session_state.slip_month = today.month
     if 'slip_year' not in st.session_state:
         st.session_state.slip_year = today.year
-    if 'slip_emp_id' not in st.session_state:
+    if 'slip_emp_id' not in st.session_state or st.session_state.slip_emp_id not in employee_list:
         st.session_state.slip_emp_id = list(employee_list.keys())[0]
 
     cols = st.columns(3)
@@ -836,7 +850,7 @@ def get_salary_sheet(month, year):
         e.account_title AS "Account Title",
         e.account_no AS "Account No.",
         e.salary AS "Base Salary",
-        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Others",
+        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Other Credits (Bonus/Reimb.)",
         COALESCE(SUM(el.debit), 0) AS "Deductions (Advance)",
         (e.salary + COALESCE(SUM(el.credit), 0) - COALESCE(SUM(el.debit), 0)) AS "Net Salary"
     FROM employees e
@@ -853,7 +867,7 @@ def generate_salary_sheet_pdf(df, month, year):
     pdf = PDF('L', 'mm', 'A4')
     pdf.title_text = f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}"
     pdf.add_page()
-    pdf.add_table(df, totals_cols=["Base Salary", "(Others.)", "Deductions (Advance)", "Net Salary"])
+    pdf.add_table(df, totals_cols=["Base Salary", "Other Credits (Bonus/Reimb.)", "Deductions (Advance)", "Net Salary"])
     return pdf.output(dest='S').encode('latin-1')
 
 def generate_individual_slip_pdf(employee_id, month, year):
@@ -1150,9 +1164,13 @@ def page_employee_ledger():
             
             cols_to_show = ['Entry Date', 'Description', 'Payment / Bonus (+)', 'Deduction / Advance (-)', 'Running Balance (in range)']
             
+            # --- FIX: Added column_config to widen description ---
             st.dataframe(
                 display_df.set_index('Entry Date')[cols_to_show],
-                use_container_width=True
+                use_container_width=True,
+                column_config={
+                    "Description": st.column_config.TextColumn("Description", width="large")
+                }
             )
             
             st.subheader(f"Balance for selected date range: PKR {range_balance:,.2f}")
@@ -1185,7 +1203,7 @@ def page_employee_ledger():
                     WHERE id IN {ids_in_range}
                     ORDER BY entry_date
                 """
-                ledger_for_edit_df = pd.read_sql_query(query, conn, parse_dates=["entry_date"])
+                ledger_for_edit_df = pd.read_sql_query(query, conn, params=(), parse_dates=["entry_date"])
             else:
                 ledger_for_edit_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit', 'employee_id', 'linked_id'])
 
@@ -1223,7 +1241,7 @@ def page_employee_ledger():
                             # --- MODIFICATION: Cascade Delete ---
                             # 1. Get the linked_id before deleting
                             linked_id_row = cursor.execute("SELECT linked_id FROM employee_ledger WHERE id = ?", (int(entry_id),)).fetchone()
-                            linked_id = linked_id_row['linked_id'] if linked_id_row else None
+                            linked_id = linked_id_row['linked_id'] if (linked_id_row and linked_id_row['linked_id']) else None
                             
                             # 2. Delete from ledger
                             cursor.execute("DELETE FROM employee_ledger WHERE id = ?", (int(entry_id),))
