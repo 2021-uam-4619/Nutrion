@@ -850,7 +850,7 @@ def get_salary_sheet(month, year):
         e.account_title AS "Account Title",
         e.account_no AS "Account No.",
         e.salary AS "Base Salary",
-        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Other Credits (Bonus/Reimb.)",
+        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Other",
         COALESCE(SUM(el.debit), 0) AS "Deductions (Advance)",
         (e.salary + COALESCE(SUM(el.credit), 0) - COALESCE(SUM(el.debit), 0)) AS "Net Salary"
     FROM employees e
@@ -867,7 +867,7 @@ def generate_salary_sheet_pdf(df, month, year):
     pdf = PDF('L', 'mm', 'A4')
     pdf.title_text = f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}"
     pdf.add_page()
-    pdf.add_table(df, totals_cols=["Base Salary", "Other Credits (Bonus/Reimb.)", "Deductions (Advance)", "Net Salary"])
+    pdf.add_table(df, totals_cols=["Base Salary", "Other", "Deductions (Advance)", "Net Salary"])
     return pdf.output(dest='S').encode('latin-1')
 
 def generate_individual_slip_pdf(employee_id, month, year):
