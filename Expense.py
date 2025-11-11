@@ -77,7 +77,7 @@ class PDF(FPDF):
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        # --- NEW DYNAMIC WIDTH LOGIC (Fix for image_c078fa.png) ---
+        # --- NEW DYNAMIC WIDTH LOGIC (Fix for image_c078fa.png & ca788b.png) ---
         self.set_font('Arial', 'B', 8)
         self.set_fill_color(220, 220, 220) # Light grey header
         
@@ -90,7 +90,13 @@ class PDF(FPDF):
         # Set base weights
         for col in df.columns:
             col_lower = str(col).lower()
-            if 'description' in col_lower:
+            
+            # --- FIX: Give more space to salary sheet headers ---
+            if 'other credits' in col_lower or 'deductions' in col_lower:
+                weight = 1.8
+            elif 'base salary' in col_lower:
+                 weight = 1.5
+            elif 'description' in col_lower:
                 weight = 3.0
             elif 'title' in col_lower or 'account no' in col_lower: # Give more space to account info
                 weight = 2.5
@@ -98,7 +104,7 @@ class PDF(FPDF):
                 weight = 2.0
             elif 'date' in col_lower or 'category' in col_lower or 'bank' in col_lower or 'designation' in col_lower:
                 weight = 1.5
-            else: # ID, Amount, Salary, etc.
+            else: # ID, Amount, Net Salary, etc.
                 weight = 1.0
             
             col_weights[col] = weight
@@ -109,8 +115,15 @@ class PDF(FPDF):
 
         # Draw Header
         for col in df.columns:
-            self.cell(col_widths[col], 7, str(col), 1, 0, 'C', 1)
-        self.ln()
+            # Use MultiCell for header to allow wrapping
+            x_start = self.get_x()
+            y_start = self.get_y()
+            self.multi_cell(col_widths[col], 7, str(col), 1, 'C', 1)
+            # Reset Y position for all cells in this row
+            self.set_y(y_start)
+            # Move X to the next cell
+            self.set_x(x_start + col_widths[col])
+        self.ln(7) # Use fixed height for header
         
         # Set data style
         self.set_font('Arial', '', 8)
@@ -139,7 +152,7 @@ class PDF(FPDF):
                 # Handle formatting
                 if pd.isna(val):
                     cell_text = ""
-                elif isinstance(val, (int, float)) and any(c in str(col).lower() for c in ['amount', 'salary', 'deductions', 'net', 'debit', 'credit', 'balance']):
+                elif isinstance(val, (int, float)) and any(c in str(col).lower() for c in ['amount', 'salary', 'deductions', 'net', 'debit', 'credit', 'balance', 'credits']):
                     cell_text = f"{val:,.2f}"
                 else:
                     cell_text = str(val)
@@ -1505,7 +1518,7 @@ def main():
             st.button(page_name, on_click=set_page, args=(page_name,), use_container_width=True)
             
         st.divider()
-        st.info(f"Version 3.1 (UI/PDF Fix)\n{DEVELOPER_INFO}") # Version bump
+        st.info(f"Version 3.2 (PDF Header Fix)\n{DEVELOPER_INFO}") # Version bump
 
     # --- Run the selected page ---
     page_function = PAGES[st.session_state.page]
