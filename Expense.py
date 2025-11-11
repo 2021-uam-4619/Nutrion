@@ -15,45 +15,50 @@ DEVELOPER_INFO = "Developed by DataNex Solution | +92320 7429422"
 # --- PDF Class with Header/Footer (MODIFIED) ---
 class PDF(FPDF):
     def header(self):
-        # Add Logo
+        # --- MODIFICATION: Professional Header based on image_bc5944.png ---
         if os.path.exists('logo.png'):
-            # Calculate width to be 1/3 of the page width
-            img_width = (self.w - self.l_margin - self.r_margin) / 3
+            # Make logo larger and place title to the right
+            img_width = 60 # Fixed width for logo
             self.image('logo.png', x=self.l_margin, y=10, w=img_width)
         
-        # Company Title
+        # Company Title (to the right of logo)
+        title_x_pos = self.l_margin + img_width + 5 # 5mm padding
         self.set_font('Arial', 'B', 20)
-        self.set_x(self.l_margin + 70) # Adjust X to be next to logo
-        # --- FIX: Use self.title_text (set before add_page) ---
+        self.set_x(title_x_pos)
         title = getattr(self, 'title_text', 'Report') # Default title
         self.cell(0, 15, f"{COMPANY_NAME} - {title}", 0, 1, 'L')
+        
+        # Report Date (below title)
         self.set_font('Arial', '', 10)
-        self.set_x(self.l_margin + 70)
+        self.set_x(title_x_pos)
         self.cell(0, 8, f"Report Date: {date.today().strftime('%B %d, %Y')}", 0, 1, 'L')
         
-        self.ln(15) # Add space after header
+        self.ln(20) # Add more space after header
 
     def footer(self):
         footer_width = self.w - self.l_margin - self.r_margin
         
-        # --- MODIFICATION: Add Signature Image ---
-        self.set_y(-40) # Position 4 cm from bottom
+        # --- MODIFICATION: Signature on the line (based on image_bc5966.png) ---
+        self.set_y(-30) # Position 3 cm from bottom
         self.set_font('Arial', '', 10)
         
+        # --- Left Side: Prepared by ---
+        text = "Prepared by: _______________"
+        self.cell(footer_width / 2, 10, text, 0, 0, 'L')
+        
+        # Place signature image at the end of the text
         if os.path.exists('Asim Siganture.jpg'):
-            # Place signature image above the "Prepared by" line
-            # Center the signature image on the left side
-            sig_width = 40 # width of signature
-            sig_x_pos = self.l_margin + (footer_width / 4) - (sig_width / 2)
-            self.image('Asim Siganture.jpg', x=sig_x_pos, y=self.get_y(), w=sig_width)
-        
-        # --- Lines for Signatures ---
-        self.set_y(-30) # Position 3 cm from bottom
-        
-        # Prepared By (Left side)
-        self.cell(footer_width / 2, 10, "Prepared by: _______________", 0, 0, 'L')
-        
-        # Approved By (Right side)
+            text_width = self.get_string_width(text) + 5 # 5mm padding
+            sig_width = 30 # smaller signature
+            sig_x_pos = self.l_margin + text_width
+            # Adjust Y to be vertically centered with the text
+            sig_y_pos = self.get_y() - (sig_width / 4) 
+            
+            # Check if signature goes off page
+            if sig_x_pos + sig_width < (self.l_margin + footer_width / 2):
+                self.image('Asim Siganture.jpg', x=sig_x_pos, y=sig_y_pos, w=sig_width)
+
+        # --- Right Side: Approved by ---
         self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
         
         # --- Developer Info ---
@@ -917,8 +922,8 @@ def generate_individual_slip_pdf(employee_id, month, year):
     pdf.cell(90, 10, "Net Salary Payable:", 'LB', 0, 'R', 1)
     pdf.cell(90, 10, f"{net_salary:,.2f} PKR", 'RB', 1, 'L', 1)
     
-    return pdf.output(dest='S').encode('latin-1')
-
+# ... (No changes to init_db, get_dashboard_metrics, get_all_employees, get_all_categories, clear_cache, generate_excel_template, page_dashboard) ...
+# ... (No changes to page_employee_management, page_expense_management, page_salary_management, get_salary_sheet, generate_salary_sheet_pdf, generate_individual_slip_pdf) ...
 
 # --- Page: Employee Ledger (Requirement 5) ---
 def page_employee_ledger():
@@ -941,6 +946,11 @@ def page_employee_ledger():
     # --- NEW FEATURE: Add Manual Ledger Entry ---
     st.subheader("Add New Ledger Entry")
     st.info("Use this form to record advances, deductions, or bonuses for an employee.")
+    
+    # --- MODIFICATION: Get categories for the form ---
+    categories_df = get_all_categories()
+    category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
+    
     with st.form("new_ledger_entry", clear_on_submit=True):
         cols = st.columns(3)
         with cols[0]:
@@ -958,37 +968,75 @@ def page_employee_ledger():
             entry_type = st.radio(
                 "Entry Type", 
                 [
-                    "Advance / Deduction (Amount Subtracted)", 
+                    "Advance / Deduction (Amount Subtracked)", 
                     "Company-Paid Personal Expense (Deduction)",
                     "Reimbursement / Bonus (Amount Added)"
-                ]
+                ],
+                key="entry_type_radio"
             )
         
+        # --- NEW: Conditional Category Box ---
+        # Show category box only if "Company-Paid Personal Expense" is selected
+        show_category_box = "Expense" in st.session_state.get("entry_type_radio", "")
+        
+        if show_category_box:
+            if not category_list:
+                st.error("No expense categories found. Please add categories on the 'Expense Management' page first.", icon="⚠️")
+                expense_category_id = None
+            else:
+                expense_category_id = st.selectbox(
+                    "Expense Category (for company records)", 
+                    options=list(category_list.keys()), 
+                    format_func=lambda x: category_list[x],
+                    help="This expense will also be added to the main company expense report."
+                )
+        else:
+            expense_category_id = None
+
         entry_desc = st.text_input("Description", placeholder="e.g., Cash advance for travel")
         entry_amount = st.number_input("Amount", min_value=0.01)
         
         entry_submitted = st.form_submit_button("Add Ledger Entry")
         
         if entry_submitted:
-            if entry_amount > 0 and entry_desc:
-                # --- MODIFICATION: Logic updated to match new terms ---
-                debit = entry_amount if ("Deduction" in entry_type or "Expense" in entry_type) else 0
+            # --- MODIFICATION: Validation for new logic ---
+            if show_category_box and not expense_category_id:
+                st.error("Please select an expense category for this 'Company-Paid Personal Expense'.")
+            elif entry_amount > 0 and entry_desc:
                 credit = entry_amount if "Bonus" in entry_type else 0
                 
                 try:
                     conn = get_db_connection()
-                    conn.execute(
+                    cursor = conn.cursor()
+                    
+                    # --- MODIFICATION: Dual-Insert Logic ---
+                    # 1. Insert into employee ledger (always)
+                    cursor.execute(
                         """
                         INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
                         VALUES (?, ?, ?, ?, ?)
                         """,
                         (entry_emp_id, str(entry_date), entry_desc, debit, credit)
                     )
+                    
+                    # 2. ALSO insert into company_expenses if it's a "Company-Paid Personal Expense"
+                    if show_category_box and expense_category_id and debit > 0:
+                        cursor.execute(
+                            """
+                            INSERT INTO company_expenses (description, amount, expense_date, category_id)
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (f"(Employee: {employee_list[entry_emp_id]}) {entry_desc}", debit, str(entry_date), expense_category_id)
+                        )
+                        st.success("Entry added to employee ledger AND company expense report.")
+                    else:
+                        st.success(f"Ledger entry added for {employee_list[entry_emp_id]}.")
+
                     conn.commit()
-                    st.success(f"Ledger entry added for {employee_list[entry_emp_id]}.")
                     clear_cache()
                     st.rerun()
                 except Exception as e:
+                    conn.rollback() # Rollback both inserts if one fails
                     st.error(f"Database error: {e}")
             else:
                 st.error("Please provide a description and amount.")
@@ -1016,30 +1064,9 @@ def page_employee_ledger():
         st.error("Start Date must be before End Date.")
         return
         
-    try:
-        # Get full ledger for all-time balance calculation
-        full_ledger_df = get_employee_ledger(selected_emp_id, date(1970, 1, 1), date(2100, 12, 31))
+        # --- FIX: Handle KeyError: "['Entry Date'] not in index" ---
+        # Move dataframe display and buttons *inside* the check for a non-empty dataframe
         
-        # Get filtered ledger for display
-        filtered_ledger_df = get_employee_ledger(selected_emp_id, start_date, end_date)
-        
-        # --- Calculate Balances ---
-        all_time_balance = 0
-        if not full_ledger_df.empty:
-            all_time_balance = full_ledger_df['credit'].sum() - full_ledger_df['debit'].sum()
-            
-        range_balance = 0
-        if not filtered_ledger_df.empty:
-            range_balance = filtered_ledger_df['credit'].sum() - filtered_ledger_df['debit'].sum()
-            
-            # Add running balance column for the *filtered* range
-            filtered_ledger_df.sort_values(by='entry_date', inplace=True)
-            filtered_ledger_df['Balance'] = filtered_ledger_df['credit'].cumsum() - filtered_ledger_df['debit'].cumsum()
-        else:
-            # If empty, create an empty df with correct columns for the editor
-            filtered_ledger_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit'])
-
-
         # --- Display Metrics ---
         st.metric(
             "All-Time Ledger Balance (Total Payable)",
@@ -1047,8 +1074,6 @@ def page_employee_ledger():
             help="Total credits minus total debits over the employee's entire history."
         )
         
-        # --- MODIFICATION: Rename columns for display ---
-        # --- FIX: Move Dataframe, subheader, and button INSIDE the check ---
         if not filtered_ledger_df.empty:
             display_df = filtered_ledger_df.rename(columns={
                 'entry_date': 'Entry Date',
@@ -1105,7 +1130,6 @@ def page_employee_ledger():
                 ledger_for_edit_df = pd.read_sql_query(query, conn, parse_dates=["entry_date"])
             else:
                 ledger_for_edit_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit', 'employee_id'])
-
             
             column_config = {
                 "id": st.column_config.NumberColumn("ID", disabled=True),
