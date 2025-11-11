@@ -24,7 +24,9 @@ class PDF(FPDF):
         # Company Title
         self.set_font('Arial', 'B', 20)
         self.set_x(self.l_margin + 70) # Adjust X to be next to logo
-        self.cell(0, 15, f"{COMPANY_NAME} - {self.title_text}", 0, 1, 'L')
+        # --- FIX: Use self.title_text (set before add_page) ---
+        title = getattr(self, 'title_text', 'Report') # Default title
+        self.cell(0, 15, f"{COMPANY_NAME} - {title}", 0, 1, 'L')
         self.set_font('Arial', '', 10)
         self.set_x(self.l_margin + 70)
         self.cell(0, 8, f"Report Date: {date.today().strftime('%B %d, %Y')}", 0, 1, 'L')
@@ -793,7 +795,8 @@ def get_salary_sheet(month, year):
 
 def generate_salary_sheet_pdf(df, month, year):
     pdf = PDF('L', 'mm', 'A4') # Landscape
-    pdf.set_title_text(f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}")
+    # --- FIX: Set title_text attribute, don't call method ---
+    pdf.title_text = f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}"
     pdf.add_page()
     
     # Add table
@@ -836,7 +839,8 @@ def generate_individual_slip_pdf(employee_id, month, year):
     
     # 4. Create PDF
     pdf = PDF('P', 'mm', 'A4') # Portrait
-    pdf.set_title_text(f"Salary Slip - {emp['name']}")
+    # --- FIX: Set title_text attribute, don't call method ---
+    pdf.title_text = f"Salary Slip - {emp['name']}"
     pdf.add_page()
     
     pdf.set_font('Arial', '', 11)
@@ -937,7 +941,7 @@ def page_employee_ledger():
     
     # --- NEW FEATURE: Add Manual Ledger Entry ---
     st.subheader("Add New Ledger Entry")
-    st.info("Yahan se employee ko advance (Paise Kaatna) ya reimbursement/bonus (Extra Paise) record karein.")
+    st.info("Use this form to record advances, deductions, or bonuses for an employee.")
     with st.form("new_ledger_entry", clear_on_submit=True):
         cols = st.columns(3)
         with cols[0]:
@@ -951,8 +955,15 @@ def page_employee_ledger():
         with cols[1]:
             entry_date = st.date_input("Entry Date", date.today())
         with cols[2]:
-            # --- MODIFICATION: Simplified terms ---
-            entry_type = st.radio("Entry Type", ["Advance / Deduction (Paise Kaatna)", "Reimbursement / Bonus (Extra Paise)"])
+            # --- MODIFICATION: Simplified English terms ---
+            entry_type = st.radio(
+                "Entry Type", 
+                [
+                    "Advance / Deduction (Amount Subtracted)", 
+                    "Company-Paid Personal Expense (Deduction)",
+                    "Reimbursement / Bonus (Amount Added)"
+                ]
+            )
         
         entry_desc = st.text_input("Description", placeholder="e.g., Cash advance for travel")
         entry_amount = st.number_input("Amount", min_value=0.01)
@@ -962,8 +973,8 @@ def page_employee_ledger():
         if entry_submitted:
             if entry_amount > 0 and entry_desc:
                 # --- MODIFICATION: Logic updated to match new terms ---
-                debit = entry_amount if "Advance" in entry_type else 0
-                credit = entry_amount if "Reimbursement" in entry_type else 0
+                debit = entry_amount if ("Deduction" in entry_type or "Expense" in entry_type) else 0
+                credit = entry_amount if "Bonus" in entry_type else 0
                 
                 try:
                     conn = get_db_connection()
@@ -1028,6 +1039,10 @@ def page_employee_ledger():
             # Add running balance column for the *filtered* range
             filtered_ledger_df.sort_values(by='entry_date', inplace=True)
             filtered_ledger_df['Balance'] = filtered_ledger_df['credit'].cumsum() - filtered_ledger_df['debit'].cumsum()
+        else:
+            # If empty, create an empty df with correct columns for the editor
+            filtered_ledger_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit'])
+
 
         # --- Display Metrics ---
         st.metric(
@@ -1037,6 +1052,7 @@ def page_employee_ledger():
         )
         
         # --- MODIFICATION: Rename columns for display ---
+        # --- FIX: Move Dataframe, subheader, and button INSIDE the check ---
         if not filtered_ledger_df.empty:
             display_df = filtered_ledger_df.rename(columns={
                 'entry_date': 'Entry Date',
@@ -1065,9 +1081,100 @@ def page_employee_ledger():
                 file_name=f"Ledger_{employee_list.get(selected_emp_id)}_{start_date}_to_{end_date}.pdf",
                 mime="application/pdf"
             )
+        
+        st.divider()
+        
+        # --- NEW: Edit/Delete Ledger Entries ---
+        st.subheader("Edit or Delete Ledger Entries")
+        st.info("You can edit or delete entries for the selected employee *within the date range specified above*.")
+        
+        try:
+            # Use the filtered DF we already fetched
+            edit_df = filtered_ledger_df.copy()
+            
+            # Re-fetch with ID for saving
+            if not edit_df.empty:
+                conn = get_db_connection()
+                # Get IDs for the date range
+                ids_in_range = tuple(edit_df['id'].tolist())
+                query = f"""
+                    SELECT id, entry_date, description, credit, debit, employee_id
+                    FROM employee_ledger
+                    WHERE id IN {ids_in_range}
+                    ORDER BY entry_date
+                """
+                ledger_for_edit_df = pd.read_sql_query(query, conn, parse_dates=["entry_date"])
+            else:
+                ledger_for_edit_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit', 'employee_id'])
 
-    except Exception as e:
-        st.error(f"Error fetching ledger: {e}")
+            
+            column_config = {
+                "id": st.column_config.NumberColumn("ID", disabled=True),
+                "employee_id": None, # Hide this column
+                "entry_date": st.column_config.DateColumn("Date", format="YYYY-MM-DD", required=True),
+                "description": st.column_config.TextColumn("Description", required=True),
+                "credit": st.column_config.NumberColumn("Payment (+)", format="%.2f", min_value=0),
+                "debit": st.column_config.NumberColumn("Deduction (-)", format="%.2f", min_value=0),
+            }
+            
+            edited_ledger_df = st.data_editor(
+                ledger_for_edit_df,
+                column_config=column_config,
+                num_rows="dynamic", # Allow deleting
+                use_container_width=True,
+                key="ledger_editor"
+            )
+            
+            if st.button("Save Ledger Changes"):
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                
+                try:
+                    db_ids = set(ledger_for_edit_df['id'])
+                    edited_ids = set(edited_ledger_df.dropna(subset=['id'])['id'])
+                    
+                    # --- Find Deleted Rows ---
+                    deleted_ids = db_ids - edited_ids
+                    if deleted_ids:
+                        for entry_id in deleted_ids:
+                            cursor.execute("DELETE FROM employee_ledger WHERE id = ?", (int(entry_id),))
+                        st.toast(f"Deleted {len(deleted_ids)} ledger entry(s).")
+
+                    # --- Find Updated/Added Rows ---
+                    for index, row in edited_ledger_df.iterrows():
+                        if pd.isna(row['id']):
+                            # This is a new row, but we should use the form for this.
+                            # For safety, we'll add it, but it's better to use the form.
+                            cursor.execute(
+                                """
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, credit, debit)
+                                VALUES (?, ?, ?, ?, ?)
+                                """,
+                                (selected_emp_id, row['entry_date'].strftime('%Y-%m-%d'), row['description'], row['credit'], row['debit'])
+                            )
+                        else:
+                            # Existing Row (Update)
+                            cursor.execute(
+                                """
+                                UPDATE employee_ledger 
+                                SET entry_date=?, description=?, credit=?, debit=?
+                                WHERE id=?
+                                """,
+                                (row['entry_date'].strftime('%Y-%m-%d'), row['description'], row['credit'], row['debit'], int(row['id']))
+                            )
+                    
+                    conn.commit()
+                    st.success("Ledger changes saved successfully.")
+                    clear_cache()
+                    st.rerun()
+
+                except Exception as e:
+                    conn.rollback()
+                    st.error(f"Error saving ledger changes: {e}")
+
+        except Exception as e:
+            st.error(f"Error loading ledger editor: {e}")
+
 
 @st.cache_data(ttl=60)
 def get_employee_ledger(employee_id, start_date, end_date):
@@ -1083,7 +1190,8 @@ def get_employee_ledger(employee_id, start_date, end_date):
 
 def generate_ledger_pdf(df, employee_name, start_date, end_date, all_time_balance):
     pdf = PDF('P', 'mm', 'A4') # Portrait
-    pdf.set_title_text(f"Employee Ledger")
+    # --- FIX: Set title_text attribute, don't call method ---
+    pdf.title_text = "Employee Ledger"
     pdf.add_page()
     
     # Add Employee Info
@@ -1195,7 +1303,8 @@ def page_reporting():
 
             # Generate PDF
             pdf = PDF('P', 'mm', 'A4')
-            pdf.set_title_text(report_title)
+            # --- FIX: Set title_text attribute, don't call method ---
+            pdf.title_text = report_title
             pdf.add_page()
             pdf.add_table(df, totals_cols=totals_cols)
             
