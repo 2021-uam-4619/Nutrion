@@ -1207,61 +1207,185 @@ def page_data_import():
             except Exception as e:
                 st.error(f"Error reading file: {e}")
 
-# --- NEW Page: App Settings ---
-def page_app_settings():
-    st.title("App Settings")
-    
-    st.header("Danger Zone")
-    st.warning("Warning: Actions on this page are permanent and cannot be undone. This will delete all data in the selected tables.")
-    
-    st.divider()
-
-    # --- Delete Employee Data ---
-    with st.expander("Delete All Employee & Ledger Data"):
-        st.write("This action will delete ALL employees and ALL their associated ledger entries (salaries, advances, etc.) from the database. This cannot be undone.")
+    # --- Import Categories ---
+    with tab2:
+        st.subheader("1. Download Category Template")
+        cols = ["name"]
+        excel_data, file_name = generate_excel_template(cols, "category_import_template.xlsx")
+        st.download_button(label="Download Template", data=excel_data, file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         
-        if st.button("Delete ALL Employee & Ledger Data", type="primary", key="delete_employees"):
-            try:
-                conn = get_db_connection()
-                # Deleting from employees will cascade delete all ledger entries due to the FOREIGN KEY constraint
-                conn.execute("DELETE FROM employees")
-                conn.commit()
-                clear_cache()
-                st.success("Successfully deleted all employee and ledger data.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting data: {e}")
-
-    # --- Delete Expense Data ---
-    with st.expander("Delete All Company Expense Data"):
-        st.write("This action will delete ALL company expenses, including those linked to employees. This will NOT delete the corresponding employee ledger entries.")
+        st.subheader("2. Upload Completed File")
+        uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx", key="cat_upload")
         
-        if st.button("Delete ALL Expense Data", type="primary", key="delete_expenses"):
+        if uploaded_file:
             try:
-                conn = get_db_connection()
-                conn.execute("DELETE FROM company_expenses")
-                conn.commit()
-                clear_cache()
-                st.success("Successfully deleted all company expense data.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting data: {e}")
+                df = pd.read_excel(uploaded_file)
+                errors = []
+                if 'name' not in df.columns:
+                    errors.append("Missing required column: 'name'")
+                else:
+                    for i, row in df.iterrows():
+                        if not row['name']:
+                            errors.append(f"Row {i+2}: 'name' cannot be empty.")
+                    
+                    db_cats = get_all_categories()['name'].tolist()
+                    for i, row in df.iterrows():
+                        if row['name'] in db_cats:
+                            errors.append(f"Row {i+2}: Category '{row['name']}' already exists in the database.")
 
-    # --- Delete Category Data ---
-    with st.expander("Delete All Expense Categories"):
-        st.write("This action will delete ALL expense categories. Existing expenses will show 'None' as their category.")
+                if errors:
+                    st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                    st.json(errors[:10])
+                else:
+                    st.success("File validation passed!")
+                    st.dataframe(df)
+                    if st.button("Import Categories"):
+                        conn = get_db_connection()
+                        try:
+                            with st.spinner("Importing..."):
+                                df.to_sql("expense_categories", conn, if_exists="append", index=False)
+                            st.success(f"Successfully imported {len(df)} categories.")
+                            clear_cache()
+                        except Exception as e:
+                            st.error(f"Error importing to database: {e}. Check for duplicates in your file.")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+    # --- Import Expenses ---
+    with tab3:
+        st.subheader("1. Download Expense Template")
+        st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies').")
+        cols = ["expense_date", "description", "amount", "category_name"]
+        excel_data, file_name = generate_excel_template(cols, "expense_import_template.xlsx")
+        st.download_button(label="Download Template", data=excel_data, file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         
-        if st.button("Delete ALL Categories", type="primary", key="delete_categories"):
+        st.subheader("2. Upload Completed File")
+        uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx", key="exp_upload")
+        
+        if uploaded_file:
             try:
-                conn = get_db_connection()
-                conn.execute("DELETE FROM expense_categories")
-                conn.commit()
-                clear_cache()
-                st.success("Successfully deleted all expense categories.")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error deleting data: {e}")
+                df = pd.read_excel(uploaded_file)
+                
+                errors = []
+                required_cols = ["expense_date", "description", "amount", "category_name"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        errors.append(f"Missing required column: '{col}'")
+                
+                if errors:
+                    st.error("File format error. Please fix and re-upload:")
+                    st.json(errors)
+                else:
+                    cat_df = get_all_categories()
+                    cat_map = {row['name']: row['id'] for _, row in cat_df.iterrows()}
+                    
+                    for i, row in df.iterrows():
+                        try: pd.to_datetime(row['expense_date'])
+                        except: errors.append(f"Row {i+2}: 'expense_date' is not a valid date.")
+                        try: pd.to_numeric(row['amount'])
+                        except: errors.append(f"Row {i+2}: 'amount' is not a valid number.")
+                        if row['category_name'] not in cat_map:
+                            errors.append(f"Row {i+2}: Category '{row['category_name']}' not found in database.")
+                    
+                    if errors:
+                        st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                        st.json(errors[:10])
+                    else:
+                        st.success("File validation passed!")
+                        st.dataframe(df)
+                        if st.button("Import Expenses"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            imported_count = 0
 
+                            with st.spinner("Processing and importing expenses..."):
+                                for _, row in df.iterrows():
+                                    cat_id = cat_map.get(row['category_name'])
+                                    
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO company_expenses (expense_date, description, amount, category_id)
+                                        VALUES (?, ?, ?, ?)
+                                        """,
+                                        (pd.to_datetime(row['expense_date']).strftime('%Y-%m-%d'), row['description'], row['amount'], cat_id)
+                                    )
+                                    imported_count += 1
+                            
+                            conn.commit()
+                            st.success(f"Successfully imported {imported_count} expense records.")
+                            clear_cache()
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+
+    # --- Import Ledger Entries ---
+    with tab4:
+        st.subheader("1. Download Ledger Template")
+        st.markdown("In the template, use the Employee *Name* (e.g., 'Alice Smith').")
+        cols = ["employee_name", "entry_date", "description", "debit", "credit"]
+        excel_data, file_name = generate_excel_template(cols, "ledger_import_template.xlsx")
+        st.download_button(label="Download Template", data=excel_data, file_name=file_name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
+        st.subheader("2. Upload Completed File")
+        uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx", key="led_upload")
+
+        if uploaded_file:
+            try:
+                df = pd.read_excel(uploaded_file).fillna(0)
+                
+                errors = []
+                required_cols = ["employee_name", "entry_date", "description", "debit", "credit"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        errors.append(f"Missing required column: '{col}'")
+
+                if errors:
+                    st.error("File format error. Please fix and re-upload:")
+                    st.json(errors)
+                else:
+                    emp_df = get_all_employees()
+                    emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
+                    
+                    for i, row in df.iterrows():
+                        try: pd.to_datetime(row['entry_date'])
+                        except: errors.append(f"Row {i+2}: 'entry_date' is not a valid date.")
+                        try: pd.to_numeric(row['debit'])
+                        except: errors.append(f"Row {i+2}: 'debit' is not a valid number.")
+                        try: pd.to_numeric(row['credit'])
+                        except: errors.append(f"Row {i+2}: 'credit' is not a valid number.")
+                        if row['debit'] != 0 and row['credit'] != 0:
+                            errors.append(f"Row {i+2}: Cannot have both 'debit' and 'credit' in the same row.")
+                        if row['employee_name'] not in emp_map:
+                            errors.append(f"Row {i+2}: Employee '{row['employee_name']}' not found in database.")
+                    
+                    if errors:
+                        st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                        st.json(errors[:10])
+                    else:
+                        st.success("File validation passed!")
+                        st.dataframe(df)
+                        if st.button("Import Ledger Entries"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            imported_count = 0
+
+                            with st.spinner("Processing and importing ledger entries..."):
+                                for _, row in df.iterrows():
+                                    emp_id = emp_map.get(row['employee_name'])
+                                    
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
+                                        VALUES (?, ?, ?, ?, ?)
+                                        """,
+                                        (emp_id, pd.to_datetime(row['entry_date']).strftime('%Y-%m-%d'), row['description'], row['debit'], row['credit'])
+                                    )
+                                    imported_count += 1
+                            
+                            conn.commit()
+                            st.success(f"Successfully imported {imported_count} ledger entries.")
+                            clear_cache()
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
 
 # --- Main App ---
 def main():
@@ -1345,7 +1469,6 @@ def main():
             "Salary Management": page_salary_management,
             "Download Reports": page_reporting,
             "Data Import": page_data_import,
-            "App Settings": page_app_settings, # --- NEW ---
         }
         
         if "page" not in st.session_state:
@@ -1365,4 +1488,4 @@ def main():
     page_function()
 
 if __name__ == "__main__":
-    main()
+    main() 
