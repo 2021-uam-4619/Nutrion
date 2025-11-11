@@ -68,7 +68,6 @@ class PDF(FPDF):
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        # ... (rest of the PDF class is unchanged) ...
         # Set font for table header
         self.set_font('Arial', 'B', 8)
         self.set_fill_color(220, 220, 220) # Light grey background
@@ -1024,9 +1023,6 @@ def page_employee_ledger():
         # Get filtered ledger for display
         filtered_ledger_df = get_employee_ledger(selected_emp_id, start_date, end_date)
         
-        if filtered_ledger_df.empty:
-            st.info("No ledger entries found for this employee in this period.")
-        
         # --- Calculate Balances ---
         all_time_balance = 0
         if not full_ledger_df.empty:
@@ -1081,6 +1077,9 @@ def page_employee_ledger():
                 file_name=f"Ledger_{employee_list.get(selected_emp_id)}_{start_date}_to_{end_date}.pdf",
                 mime="application/pdf"
             )
+        else:
+            # --- FIX: Handle case where no entries are found ---
+            st.info("No ledger entries found for this employee in this period.")
         
         st.divider()
         
@@ -1175,12 +1174,15 @@ def page_employee_ledger():
         except Exception as e:
             st.error(f"Error loading ledger editor: {e}")
 
+    # --- FIX: Add the missing 'except' block ---
+    except Exception as e:
+        st.error(f"Error fetching ledger: {e}")
 
 @st.cache_data(ttl=60)
 def get_employee_ledger(employee_id, start_date, end_date):
     conn = get_db_connection()
     query = """
-    SELECT entry_date, description, debit, credit
+    SELECT id, entry_date, description, debit, credit
     FROM employee_ledger
     WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
     ORDER BY entry_date
@@ -1740,7 +1742,7 @@ def main():
             st.button(page_name, on_click=set_page, args=(page_name,), use_container_width=True)
             
         st.divider()
-        st.info(f"Version 2.0\n{DEVELOPER_INFO}")
+        st.info(f"Version 2.1\n{DEVELOPER_INFO}")
 
     # Run the selected page function
     page_function = PAGES[st.session_state.page]
