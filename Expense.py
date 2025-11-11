@@ -5,13 +5,14 @@ from datetime import date, datetime, timedelta
 import os
 from fpdf import FPDF
 import io
+from PIL import Image  # <-- Added for loading page icon
 
 # --- Constants ---
 DB_FILE = "nutrion_app.db"
 COMPANY_NAME = "Nutrion"
 DEVELOPER_INFO = "Developed by DataNex Solution | +92320 7429422"
 
-# --- PDF Class with Header/Footer ---
+# --- PDF Class with Header/Footer (MODIFIED) ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -19,8 +20,11 @@ class PDF(FPDF):
         self.date_range_str = ""
 
     def header(self):
-        # Logo (optional - requires image file)
-        # self.image('logo.png', 10, 8, 33)
+        # --- MODIFICATION: Add logo if it exists ---
+        if os.path.exists('logo.png'):
+            self.image('logo.png', 10, 8, 33) # x, y, width
+            self.set_x(0) # Move to center
+            
         self.set_font('Arial', 'B', 15)
         self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
         self.set_font('Arial', 'B', 12)
@@ -30,17 +34,28 @@ class PDF(FPDF):
         self.ln(5) # Line break
 
     def footer(self):
+        footer_width = self.w - self.l_margin - self.r_margin
+        
+        # --- MODIFICATION: Add Signature Image ---
         self.set_y(-35) # Position 3.5 cm from bottom
         self.set_font('Arial', '', 10)
-        
-        # --- Signature Lines ---
-        footer_width = self.w - self.l_margin - self.r_margin
-        # --- MODIFIED: Added computerized signature ---
-        self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
-        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
-        self.ln(10)
 
+        # Prepared By (Left side)
+        if os.path.exists('Asim Siganture.jpg'):
+            self.cell(footer_width / 2, 5, "Prepared by:", 0, 0, 'L')
+            # Place signature image below the text
+            self.image('Asim Siganture.jpg', x=self.l_margin, y=self.get_y() + 5, w=40) # w=40mm
+        else:
+            # Fallback text
+            self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
+
+        # Approved By (Right side)
+        self.set_y(-35) # Reset Y for the other cell
+        self.cell(footer_width / 2, 10, "", 0, 0, 'C') # Empty spacer cell
+        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
+        
         # --- Page Number and Developer Info ---
+        self.set_y(-15) # Position 1.5 cm from bottom
         self.set_font('Arial', 'I', 8)
         self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
@@ -176,8 +191,10 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
     """Generates a professional PDF report from a DataFrame."""
     pdf = PDF(orientation=orientation, unit='mm', format='A4')
     pdf.report_title = title
-    if date_range:
+    if date_range and date_range[0] is not None:
         pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+    elif date_range:
+         pdf.date_range_str = "All-Time Report"
     else:
         pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
         
@@ -337,8 +354,6 @@ def page_dashboard():
     - **Reporting**: Download summary reports for expenses and categories.
     - **Data Import**: Bulk-import existing data using Excel templates.
     """)
-    # --- REMOVED FAILING IMAGE LINE ---
-    # st.image("https://placehold.co/800x300/e0e0e0/777?text=Nutrion+Company+Dashboard", use_column_width=True)
 
 def page_employee_management():
     st.title("Employee Management")
@@ -381,14 +396,12 @@ def page_employee_management():
 
     # --- Manage Existing Employees (Req 4) ---
     st.subheader("Manage Employees")
-    # --- NEW: Added help text for data editor ---
-    st.help("""
-    Use the table below to edit or delete employees.
+    # --- MODIFIED: Changed st.help to plain text ---
+    st.markdown("""
+    *Use the table below to edit, delete, or add employees. Click 'Save Changes' when done.*
     - **To Edit:** Click on any cell, make your change, and press Enter.
     - **To Delete:** Click the `x` icon at the end of a row.
     - **To Add:** Click the `+` icon at the bottom to add a new row.
-    
-    **You must click the 'Save Changes' button below the table to apply all edits.**
     """)
     try:
         employees_df = get_all_employees()
@@ -538,14 +551,12 @@ def page_expense_management():
     
     # --- Manage Expense Categories (Req 3, 10) ---
     st.subheader("Manage Expense Categories")
-    # --- NEW: Added help text for data editor ---
-    st.help("""
-    Use the table below to edit or delete categories.
+    # --- MODIFIED: Changed st.help to plain text ---
+    st.markdown("""
+    *Use the table below to edit, delete, or add categories. Click 'Save Category Changes' when done.*
     - **To Edit:** Click on the 'name' cell, make your change, and press Enter.
     - **To Delete:** Click the `x` icon at the end of a row.
     - **To Add:** Click the `+` icon at the bottom and add a new name.
-    
-    **You must click the 'Save Category Changes' button below the table to apply all edits.**
     """)
     try:
         categories_df = get_all_categories()
@@ -672,9 +683,11 @@ def page_expense_management():
                 current_cat_id = expense_details['category_id']
                 if pd.notna(current_cat_id) and current_cat_id not in cat_ids:
                     st.error(f"Error: The original category (ID: {current_cat_id}) for this expense was deleted. Please select a new, valid category.")
-                    cat_ids.append(current_cat_id)
-                    category_list[current_cat_id] = f"INVALID CATEGORY (ID: {current_cat_id})"
-                    default_index = 0 
+                    # Add invalid one to list just for selection
+                    if current_cat_id not in cat_ids:
+                        cat_ids.append(current_cat_id)
+                        category_list[current_cat_id] = f"INVALID CATEGORY (ID: {current_cat_id})"
+                    default_index = cat_ids.index(current_cat_id)
                 elif pd.notna(current_cat_id):
                     default_index = cat_ids.index(current_cat_id)
                 else:
@@ -691,7 +704,7 @@ def page_expense_management():
                     with cols[1]:
                         edit_category_id = st.selectbox("Category", 
                             options=cat_ids, 
-                            format_func=lambda x: category_list[x], 
+                            format_func=lambda x: category_list.get(x, "Invalid"), 
                             index=default_index
                         )
                     with cols[2]:
@@ -794,7 +807,7 @@ def page_salary_management():
 
     # --- Step 2: Download Salary Sheet (Req 2) ---
     st.subheader("2. View & Download Salary Sheet")
-    st.help("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
+    st.markdown("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
     
     if st.button("Generate Salary Sheet"):
         try:
@@ -986,10 +999,6 @@ def page_employee_ledger():
                 """
                 params = (selected_emp_id,)
                 date_range = (None, None) # For PDF
-                pdf_title_date_range = (
-                    pd.to_datetime(get_all_employees()['join_date'].min()), # A bit of a hack, find earliest date
-                    date.today()
-                )
             else:
                 query = """
                     SELECT 
@@ -1024,7 +1033,7 @@ def page_employee_ledger():
                 pdf_bytes = generate_pdf_report(
                     balance_df, 
                     f"Ledger for {employee_list[selected_emp_id]}", 
-                    date_range=date_range if not show_all_time else None, # Use date_range
+                    date_range=date_range, # Use date_range
                     orientation='P',
                     totals_cols=["Credit", "Debit"]
                 )
@@ -1046,7 +1055,7 @@ def page_reporting():
     
     # --- Report 1: Company Expense Report (Req 3) ---
     st.header("Company Expense Report")
-    st.help("Full report of all company expenses, filterable by date and category.")
+    st.markdown("Full report of all company expenses, filterable by date and category.")
     
     # Filters
     categories_df = get_all_categories()
@@ -1120,7 +1129,7 @@ def page_reporting():
 
     # --- Report 2: Expense Category Sheet (Req 10) ---
     st.header("Expense Category Sheet")
-    st.help("Downloads a simple list of all defined expense categories.")
+    st.markdown("Downloads a simple list of all defined expense categories.")
     
     if st.button("Generate Category Sheet (PDF)"):
         try:
@@ -1219,7 +1228,7 @@ def page_data_import():
     # --- Tab 3: Import Expenses ---
     with tab3:
         st.subheader("1. Download Expense Template")
-        st.help("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
+        st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
         cols = ["expense_date", "description", "amount", "category_name", "employee_name"]
         excel_data, file_name = generate_excel_template(cols, "expense_import_template.xlsx")
         st.download_button(
@@ -1255,7 +1264,7 @@ def page_data_import():
                             emp_id = emp_map.get(row['employee_name']) # Will be None if blank or not found
                             
                             if not cat_id:
-                                error_list.append(f"Category '{row['category_name']}' not found.")
+                                error_list.append(f"Row {_+2}: Category '{row['category_name']}' not found.")
                                 continue
                             
                             cursor.execute(
@@ -1291,7 +1300,7 @@ def page_data_import():
     # --- Tab 4: Import Ledger Entries ---
     with tab4:
         st.subheader("1. Download Ledger Template")
-        st.help("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
+        st.markdown("Use the Employee *Name* (e.g., 'Alice Smith'). Fill in EITHER debit OR credit for each row, not both.")
         cols = ["employee_name", "entry_date", "description", "debit", "credit"]
         excel_data, file_name = generate_excel_template(cols, "ledger_import_template.xlsx")
         st.download_button(
@@ -1323,7 +1332,7 @@ def page_data_import():
                             emp_id = emp_map.get(row['employee_name'])
                             
                             if not emp_id:
-                                error_list.append(f"Employee '{row['employee_name']}' not found.")
+                                error_list.append(f"Row {_+2}: Employee '{row['employee_name']}' not found.")
                                 continue
                             
                             # Note: related_expense_id is not set for generic ledger imports
@@ -1347,13 +1356,28 @@ def page_data_import():
 
 # --- Main App ---
 def main():
-    st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide")
+    # --- MODIFICATION: Set page config with logo ---
+    page_icon_path = "logo.png"
+    page_icon_img = None
+    try:
+        # Try to load image for favicon
+        page_icon_img = Image.open(page_icon_path)
+    except FileNotFoundError:
+        page_icon_img = None # Fallback
+    
+    st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide", page_icon=page_icon_img)
     
     # Initialize DB
     init_db()
 
-    # --- Sidebar Navigation ---
+    # --- MODIFICATION: Add logo to sidebar ---
     st.sidebar.title(f"{COMPANY_NAME} Portal")
+    if os.path.exists("logo.png"):
+        st.sidebar.image("logo.png", use_column_width=True)
+    else:
+        st.sidebar.warning("`logo.png` not found. Add it to the app directory to display.")
+    
+    # --- Sidebar Navigation ---
     page_options = {
         "Dashboard": page_dashboard,
         "Employee Management": page_employee_management,
