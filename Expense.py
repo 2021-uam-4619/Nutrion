@@ -77,7 +77,7 @@ class PDF(FPDF):
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        # --- NEW DYNAMIC WIDTH LOGIC ---
+        # --- NEW DYNAMIC WIDTH LOGIC (Fix for image_c078fa.png) ---
         self.set_font('Arial', 'B', 8)
         self.set_fill_color(220, 220, 220) # Light grey header
         
@@ -89,13 +89,17 @@ class PDF(FPDF):
         
         # Set base weights
         for col in df.columns:
-            col_lower = col.lower()
-            if 'description' in col_lower or 'name' in col_lower or 'title' in col_lower:
-                weight = 3.5 # High weight
-            elif 'date' in col_lower or 'category' in col_lower:
-                weight = 1.5 # Medium weight
+            col_lower = str(col).lower()
+            if 'description' in col_lower:
+                weight = 3.0
+            elif 'title' in col_lower or 'account no' in col_lower: # Give more space to account info
+                weight = 2.5
+            elif 'name' in col_lower:
+                weight = 2.0
+            elif 'date' in col_lower or 'category' in col_lower or 'bank' in col_lower or 'designation' in col_lower:
+                weight = 1.5
             else: # ID, Amount, Salary, etc.
-                weight = 1.0 # Standard weight
+                weight = 1.0
             
             col_weights[col] = weight
             total_weight += weight
@@ -105,7 +109,7 @@ class PDF(FPDF):
 
         # Draw Header
         for col in df.columns:
-            self.cell(col_widths[col], 7, col, 1, 0, 'C', 1)
+            self.cell(col_widths[col], 7, str(col), 1, 0, 'C', 1)
         self.ln()
         
         # Set data style
@@ -135,7 +139,7 @@ class PDF(FPDF):
                 # Handle formatting
                 if pd.isna(val):
                     cell_text = ""
-                elif isinstance(val, (int, float)) and col.lower() in ['amount', 'salary', 'deductions', 'net salary', 'debit', 'credit', 'balance', 'deduction / advance (-)', 'payment / bonus (+)']:
+                elif isinstance(val, (int, float)) and any(c in str(col).lower() for c in ['amount', 'salary', 'deductions', 'net', 'debit', 'credit', 'balance']):
                     cell_text = f"{val:,.2f}"
                 else:
                     cell_text = str(val)
@@ -160,40 +164,40 @@ class PDF(FPDF):
             self.set_fill_color(240, 240, 240) # Lighter grey for totals
             
             total_values = {}
-            for col in totals_cols:
-                if col in df.columns:
+            for col_name in totals_cols:
+                if col_name in df.columns:
                     try:
-                        total_values[col] = df[col].sum()
+                        total_values[col_name] = df[col_name].sum()
                     except TypeError:
-                        total_values[col] = None
+                        total_values[col_name] = None
             
             # Find the first column that needs a total
-            first_total_col = len(df.columns)
-            
-            for i, col in enumerate(df.columns):
-                if col in totals_cols:
-                    first_total_col = i
+            first_total_col_index = -1
+            for i, col_name in enumerate(df.columns):
+                if col_name in totals_cols:
+                    first_total_col_index = i
                     break
-                    
-            # Add "GRAND TOTAL" label, aligned right
-            total_label_width = sum(col_widths[col] for col in df.columns[:first_total_col])
             
-            if first_total_col == 0:
-                 # If total is in first col, just write in that cell
-                pass
-            else:
+            if first_total_col_index == -1: # No total cols found
+                 self.ln()
+                 return
+
+            # Add "GRAND TOTAL" label, aligned right
+            total_label_width = sum(col_widths[col] for col in df.columns[:first_total_col_index])
+            
+            if first_total_col_index > 0:
                 self.cell(total_label_width, 7, "GRAND TOTAL", 1, 0, 'R', 1)
 
             # Add the calculated totals
-            for col in df.columns[first_total_col:]:
-                col_width = col_widths[col]
+            for col_name in df.columns[first_total_col_index:]:
+                col_width = col_widths[col_name]
                 
-                if col == df.columns[first_total_col] and first_total_col == 0:
+                if col_name == df.columns[first_total_col_index] and first_total_col_index == 0:
                      # Handle case where total is in first column
-                    cell_text = f"GRAND TOTAL: {total_values[col]:,.2f}" if col in total_values else "GRAND TOTAL"
+                    cell_text = f"GRAND TOTAL: {total_values.get(col_name, 0):,.2f}" if col_name in total_values else "GRAND TOTAL"
                     self.cell(col_width, 7, cell_text, 1, 0, 'R', 1)
-                elif col in total_values and total_values[col] is not None:
-                    cell_text = f"{total_values[col]:,.2f}"
+                elif col_name in total_values and total_values[col_name] is not None:
+                    cell_text = f"{total_values[col_name]:,.2f}"
                     self.cell(col_width, 7, cell_text, 1, 0, 'R', 1)
                 else:
                     self.cell(col_width, 7, "", 1, 0, 'C', 1) # Blank cell
@@ -1417,30 +1421,30 @@ def main():
     
     st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide", page_icon=page_icon_img)
     
-    # --- Professional UI Styling ---
+    # --- Professional UI Styling (Nutrion Green Theme) ---
     st.markdown("""
         <style>
             :root {
-                --brand-blue: #004A99;
-                --brand-blue-light: #E6F0FF;
+                --brand-green: #4CAF50; /* Nutrion Green */
+                --brand-green-light: #E8F5E9; /* Light green for tabs */
                 --background-color: #F4F7FC;
                 --sidebar-background: #FFFFFF;
                 --card-background: #FFFFFF;
                 --text-color: #0F172A;
-                --title-color: #004A99;
+                --title-color: #2E7D32; /* Darker green for titles */
                 --border-color: #E2E8F0;
-                --shadow: 0 4px 12px rgba(0, 74, 153, 0.08);
+                --shadow: 0 4px 12px rgba(76, 175, 80, 0.1);
             }
             .stApp { background-color: var(--background-color); color: var(--text-color); }
             h1 { color: var(--title-color) !important; }
             .stButton > button {
-                border: 2px solid var(--brand-blue);
-                background-color: var(--brand-blue);
+                border: 2px solid var(--brand-green);
+                background-color: var(--brand-green);
                 color: white;
                 border-radius: 8px;
                 transition: all 0.2s;
             }
-            .stButton > button:hover { background-color: white; color: var(--brand-blue); border-color: var(--brand-blue); }
+            .stButton > button:hover { background-color: white; color: var(--brand-green); border-color: var(--brand-green); }
             .stButton > button[kind="primary"] { border: 2px solid #D32F2F; background-color: #D32F2F; }
             .stButton > button[kind="primary"]:hover { background-color: white; color: #D32F2F; }
             div[data-testid="stMetric"], div[data-testid="stForm"], div[data-testid="stExpander"], .stDataFrame {
@@ -1460,9 +1464,9 @@ def main():
             }
             button[data-baseweb="tab"] { border-radius: 8px 8px 0 0; }
             button[data-baseweb="tab"][aria-selected="true"] {
-                background-color: var(--brand-blue-light);
-                color: var(--brand-blue);
-                border-bottom: 2px solid var(--brand-blue);
+                background-color: var(--brand-green-light);
+                color: var(--brand-green);
+                border-bottom: 2px solid var(--brand-green);
             }
         </style>
     """, unsafe_allow_html=True)
@@ -1501,7 +1505,7 @@ def main():
             st.button(page_name, on_click=set_page, args=(page_name,), use_container_width=True)
             
         st.divider()
-        st.info(f"Version 3.0 (PDF Fix)\n{DEVELOPER_INFO}") # Version bump
+        st.info(f"Version 3.1 (UI/PDF Fix)\n{DEVELOPER_INFO}") # Version bump
 
     # --- Run the selected page ---
     page_function = PAGES[st.session_state.page]
