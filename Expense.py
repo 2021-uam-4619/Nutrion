@@ -40,30 +40,11 @@ class PDF(FPDF):
     def footer(self):
         footer_width = self.w - self.l_margin - self.r_margin
         
-        # --- MODIFICATION: Signature ABOVE the line (based on image_bcd23d.png) ---
-        
-        # 1. Place signature image first, 4cm from bottom
-        if os.path.exists('Asim Siganture.jpg'):
-            sig_width = 30 # smaller signature
-            # Position it above the "Prepared by" line
-            sig_x_pos = self.l_margin + 30 # Indent a bit
-            sig_y_pos = -40 # 4cm from bottom
-            try:
-                self.image('Asim Siganture.jpg', x=sig_x_pos, y=sig_y_pos, w=sig_width)
-            except Exception as e:
-                # Fallback if image is corrupted or invalid
-                pass 
-
-        # 2. Place text lines, 3cm from bottom
+        # --- NEW: System Generated Text ---
+        # 1. Place system-generated text line, 3cm from bottom
         self.set_y(-30) 
-        self.set_font('Arial', '', 10)
-        
-        # --- Left Side: Prepared by ---
-        text = "Prepared by: _______________"
-        self.cell(footer_width / 2, 10, text, 0, 0, 'L')
-        
-        # --- Right Side: Approved by ---
-        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
+        self.set_font('Arial', 'I', 10) # Italic
+        self.cell(0, 10, "This is a system-generated document and does not require a signature.", 0, 1, 'C')
         
         # --- Developer Info ---
         self.set_y(-15) # Position 1.5 cm from bottom
@@ -91,12 +72,8 @@ class PDF(FPDF):
         for col in df.columns:
             col_lower = str(col).lower()
             
-            # --- FIX: Give more space to salary sheet headers ---
-            if 'other credits' in col_lower or 'deductions' in col_lower:
-                weight = 1.8
-            elif 'base salary' in col_lower:
-                 weight = 1.5
-            elif 'description' in col_lower:
+            # --- FIX: Give more space to salary sheet headers (Removed unused columns) ---
+            if 'description' in col_lower:
                 weight = 3.0
             elif 'title' in col_lower or 'account no' in col_lower: # Give more space to account info
                 weight = 2.5
@@ -801,80 +778,15 @@ def page_expense_management():
 def page_salary_management():
     st.title("Salary Management")
     
-    st.text("Follow these steps to process monthly salaries:\n"
-            "1. Generate Monthly Salary Credits: Run this first.\n"
-            "2. View & Download Salary Sheet: After credits are generated, use this.\n"
-            "3. Generate Individual Salary Slip: Download a PDF slip for one employee.")
+    st.text("Use the tools below to manage and download salary information.")
 
-    # --- 1. Generate Monthly Salary Credits ---
-    st.subheader("1. Generate Monthly Salary Credits")
-    st.warning("Run this **only once** per month. Running it again for the same month will create duplicate entries.")
+    # --- 1. Generate Monthly Salary Credits (REMOVED) ---
     
-    today = date.today()
-    # --- NEW: Use session state for dates ---
-    if 'salary_month' not in st.session_state:
-        st.session_state.salary_month = today.month
-    if 'salary_year' not in st.session_state:
-        st.session_state.salary_year = today.year
-    
-    with st.form("generate_salaries_form"):
-        cols = st.columns(2)
-        salary_month = cols[0].number_input("For Month", min_value=1, max_value=12, key="salary_month")
-        salary_year = cols[1].number_input("For Year", min_value=2020, max_value=2100, key="salary_year")
-        
-        submitted = st.form_submit_button("Generate Salary Credits for All Employees")
-        
-        if submitted:
-            conn = get_db_connection()
-            cursor = conn.cursor()
-            employees = get_all_employees()
-            
-            if employees.empty:
-                st.error("No employees found to generate salaries for.")
-                return
-
-            try:
-                count = 0
-                with st.spinner(f"Generating salary credits for {len(employees)} employees..."):
-                    entry_date = date(salary_year, salary_month, 1)
-                    
-                    for index, emp in employees.iterrows():
-                        description = f"Monthly Salary Credit for {entry_date.strftime('%B %Y')}"
-                        
-                        exists = cursor.execute(
-                            """
-                            SELECT 1 FROM employee_ledger 
-                            WHERE employee_id = ? AND description = ? AND credit = ?
-                            """,
-                            (int(emp['id']), description, float(emp['salary']))
-                        ).fetchone()
-                        
-                        if not exists:
-                            cursor.execute(
-                                """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, credit)
-                                VALUES (?, ?, ?, ?)
-                                """,
-                                (int(emp['id']), str(entry_date), description, float(emp['salary']))
-                            )
-                            count += 1
-                        
-                conn.commit()
-                if count > 0:
-                    st.success(f"Successfully generated {count} new salary credit entries.")
-                else:
-                    st.info("No new entries were created. Salaries for this period might already be generated.")
-                clear_cache()
-                
-            except Exception as e:
-                conn.rollback()
-                st.error(f"Error generating salaries: {e}")
-
     st.divider()
 
-    # --- 2. View & Download Salary Sheet ---
-    st.subheader("2. View & Download Salary Sheet")
-    st.text("This sheet calculates the Net Salary based on all ledger entries for the selected month.")
+    # --- 1. View & Download Salary Sheet ---
+    st.subheader("1. View & Download Salary Sheet")
+    st.text("This sheet shows employee bank details and base salary.")
     
     # --- NEW: Use session state for dates ---
     persist_date('sheet_start', today.replace(day=1))
@@ -902,8 +814,8 @@ def page_salary_management():
 
     st.divider()
     
-    # --- 3. Generate Individual Salary Slip ---
-    st.subheader("3. Generate Individual Salary Slip (Req 2)")
+    # --- 2. Generate Individual Salary Slip ---
+    st.subheader("2. Generate Individual Salary Slip (Req 2)")
     
     employees_df = get_all_employees()
     employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
@@ -946,6 +858,7 @@ def page_salary_management():
 def get_salary_sheet(start_date, end_date):
     """Calculates the salary sheet for all employees for a given period."""
     conn = get_db_connection()
+    # --- MODIFIED: Removed credit/debit/net columns ---
     query = """
     SELECT
         e.name AS "Name",
@@ -953,17 +866,12 @@ def get_salary_sheet(start_date, end_date):
         e.bank AS "Bank",
         e.account_title AS "Account Title",
         e.account_no AS "Account No.",
-        e.salary AS "Base Salary",
-        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Other Credits (Bonus/Reimb.)",
-        COALESCE(SUM(el.debit), 0) AS "Deductions (Advance)",
-        (COALESCE(SUM(el.credit), 0) - COALESCE(SUM(el.debit), 0)) AS "Net Salary"
+        e.salary AS "Base Salary"
     FROM employees e
-    LEFT JOIN employee_ledger el ON e.id = el.employee_id
-        AND el.entry_date BETWEEN ? AND ?
     GROUP BY e.id
     ORDER BY e.name
     """
-    df = pd.read_sql_query(query, conn, params=(str(start_date), str(end_date)))
+    df = pd.read_sql_query(query, conn)
     return df
 
 def generate_salary_sheet_pdf(df, start_date, end_date):
@@ -974,7 +882,8 @@ def generate_salary_sheet_pdf(df, start_date, end_date):
     pdf.set_font('Arial', '', 11)
     pdf.cell(0, 8, f"Period: {start_date.strftime('%d-%m-%Y')} to {end_date.strftime('%d-%m-%Y')}", 0, 1, 'L')
     pdf.ln(5)
-    pdf.add_table(df, totals_cols=["Base Salary", "Other Credits (Bonus/Reimb.)", "Deductions (Advance)", "Net Salary"])
+    # --- MODIFIED: Updated totals_cols ---
+    pdf.add_table(df, totals_cols=["Base Salary"])
     return pdf.output(dest='S').encode('latin-1')
 
 def generate_individual_slip_pdf(employee_id, start_date, end_date):
