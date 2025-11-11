@@ -836,7 +836,7 @@ def get_salary_sheet(month, year):
         e.account_title AS "Account Title",
         e.account_no AS "Account No.",
         e.salary AS "Base Salary",
-        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Other Credits (Bonus/Reimb.)",
+        COALESCE(SUM(CASE WHEN el.credit > 0 AND el.description NOT LIKE 'Monthly Salary Credit%' THEN el.credit ELSE 0 END), 0) AS "Others",
         COALESCE(SUM(el.debit), 0) AS "Deductions (Advance)",
         (e.salary + COALESCE(SUM(el.credit), 0) - COALESCE(SUM(el.debit), 0)) AS "Net Salary"
     FROM employees e
