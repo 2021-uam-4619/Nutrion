@@ -42,9 +42,10 @@ class PDF(FPDF):
 
         # Prepared By (Left side)
         if os.path.exists('Asim Siganture.jpg'):
-            self.cell(footer_width / 2, 5, "Prepared by:", 0, 0, 'L')
-            # Place signature image below the text
-            self.image('Asim Siganture.jpg', x=self.l_margin, y=self.get_y() + 5, w=40) # w=40mm
+            # --- MODIFICATION: Place image ON the line ---
+            # We place the image and the "Approved by" text at the same Y level.
+            self.image('Asim Siganture.jpg', x=self.l_margin, y=self.get_y() - 5, w=50) # w=50mm, y adjusted
+            self.cell(footer_width / 2, 10, "", 0, 0, 'L') # Spacer
         else:
             # Fallback text
             self.cell(footer_width / 2, 10, "Prepared by: System (Auto-Generated)", 0, 0, 'L')
@@ -163,9 +164,8 @@ def init_db():
             amount REAL NOT NULL,
             expense_date DATE NOT NULL,
             category_id INTEGER,
-            employee_id INTEGER, -- For Req 11
-            FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL,
-            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
+            -- MODIFICATION: Removed employee_id
+            FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL
         )
     ''')
     
@@ -178,9 +178,8 @@ def init_db():
             description TEXT,
             debit REAL DEFAULT 0,
             credit REAL DEFAULT 0,
-            related_expense_id INTEGER, -- NEW: To link ledger debit to expense
-            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
-            FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
+            -- MODIFICATION: Removed related_expense_id
+            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE
         )
     ''')
     
@@ -477,17 +476,14 @@ def page_expense_management():
 
     # --- Log New Expense (Req 3) ---
     st.subheader("Log New Company Expense")
+    st.info("Use this form to log general company expenses. This does NOT affect any employee's ledger.")
     
     # Get categories for dropdown
     categories_df = get_all_categories()
     category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
     
     # Get employees for dropdown (Req 11)
-    employees_df = get_all_employees()
-    employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
-    # Add a "None" option for expenses not tied to an employee
-    employee_list_with_none = {0: "N/A (General Company Expense)"}
-    employee_list_with_none.update(employee_list)
+    # --- MODIFICATION: Removed employee list from this form ---
 
     if not category_list:
         st.warning("No expense categories found. Please add categories below before logging expenses.", icon="⚠️")
@@ -504,8 +500,7 @@ def page_expense_management():
         description = st.text_input("Description", placeholder="e.g., Office electricity bill")
         
         # Req 11: Link expense to employee
-        st.info("If this expense is an advance or deduction for an employee, select their name. (Req 11)")
-        employee_id = st.selectbox("Employee (Optional)", options=list(employee_list_with_none.keys()), format_func=lambda x: employee_list_with_none[x])
+        # --- MODIFICATION: Removed employee selection from this form ---
 
         submitted = st.form_submit_button("Log Expense")
         if submitted:
@@ -515,30 +510,20 @@ def page_expense_management():
                     cursor = conn.cursor()
                     
                     # 1. Log the company expense
+                    # --- MODIFICATION: Simplified query (no employee_id) ---
                     cursor.execute(
                         """
-                        INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id)
-                        VALUES (?, ?, ?, ?, ?)
+                        INSERT INTO company_expenses (description, amount, expense_date, category_id)
+                        VALUES (?, ?, ?, ?)
                         """,
-                        (description, amount, str(expense_date), category_id, employee_id if employee_id != 0 else None)
+                        (description, amount, str(expense_date), category_id)
                     )
                     
                     # Get the ID of the expense we just inserted
                     expense_id = cursor.lastrowid
                     
-                    # 2. (Req 11) If linked to employee, add as a DEBIT to their ledger
-                    if employee_id != 0:
-                        ledger_desc = f"Expense: {description} (Ref ID: {expense_id})"
-                        cursor.execute(
-                            """
-                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
-                            VALUES (?, ?, ?, ?, 0, ?)
-                            """,
-                            (employee_id, str(expense_date), ledger_desc, amount, expense_id)
-                        )
-                        st.success(f"Expense logged and Rs. {amount} debited from {employee_list[employee_id]}'s ledger.")
-                    else:
-                        st.success("Company expense logged successfully.")
+                    # --- MODIFICATION: Removed all logic linking to employee ledger ---
+                    st.success("Company expense logged successfully.")
                     
                     conn.commit()
                     clear_cache()
@@ -603,6 +588,7 @@ def page_expense_management():
     st.subheader("Manage Logged Expenses")
     try:
         conn = get_db_connection()
+        # --- MODIFICATION: Removed employee join ---
         expenses_df = pd.read_sql_query(
             """
             SELECT 
@@ -611,12 +597,9 @@ def page_expense_management():
                 ce.description, 
                 ce.amount, 
                 ec.name as category,
-                e.name as employee,
-                ce.category_id, -- Keep for editing
-                ce.employee_id -- Keep for editing
+                ce.category_id -- Keep for editing
             FROM company_expenses ce
             LEFT JOIN expense_categories ec ON ce.category_id = ec.id
-            LEFT JOIN employees e ON ce.employee_id = e.id
             ORDER BY ce.expense_date DESC
             """, conn
         )
@@ -625,7 +608,7 @@ def page_expense_management():
             st.info("No expenses logged yet.")
             return
 
-        cols_to_show = ['id', 'expense_date', 'description', 'amount', 'category', 'employee']
+        cols_to_show = ['id', 'expense_date', 'description', 'amount', 'category']
         
         # --- Display in a non-editable table first ---
         st.dataframe(expenses_df[cols_to_show], use_container_width=True)
@@ -645,18 +628,10 @@ def page_expense_management():
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # --- CRITICAL FIX: Also delete the related ledger entry ---
-                    if pd.notna(expense_details['employee_id']):
-                        cursor.execute(
-                            "DELETE FROM employee_ledger WHERE related_expense_id = ?",
-                            (int(expense_to_edit),)
-                        )
-                        st.info("Removed corresponding debit from employee's ledger.")
-                    # --- END FIX ---
-
+                    # --- MODIFICATION: Removed ledger deletion logic ---
                     cursor.execute("DELETE FROM company_expenses WHERE id = ?", (int(expense_to_edit),))
                     conn.commit()
-                    st.success(f"Expense ID {expense_to_edit} and its related ledger entry deleted.")
+                    st.success(f"Expense ID {expense_to_edit} deleted.")
                     clear_cache()
                     st.rerun()
                 except Exception as e:
@@ -664,16 +639,8 @@ def page_expense_management():
             
             # Edit Form
             with st.expander("Edit Expense Details"):
-                # --- NEW: Add warning about editing employee-linked expenses ---
-                if pd.notna(expense_details['employee_id']):
-                    st.warning("""
-                    **Accounting Warning:** This expense is linked to an employee's ledger. 
-                    Editing the amount here will **NOT** automatically update their ledger, which may cause accounting errors.
-                    
-                    **Recommendation:** To change the amount, please **delete** this expense (which will also remove the ledger debit) and **create a new one** with the correct amount.
-                    """, icon="⚠️")
-                # --- END WARNING ---
-
+                # --- MODIFICATION: Removed accounting warning ---
+                
                 # Get category list for form
                 categories_df = get_all_categories()
                 category_list = {row['id']: row['name'] for index, row in categories_df.iterrows()}
@@ -698,7 +665,7 @@ def page_expense_management():
                     edit_date = st.date_input("Expense Date", value=pd.to_datetime(expense_details['expense_date']))
                     edit_amount = st.number_input("Amount", value=expense_details['amount'])
                     
-                    cols = st.columns(3)
+                    cols = st.columns(2)
                     with cols[0]:
                         edit_desc = st.text_input("Description", value=expense_details['description'])
                     with cols[1]:
@@ -707,8 +674,7 @@ def page_expense_management():
                             format_func=lambda x: category_list.get(x, "Invalid"), 
                             index=default_index
                         )
-                    with cols[2]:
-                        st.text_input("Employee (Read-only)", value=expense_details.get('employee', 'N/A'), disabled=True)
+                    # --- MODIFICATION: Removed employee field ---
 
                     update_submitted = st.form_submit_button("Save Changes")
                     if update_submitted:
@@ -949,6 +915,54 @@ def page_employee_ledger():
         format_func=lambda x: employee_list[x]
     )
     
+    # --- NEW FEATURE: Add Manual Ledger Entry ---
+    st.subheader("Add Manual Ledger Entry")
+    st.info("Use this form to record advances (Debits) or reimbursements/bonuses (Credits) for an employee.")
+    with st.form("new_ledger_entry", clear_on_submit=True):
+        cols = st.columns(3)
+        with cols[0]:
+            entry_emp_id = st.selectbox(
+                "Select Employee", 
+                options=emp_ids, 
+                format_func=lambda x: employee_list[x],
+                index=emp_ids.index(selected_emp_id) if selected_emp_id in emp_ids else 0
+            )
+        with cols[1]:
+            entry_date = st.date_input("Entry Date", date.today())
+        with cols[2]:
+            entry_type = st.radio("Entry Type", ["Debit (Advance/Deduction)", "Credit (Reimbursement/Bonus)"])
+        
+        entry_desc = st.text_input("Description", placeholder="e.g., Cash advance for travel")
+        entry_amount = st.number_input("Amount", min_value=0.01)
+        
+        entry_submitted = st.form_submit_button("Add Ledger Entry")
+        
+        if entry_submitted:
+            if entry_amount > 0 and entry_desc:
+                debit = entry_amount if "Debit" in entry_type else 0
+                credit = entry_amount if "Credit" in entry_type else 0
+                
+                try:
+                    conn = get_db_connection()
+                    conn.execute(
+                        """
+                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (entry_emp_id, str(entry_date), entry_desc, debit, credit)
+                    )
+                    conn.commit()
+                    st.success(f"Ledger entry added for {employee_list[entry_emp_id]}.")
+                    clear_cache()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Database error: {e}")
+            else:
+                st.error("Please provide a description and amount.")
+    
+    st.divider()
+    # --- END NEW FEATURE ---
+
     # --- NEW: All-Time Ledger Toggle ---
     show_all_time = st.checkbox("Show All-Time Ledger? (Disables date filter)", key="all_time_toggle")
 
@@ -1088,11 +1102,9 @@ def page_reporting():
                         ce.expense_date AS "Date",
                         ce.description AS "Description",
                         ec.name AS "Category",
-                        e.name AS "Employee",
                         ce.amount AS "Amount"
                     FROM company_expenses ce
                     LEFT JOIN expense_categories ec ON ce.category_id = ec.id
-                    LEFT JOIN employees e ON ce.employee_id = e.id
                     WHERE ce.expense_date BETWEEN ? AND ?
                 """
                 params = [str(report_start_date), str(report_end_date)]
@@ -1177,16 +1189,50 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file)
-                st.dataframe(df)
                 
-                if st.button("Import Employees"):
-                    conn = get_db_connection()
-                    try:
-                        with st.spinner("Importing..."):
-                            df.to_sql("employees", conn, if_exists="append", index=False)
-                        st.success(f"Successfully imported {len(df)} employee records.")
-                        clear_cache()
-                    except Exception as e:
+                # --- NEW VALIDATION LOGIC ---
+                errors = []
+                # Check columns
+                required_cols = ["name", "designation", "salary", "bank", "account_title", "account_no", "join_date"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        errors.append(f"Missing required column: '{col}'")
+                
+                if errors:
+                    st.error("File format error. Please fix and re-upload:")
+                    st.json(errors)
+                else:
+                    # Validate data types
+                    for i, row in df.iterrows():
+                        if not row['name']:
+                            errors.append(f"Row {i+2}: 'name' cannot be empty.")
+                        try:
+                            pd.to_numeric(row['salary'])
+                        except:
+                            errors.append(f"Row {i+2}: 'salary' is not a valid number (Value: {row['salary']}).")
+                        try:
+                            pd.to_datetime(row['join_date'])
+                        except:
+                            errors.append(f"Row {i+2}: 'join_date' is not a valid date (Value: {row['join_date']}).")
+                    
+                    if errors:
+                        st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                        st.json(errors[:10]) # Show first 10 errors
+                    else:
+                        st.success("File validation passed!")
+                        st.dataframe(df)
+                        if st.button("Import Employees"):
+                            conn = get_db_connection()
+                            try:
+                                with st.spinner("Importing..."):
+                                    # We already validated, so we can just insert
+                                    df.to_sql("employees", conn, if_exists="append", index=False)
+                                st.success(f"Successfully imported {len(df)} employee records.")
+                                clear_cache()
+                            except Exception as e:
+                                st.error(f"Error importing to database: {e}. Check if data is valid.")
+                
+            except Exception as e:
                         st.error(f"Error importing to database: {e}. Check if data is valid.")
             except Exception as e:
                 st.error(f"Error reading Excel file: {e}")
@@ -1209,9 +1255,28 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file)
+                
+                # --- NEW VALIDATION LOGIC ---
+                errors = []
                 if 'name' not in df.columns:
-                    st.error("Excel file must contain a 'name' column.")
+                    errors.append("Missing required column: 'name'")
                 else:
+                    # Check for empty names
+                    for i, row in df.iterrows():
+                        if not row['name']:
+                            errors.append(f"Row {i+2}: 'name' cannot be empty.")
+                    
+                    # Check for duplicates against DB
+                    db_cats = get_all_categories()['name'].tolist()
+                    for i, row in df.iterrows():
+                        if row['name'] in db_cats:
+                            errors.append(f"Row {i+2}: Category '{row['name']}' already exists in the database.")
+
+                if errors:
+                    st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                    st.json(errors[:10])
+                else:
+                    st.success("File validation passed!")
                     st.dataframe(df)
                     if st.button("Import Categories"):
                         conn = get_db_connection()
@@ -1221,6 +1286,8 @@ def page_data_import():
                             st.success(f"Successfully imported {len(df)} categories.")
                             clear_cache()
                         except Exception as e:
+                            st.error(f"Error importing to database: {e}. Check for duplicates in your file.")
+            except Exception as e:
                             st.error(f"Error importing to database: {e}. Check for duplicates.")
             except Exception as e:
                 st.error(f"Error reading Excel file: {e}")
@@ -1228,8 +1295,8 @@ def page_data_import():
     # --- Tab 3: Import Expenses ---
     with tab3:
         st.subheader("1. Download Expense Template")
-        st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies') and Employee *Name* (e.g., 'Alice Smith'). Leave Employee Name blank for general expenses.")
-        cols = ["expense_date", "description", "amount", "category_name", "employee_name"]
+        st.markdown("In the template, use the Category *Name* (e.g., 'Office Supplies').")
+        cols = ["expense_date", "description", "amount", "category_name"]
         excel_data, file_name = generate_excel_template(cols, "expense_import_template.xlsx")
         st.download_button(
             label="Download Expense Template",
@@ -1244,56 +1311,63 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file)
-                st.dataframe(df)
                 
-                if st.button("Import Expenses"):
-                    # Get mappings from names to IDs
+                # --- NEW VALIDATION LOGIC ---
+                errors = []
+                required_cols = ["expense_date", "description", "amount", "category_name"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        errors.append(f"Missing required column: '{col}'")
+                
+                if errors:
+                    st.error("File format error. Please fix and re-upload:")
+                    st.json(errors)
+                else:
+                    # Get mappings
                     cat_df = get_all_categories()
                     cat_map = {row['name']: row['id'] for _, row in cat_df.iterrows()}
-                    emp_df = get_all_employees()
-                    emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
-
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    imported_count = 0
-                    error_list = []
-
-                    with st.spinner("Processing and importing expenses..."):
-                        for _, row in df.iterrows():
-                            cat_id = cat_map.get(row['category_name'])
-                            emp_id = emp_map.get(row['employee_name']) # Will be None if blank or not found
-                            
-                            if not cat_id:
-                                error_list.append(f"Row {_+2}: Category '{row['category_name']}' not found.")
-                                continue
-                            
-                            cursor.execute(
-                                """
-                                INSERT INTO company_expenses (expense_date, description, amount, category_id, employee_id)
-                                VALUES (?, ?, ?, ?, ?)
-                                """,
-                                (row['expense_date'], row['description'], row['amount'], cat_id, emp_id)
-                            )
-                            
-                            expense_id = cursor.lastrowid
-                            
-                            # Also add to ledger if employee is linked
-                            if emp_id:
-                                cursor.execute(
-                                    """
-                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
-                                    VALUES (?, ?, ?, ?, 0, ?)
-                                    """,
-                                    (emp_id, row['expense_date'], f"Imported Expense: {row['description']}", row['amount'], expense_id)
-                                )
-                            imported_count += 1
                     
-                    conn.commit()
-                    st.success(f"Successfully imported {imported_count} expense records.")
-                    if error_list:
-                        st.error("Some rows failed to import:")
-                        st.json(error_list)
-                    clear_cache()
+                    for i, row in df.iterrows():
+                        # Validate data types
+                        try:
+                            pd.to_datetime(row['expense_date'])
+                        except:
+                            errors.append(f"Row {i+2}: 'expense_date' is not a valid date.")
+                        try:
+                            pd.to_numeric(row['amount'])
+                        except:
+                            errors.append(f"Row {i+2}: 'amount' is not a valid number.")
+                        # Validate foreign keys
+                        if row['category_name'] not in cat_map:
+                            errors.append(f"Row {i+2}: Category '{row['category_name']}' not found in database.")
+                    
+                    if errors:
+                        st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                        st.json(errors[:10])
+                    else:
+                        st.success("File validation passed!")
+                        st.dataframe(df)
+                        if st.button("Import Expenses"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            imported_count = 0
+
+                            with st.spinner("Processing and importing expenses..."):
+                                for _, row in df.iterrows():
+                                    cat_id = cat_map.get(row['category_name'])
+                                    
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO company_expenses (expense_date, description, amount, category_id)
+                                        VALUES (?, ?, ?, ?)
+                                        """,
+                                        (row['expense_date'], row['description'], row['amount'], cat_id)
+                                    )
+                                    imported_count += 1
+                            
+                            conn.commit()
+                            st.success(f"Successfully imported {imported_count} expense records.")
+                            clear_cache()
             except Exception as e:
                 st.error(f"Error processing file: {e}")
 
@@ -1316,41 +1390,68 @@ def page_data_import():
         if uploaded_file:
             try:
                 df = pd.read_excel(uploaded_file).fillna(0) # Fill NaNs with 0
-                st.dataframe(df)
+                
+                # --- NEW VALIDATION LOGIC ---
+                errors = []
+                required_cols = ["employee_name", "entry_date", "description", "debit", "credit"]
+                for col in required_cols:
+                    if col not in df.columns:
+                        errors.append(f"Missing required column: '{col}'")
 
-                if st.button("Import Ledger Entries"):
+                if errors:
+                    st.error("File format error. Please fix and re-upload:")
+                    st.json(errors)
+                else:
                     emp_df = get_all_employees()
                     emp_map = {row['name']: row['id'] for _, row in emp_df.iterrows()}
-
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    imported_count = 0
-                    error_list = []
-
-                    with st.spinner("Processing and importing ledger entries..."):
-                        for _, row in df.iterrows():
-                            emp_id = emp_map.get(row['employee_name'])
-                            
-                            if not emp_id:
-                                error_list.append(f"Row {_+2}: Employee '{row['employee_name']}' not found.")
-                                continue
-                            
-                            # Note: related_expense_id is not set for generic ledger imports
-                            cursor.execute(
-                                """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                VALUES (?, ?, ?, ?, ?)
-                                """,
-                                (emp_id, row['entry_date'], row['description'], row['debit'], row['credit'])
-                            )
-                            imported_count += 1
                     
-                    conn.commit()
-                    st.success(f"Successfully imported {imported_count} ledger entries.")
-                    if error_list:
-                        st.error("Some rows failed to import:")
-                        st.json(error_list)
-                    clear_cache()
+                    for i, row in df.iterrows():
+                        # Validate data types
+                        try:
+                            pd.to_datetime(row['entry_date'])
+                        except:
+                            errors.append(f"Row {i+2}: 'entry_date' is not a valid date.")
+                        try:
+                            pd.to_numeric(row['debit'])
+                        except:
+                            errors.append(f"Row {i+2}: 'debit' is not a valid number.")
+                        try:
+                            pd.to_numeric(row['credit'])
+                        except:
+                            errors.append(f"Row {i+2}: 'credit' is not a valid number.")
+                        if row['debit'] != 0 and row['credit'] != 0:
+                            errors.append(f"Row {i+2}: Cannot have both 'debit' and 'credit' in the same row.")
+                        # Validate foreign keys
+                        if row['employee_name'] not in emp_map:
+                            errors.append(f"Row {i+2}: Employee '{row['employee_name']}' not found in database.")
+                    
+                    if errors:
+                        st.error(f"Found {len(errors)} data errors. Please fix in your file and re-upload:")
+                        st.json(errors[:10])
+                    else:
+                        st.success("File validation passed!")
+                        st.dataframe(df)
+                        if st.button("Import Ledger Entries"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            imported_count = 0
+
+                            with st.spinner("Processing and importing ledger entries..."):
+                                for _, row in df.iterrows():
+                                    emp_id = emp_map.get(row['employee_name'])
+                                    
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
+                                        VALUES (?, ?, ?, ?, ?)
+                                        """,
+                                        (emp_id, row['entry_date'], row['description'], row['debit'], row['credit'])
+                                    )
+                                    imported_count += 1
+                            
+                            conn.commit()
+                            st.success(f"Successfully imported {imported_count} ledger entries.")
+                            clear_cache()
             except Exception as e:
                 st.error(f"Error processing file: {e}")
 
@@ -1367,6 +1468,41 @@ def main():
     
     st.set_page_config(page_title=f"{COMPANY_NAME} App", layout="wide", page_icon=page_icon_img)
     
+    # --- NEW: Add custom CSS for UI ---
+    st.markdown("""
+        <style>
+            /* Add rounded corners and shadows to UI elements */
+            .stApp {
+                background-color: #F8F9FA; /* Light grey background */
+            }
+            div[data-testid="stMetric"],
+            div[data-testid="stForm"],
+            div[data-testid="stExpander"],
+            .stDataFrame {
+                border-radius: 10px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+                border: 1px solid #E0E0E0;
+            }
+            /* Style metric cards */
+            div[data-testid="stMetric"] {
+                padding: 15px 20px;
+                background-color: #FFFFFF;
+            }
+            /* Style forms */
+            div[data-testid="stForm"] {
+                padding: 20px;
+                background-color: #FFFFFF;
+            }
+            /* Style sidebar */
+            div[data-testid="stSidebarUserContent"] {
+                background-color: #FFFFFF;
+                border-radius: 10px;
+                margin: 10px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.05);
+            }
+        </style>
+    """, unsafe_allow_html=True)
+
     # Initialize DB
     init_db()
 
