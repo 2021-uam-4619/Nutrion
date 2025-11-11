@@ -337,7 +337,7 @@ def page_employee_management():
     
     # --- Edit/Delete Employees ---
     st.subheader("Edit or Delete Employees")
-    st.info("Use this table to edit, add, or delete employees. Click 'Save Changes' to update the database.")
+    st.text("Use this table to edit, add, or delete employees. Click 'Save Changes' to update the database.")
     
     try:
         employees_df = get_all_employees()
@@ -475,7 +475,7 @@ def page_expense_management():
 
     # --- Manage Logged Expenses (Req 4) ---
     st.subheader("Manage Logged Expenses")
-    st.info("Select an expense ID from the table to delete or edit it.")
+    st.text("Select an expense ID from the table to delete or edit it.")
     try:
         conn = get_db_connection()
         expenses_df = pd.read_sql_query(
@@ -576,7 +576,7 @@ def page_expense_management():
 
     # --- Manage Expense Categories (Req 3, 10) ---
     st.subheader("Manage Expense Categories")
-    st.info("Use this table to add, rename, or delete expense categories.")
+    st.text("Use this table to add, rename, or delete expense categories.")
     
     try:
         categories_df = get_all_categories()
@@ -642,10 +642,10 @@ def page_expense_management():
 def page_salary_management():
     st.title("Salary Management")
     
-    st.info("Follow these steps to process monthly salaries:\n"
-            "1. **Generate Monthly Salary Credits:** Run this first. It adds the 'Base Salary' as a credit to each employee's ledger for the month.\n"
-            "2. **View & Download Salary Sheet:** After credits are generated (and any deductions are logged), use this to see the final pay.\n"
-            "3. **Generate Individual Salary Slip:** Download a PDF slip for a single employee.")
+    st.text("Follow these steps to process monthly salaries:\n"
+            "1. Generate Monthly Salary Credits: Run this first.\n"
+            "2. View & Download Salary Sheet: After credits are generated, use this.\n"
+            "3. Generate Individual Salary Slip: Download a PDF slip for one employee.")
 
     # --- 1. Generate Monthly Salary Credits ---
     st.subheader("1. Generate Monthly Salary Credits")
@@ -799,7 +799,6 @@ def get_salary_sheet(month, year):
 
 def generate_salary_sheet_pdf(df, month, year):
     pdf = PDF('L', 'mm', 'A4') # Landscape
-    # --- FIX: Set title_text attribute, don't call method ---
     pdf.title_text = f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}"
     pdf.add_page()
     
@@ -843,7 +842,6 @@ def generate_individual_slip_pdf(employee_id, month, year):
     
     # 4. Create PDF
     pdf = PDF('P', 'mm', 'A4') # Portrait
-    # --- FIX: Set title_text attribute, don't call method ---
     pdf.title_text = f"Salary Slip - {emp['name']}"
     pdf.add_page()
     
@@ -922,8 +920,8 @@ def generate_individual_slip_pdf(employee_id, month, year):
     pdf.cell(90, 10, "Net Salary Payable:", 'LB', 0, 'R', 1)
     pdf.cell(90, 10, f"{net_salary:,.2f} PKR", 'RB', 1, 'L', 1)
     
-# ... (No changes to init_db, get_dashboard_metrics, get_all_employees, get_all_categories, clear_cache, generate_excel_template, page_dashboard) ...
-# ... (No changes to page_employee_management, page_expense_management, page_salary_management, get_salary_sheet, generate_salary_sheet_pdf, generate_individual_slip_pdf) ...
+    return pdf.output(dest='S').encode('latin-1')
+
 
 # --- Page: Employee Ledger (Requirement 5) ---
 def page_employee_ledger():
@@ -968,7 +966,7 @@ def page_employee_ledger():
             entry_type = st.radio(
                 "Entry Type", 
                 [
-                    "Advance / Deduction (Amount Subtracked)", 
+                    "Advance / Deduction (Amount Subtracted)", 
                     "Company-Paid Personal Expense (Deduction)",
                     "Reimbursement / Bonus (Amount Added)"
                 ],
@@ -1003,6 +1001,8 @@ def page_employee_ledger():
             if show_category_box and not expense_category_id:
                 st.error("Please select an expense category for this 'Company-Paid Personal Expense'.")
             elif entry_amount > 0 and entry_desc:
+                # --- MODIFICATION: Logic updated to match new terms ---
+                debit = entry_amount if ("Deduction" in entry_type or "Expense" in entry_type) else 0
                 credit = entry_amount if "Bonus" in entry_type else 0
                 
                 try:
@@ -1063,16 +1063,41 @@ def page_employee_ledger():
     if start_date > end_date:
         st.error("Start Date must be before End Date.")
         return
+    
+    # --- FIX: Add the missing 'try:' block ---
+    try:
+        # Get full ledger for all-time balance calculation
+        full_ledger_df = get_employee_ledger(selected_emp_id, date(1970, 1, 1), date(2100, 12, 31))
         
-        # --- FIX: Handle KeyError: "['Entry Date'] not in index" ---
-        # Move dataframe display and buttons *inside* the check for a non-empty dataframe
+        # Get filtered ledger for display
+        filtered_ledger_df = get_employee_ledger(selected_emp_id, start_date, end_date)
         
+        # --- Calculate Balances ---
+        all_time_balance = 0
+        if not full_ledger_df.empty:
+            all_time_balance = full_ledger_df['credit'].sum() - full_ledger_df['debit'].sum()
+            
+        range_balance = 0
+        if not filtered_ledger_df.empty:
+            range_balance = filtered_ledger_df['credit'].sum() - filtered_ledger_df['debit'].sum()
+            
+            # Add running balance column for the *filtered* range
+            filtered_ledger_df.sort_values(by='entry_date', inplace=True)
+            filtered_ledger_df['Balance'] = filtered_ledger_df['credit'].cumsum() - filtered_ledger_df['debit'].cumsum()
+        else:
+            # If empty, create an empty df with correct columns for the editor
+            filtered_ledger_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit'])
+
+
         # --- Display Metrics ---
         st.metric(
             "All-Time Ledger Balance (Total Payable)",
             f"PKR {all_time_balance:,.2f}",
             help="Total credits minus total debits over the employee's entire history."
         )
+        
+        # --- FIX: Handle KeyError: "['Entry Date'] not in index" ---
+        # Move dataframe display and buttons *inside* the check for a non-empty dataframe
         
         if not filtered_ledger_df.empty:
             display_df = filtered_ledger_df.rename(columns={
@@ -1130,6 +1155,7 @@ def page_employee_ledger():
                 ledger_for_edit_df = pd.read_sql_query(query, conn, parse_dates=["entry_date"])
             else:
                 ledger_for_edit_df = pd.DataFrame(columns=['id', 'entry_date', 'description', 'credit', 'debit', 'employee_id'])
+
             
             column_config = {
                 "id": st.column_config.NumberColumn("ID", disabled=True),
@@ -1198,7 +1224,7 @@ def page_employee_ledger():
         except Exception as e:
             st.error(f"Error loading ledger editor: {e}")
 
-    # --- FIX: Add the missing 'except' block ---
+    # --- FIX: Add the matching 'except' block ---
     except Exception as e:
         st.error(f"Error fetching ledger: {e}")
 
@@ -1216,7 +1242,6 @@ def get_employee_ledger(employee_id, start_date, end_date):
 
 def generate_ledger_pdf(df, employee_name, start_date, end_date, all_time_balance):
     pdf = PDF('P', 'mm', 'A4') # Portrait
-    # --- FIX: Set title_text attribute, don't call method ---
     pdf.title_text = "Employee Ledger"
     pdf.add_page()
     
@@ -1329,7 +1354,6 @@ def page_reporting():
 
             # Generate PDF
             pdf = PDF('P', 'mm', 'A4')
-            # --- FIX: Set title_text attribute, don't call method ---
             pdf.title_text = report_title
             pdf.add_page()
             pdf.add_table(df, totals_cols=totals_cols)
@@ -1766,7 +1790,7 @@ def main():
             st.button(page_name, on_click=set_page, args=(page_name,), use_container_width=True)
             
         st.divider()
-        st.info(f"Version 2.1\n{DEVELOPER_INFO}")
+        st.info(f"Version 2.2\n{DEVELOPER_INFO}")
 
     # Run the selected page function
     page_function = PAGES[st.session_state.page]
