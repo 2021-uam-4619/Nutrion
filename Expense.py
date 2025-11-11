@@ -72,8 +72,12 @@ class PDF(FPDF):
         for col in df.columns:
             col_lower = str(col).lower()
             
-            # --- FIX: Give more space to salary sheet headers (Removed unused columns) ---
-            if 'description' in col_lower:
+            # --- FIX: Give more space to salary sheet headers ---
+            if 'other credits' in col_lower or 'deductions' in col_lower:
+                weight = 1.8
+            elif 'base salary' in col_lower:
+                 weight = 1.5
+            elif 'description' in col_lower:
                 weight = 3.0
             elif 'title' in col_lower or 'account no' in col_lower: # Give more space to account info
                 weight = 2.5
@@ -788,6 +792,9 @@ def page_salary_management():
     st.subheader("1. View & Download Salary Sheet")
     st.text("This sheet shows employee bank details and base salary.")
     
+    # --- FIX: Define 'today' ---
+    today = date.today()
+    
     # --- NEW: Use session state for dates ---
     persist_date('sheet_start', today.replace(day=1))
     persist_date('sheet_end', today)
@@ -797,6 +804,7 @@ def page_salary_management():
     sheet_end = cols[1].date_input("End Date", key="sheet_end")
     
     try:
+        # --- MODIFIED: Pass dates (though unused by new query) for consistency ---
         df = get_salary_sheet(sheet_start, sheet_end)
         st.dataframe(df, use_container_width=True, hide_index=True)
         
@@ -843,6 +851,10 @@ def page_salary_management():
     
     if st.button("Generate Individual Slip"):
         try:
+            # --- Auto-generate salary credit before making slip ---
+            # This replaces the manual button
+            auto_generate_salary_for_employee(slip_emp_id, slip_start.year, slip_start.month)
+            
             pdf_data = generate_individual_slip_pdf(slip_emp_id, slip_start, slip_end)
             st.download_button(
                 label=f"Download Slip for {employee_list[slip_emp_id]}",
@@ -852,6 +864,47 @@ def page_salary_management():
             )
         except Exception as e:
             st.error(f"Error generating PDF slip: {e}")
+
+
+def auto_generate_salary_for_employee(employee_id, year, month):
+    """
+    Silently generates the salary credit for a single employee
+    for a given month if it doesn't already exist.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        emp = conn.execute("SELECT id, salary FROM employees WHERE id = ?", (employee_id,)).fetchone()
+        if not emp:
+            return # Employee not found
+
+        entry_date = date(year, month, 1)
+        description = f"Monthly Salary Credit for {entry_date.strftime('%B %Y')}"
+        
+        exists = cursor.execute(
+            """
+            SELECT 1 FROM employee_ledger 
+            WHERE employee_id = ? AND description = ? AND credit = ?
+            """,
+            (int(emp['id']), description, float(emp['salary']))
+        ).fetchone()
+        
+        if not exists:
+            cursor.execute(
+                """
+                INSERT INTO employee_ledger (employee_id, entry_date, description, credit)
+                VALUES (?, ?, ?, ?)
+                """,
+                (int(emp['id']), str(entry_date), description, float(emp['salary']))
+            )
+            conn.commit()
+            clear_cache()
+            st.toast(f"Generated salary credit for {entry_date.strftime('%B %Y')}.", icon="✅")
+            
+    except Exception as e:
+        conn.rollback()
+        st.warning(f"Could not auto-generate salary: {e}")
 
 
 @st.cache_data(ttl=60)
@@ -871,6 +924,7 @@ def get_salary_sheet(start_date, end_date):
     GROUP BY e.id
     ORDER BY e.name
     """
+    # Parameters start_date and end_date are no longer needed, but kept for function signature
     df = pd.read_sql_query(query, conn)
     return df
 
@@ -880,7 +934,7 @@ def generate_salary_sheet_pdf(df, start_date, end_date):
     pdf.title_text = f"Salary Sheet"
     pdf.add_page()
     pdf.set_font('Arial', '', 11)
-    pdf.cell(0, 8, f"Period: {start_date.strftime('%d-%m-%Y')} to {end_date.strftime('%d-%m-%Y')}", 0, 1, 'L')
+    pdf.cell(0, 8, f"Report Date: {date.today().strftime('%d-%m-%Y')}", 0, 1, 'L')
     pdf.ln(5)
     # --- MODIFIED: Updated totals_cols ---
     pdf.add_table(df, totals_cols=["Base Salary"])
@@ -1427,7 +1481,7 @@ def main():
             st.button(page_name, on_click=set_page, args=(page_name,), use_container_width=True)
             
         st.divider()
-        st.info(f"Version 3.2 (PDF Header Fix)\n{DEVELOPER_INFO}") # Version bump
+        st.info(f"Version 3.3 (Simplified Salary)\n{DEVELOPER_INFO}") # Version bump
 
     # --- Run the selected page ---
     page_function = PAGES[st.session_state.page]
