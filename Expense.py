@@ -853,7 +853,7 @@ def generate_salary_sheet_pdf(df, month, year):
     pdf = PDF('L', 'mm', 'A4')
     pdf.title_text = f"Salary Sheet - {datetime(2000, month, 1).strftime('%B')} {year}"
     pdf.add_page()
-    pdf.add_table(df, totals_cols=["Base Salary", "Other Credits (Bonus/Reimb.)", "Deductions (Advance)", "Net Salary"])
+    pdf.add_table(df, totals_cols=["Base Salary", "(Others.)", "Deductions (Advance)", "Net Salary"])
     return pdf.output(dest='S').encode('latin-1')
 
 def generate_individual_slip_pdf(employee_id, month, year):
