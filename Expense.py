@@ -327,28 +327,11 @@ def get_db_connection():
     conn.row_factory = sqlite3.Row
     return conn
 
-def safe_alter_table(cursor, table_name, column_name, column_type):
-    """Safely alter table to add column if it doesn't exist"""
-    try:
-        # Check if column exists
-        cursor.execute(f"PRAGMA table_info({table_name})")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if column_name not in columns:
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
-            st.info(f"Added column {column_name} to {table_name}")
-    except sqlite3.OperationalError as e:
-        # If table doesn't exist, it will be created later with the correct schema
-        if "no such table" in str(e).lower():
-            pass
-        else:
-            raise e
-
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
     
-    # Create tables first with complete schema
+    # Create tables if they don't exist with complete schema
     c.execute('''
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -397,13 +380,6 @@ def init_db():
             FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
         )
     ''')
-    
-    # Now safely add any missing columns to existing tables
-    safe_alter_table(c, 'employees', 'join_date', 'DATE')
-    safe_alter_table(c, 'employees', 'bank', 'TEXT DEFAULT ""')
-    safe_alter_table(c, 'employees', 'account_title', 'TEXT DEFAULT ""')
-    safe_alter_table(c, 'employees', 'account_no', 'TEXT DEFAULT ""')
-    safe_alter_table(c, 'employee_ledger', 'related_expense_id', 'INTEGER')
     
     # Pre-populate expense categories
     default_categories = [
@@ -506,6 +482,24 @@ def get_employee_balance(employee_id):
     except Exception as e:
         st.error(f"Error getting employee balance: {e}")
         return 0.0
+
+def get_employee_monthly_ledger(employee_id, month_date):
+    """Get employee ledger entries for a specific month"""
+    first_day = month_date.replace(day=1)
+    last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+    
+    conn = get_db_connection()
+    ledger_df = pd.read_sql_query(
+        """
+        SELECT entry_date, description, debit, credit 
+        FROM employee_ledger 
+        WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
+        ORDER BY entry_date
+        """,
+        conn,
+        params=(employee_id, str(first_day), str(last_day))
+    )
+    return ledger_df
 
 # --- Import/Export Functions ---
 def export_employees_to_excel():
@@ -903,7 +897,7 @@ def page_employee_expense_management():
                     if processed_count > 0:
                         st.success(f"Salary credits generated for {processed_count} employees.")
                     if skipped_count > 0:
-                        st.info(f"Skipped {skipped_count} employees (already processed or zero salary).")
+                        st.info(f"Skipped {skpped_count} employees (already processed or zero salary).")
                     clear_cache()
                     
                 except Exception as e:
@@ -1228,7 +1222,7 @@ def page_employee_management():
                         if success:
                             st.rerun()
 
-# --- Simplified Company Expense Management ---
+# --- Complete Company Expense Management ---
 def page_expense_management():
     st.title("💼 Company Expense Management")
     
@@ -1237,7 +1231,7 @@ def page_expense_management():
     For employee-specific expenses and advances, use the **Employee Expense Management** page.
     """)
     
-    tab1, tab2 = st.tabs(["➕ Add Expense", "📋 View Expenses"])
+    tab1, tab2, tab3 = st.tabs(["➕ Add Expense", "📋 View Expenses", "📊 Expense Reports"])
     
     with tab1:
         st.subheader("Add Company Expense")
@@ -1260,6 +1254,20 @@ def page_expense_management():
                 else:
                     st.warning("No categories found. Please add categories first.")
                     category_id = None
+                
+                employees_df = get_all_employees()
+                if not employees_df.empty:
+                    employee_options = {row['id']: row['name'] for _, row in employees_df.iterrows()}
+                    employee_options[0] = "Not Applicable"
+                    employee_id = st.selectbox(
+                        "Related Employee (Optional)",
+                        options=list(employee_options.keys()),
+                        format_func=lambda x: employee_options[x],
+                        index=0
+                    )
+                    employee_id = None if employee_id == 0 else employee_id
+                else:
+                    employee_id = None
             
             submitted = st.form_submit_button("💾 Add Expense")
             if submitted:
@@ -1270,10 +1278,10 @@ def page_expense_management():
                         
                         cursor.execute(
                             """
-                            INSERT INTO company_expenses (description, amount, expense_date, category_id)
-                            VALUES (?, ?, ?, ?)
+                            INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id)
+                            VALUES (?, ?, ?, ?, ?)
                             """,
-                            (description, amount, str(expense_date), category_id)
+                            (description, amount, str(expense_date), category_id, employee_id)
                         )
                         
                         conn.commit()
@@ -1288,11 +1296,15 @@ def page_expense_management():
         st.subheader("Company Expenses")
         
         # Filters
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             start_date = st.date_input("Start Date", date.today().replace(day=1), key="comp_start")
         with col2:
             end_date = st.date_input("End Date", date.today(), key="comp_end")
+        with col3:
+            categories = get_all_categories()
+            category_options = ["All"] + [row['name'] for _, row in categories.iterrows()]
+            selected_category = st.selectbox("Filter by Category", category_options)
         
         if st.button("🔍 Load Expenses"):
             try:
@@ -1302,14 +1314,22 @@ def page_expense_management():
                     ce.description as Description,
                     ce.amount as Amount,
                     ce.expense_date as Date,
-                    ec.name as Category
+                    ec.name as Category,
+                    e.name as Employee
                 FROM company_expenses ce
-                JOIN expense_categories ec ON ce.category_id = ec.id
+                LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                LEFT JOIN employees e ON ce.employee_id = e.id
                 WHERE ce.expense_date BETWEEN ? AND ?
-                ORDER BY ce.expense_date DESC
                 """
+                params = [str(start_date), str(end_date)]
                 
-                expenses_df = pd.read_sql_query(query, conn, params=[str(start_date), str(end_date)])
+                if selected_category != "All":
+                    query += " AND ec.name = ?"
+                    params.append(selected_category)
+                
+                query += " ORDER BY ce.expense_date DESC"
+                
+                expenses_df = pd.read_sql_query(query, conn, params=params)
                 
                 if not expenses_df.empty:
                     st.dataframe(
@@ -1326,12 +1346,103 @@ def page_expense_management():
                     
             except Exception as e:
                 st.error(f"Error loading expenses: {e}")
+    
+    with tab3:
+        st.subheader("Expense Reports")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            report_month = st.date_input("Report Month", date.today().replace(day=1), key="report_month")
+        with col2:
+            report_type = st.selectbox("Report Type", ["Monthly Summary", "Category Breakdown", "Detailed Report"])
+        
+        if st.button("📊 Generate Report"):
+            try:
+                first_day = report_month.replace(day=1)
+                last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+                
+                conn = get_db_connection()
+                
+                if report_type == "Monthly Summary":
+                    query = """
+                    SELECT 
+                        ec.name as Category,
+                        COUNT(ce.id) as Count,
+                        SUM(ce.amount) as Amount
+                    FROM company_expenses ce
+                    JOIN expense_categories ec ON ce.category_id = ec.id
+                    WHERE ce.expense_date BETWEEN ? AND ?
+                    GROUP BY ec.name
+                    ORDER BY Amount DESC
+                    """
+                    report_df = pd.read_sql_query(query, conn, params=[str(first_day), str(last_day)])
+                    
+                    if not report_df.empty:
+                        st.dataframe(
+                            report_df.style.format({
+                                'Amount': 'Rs. {:,.2f}'
+                            }),
+                            use_container_width=True
+                        )
+                        
+                        # Download PDF
+                        pdf_bytes = generate_pdf_report(
+                            report_df, 
+                            f"Expense Summary - {report_month.strftime('%B %Y')}",
+                            date_range=(first_day, last_day),
+                            totals_cols=["Amount"]
+                        )
+                        st.download_button(
+                            label="📥 Download PDF Report",
+                            data=pdf_bytes,
+                            file_name=f"Expense_Summary_{report_month.strftime('%Y_%m')}.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.info("No expenses found for the selected month.")
+                
+                elif report_type == "Detailed Report":
+                    query = """
+                    SELECT 
+                        ce.description as Description,
+                        ce.amount as Amount,
+                        ce.expense_date as Date,
+                        ec.name as Category,
+                        e.name as Employee
+                    FROM company_expenses ce
+                    LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                    LEFT JOIN employees e ON ce.employee_id = e.id
+                    WHERE ce.expense_date BETWEEN ? AND ?
+                    ORDER BY ce.expense_date DESC
+                    """
+                    report_df = pd.read_sql_query(query, conn, params=[str(first_day), str(last_day)])
+                    
+                    if not report_df.empty:
+                        st.dataframe(report_df, use_container_width=True)
+                        
+                        pdf_bytes = generate_pdf_report(
+                            report_df, 
+                            f"Detailed Expenses - {report_month.strftime('%B %Y')}",
+                            date_range=(first_day, last_day),
+                            totals_cols=["Amount"]
+                        )
+                        st.download_button(
+                            label="📥 Download PDF Report",
+                            data=pdf_bytes,
+                            file_name=f"Detailed_Expenses_{report_month.strftime('%Y_%m')}.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.info("No expenses found for the selected month.")
+                        
+            except Exception as e:
+                st.error(f"Error generating report: {e}")
 
-# --- Simplified Reports & Analytics ---
+# --- Complete Reports & Analytics ---
 def page_reporting():
     st.title("📈 Reports & Analytics")
     
-    tab1, tab2 = st.tabs(["📋 Employee Reports", "💼 Company Reports"])
+    tab1, tab2, tab3 = st.tabs(["📋 Employee Reports", "💼 Company Reports", "📊 Analytics Dashboard"])
     
     with tab1:
         st.subheader("Employee Reports")
@@ -1344,7 +1455,7 @@ def page_reporting():
             with col1:
                 report_type = st.selectbox(
                     "Report Type",
-                    ["Salary Sheet", "Balance Summary"]
+                    ["Salary Sheet", "Employee Ledger", "Balance Summary", "Attendance Report"]
                 )
             with col2:
                 report_month = st.date_input("Report Month", date.today().replace(day=1))
@@ -1431,57 +1542,159 @@ def page_reporting():
         with col2:
             end_date = st.date_input("End Date", date.today(), key="comp_report_end")
         
-        if st.button("Generate Expense Report"):
+        report_type = st.selectbox(
+            "Report Type",
+            ["Expense Summary", "Category-wise Report", "Monthly Trend"]
+        )
+        
+        if st.button("Generate Company Report"):
             try:
                 conn = get_db_connection()
                 
-                query = """
-                SELECT 
-                    ec.name as Category,
-                    COUNT(ce.id) as Count,
-                    SUM(ce.amount) as Amount
-                FROM company_expenses ce
-                JOIN expense_categories ec ON ce.category_id = ec.id
-                WHERE ce.expense_date BETWEEN ? AND ?
-                GROUP BY ec.name
-                ORDER BY Amount DESC
-                """
-                report_df = pd.read_sql_query(query, conn, params=[str(start_date), str(end_date)])
+                if report_type == "Expense Summary":
+                    query = """
+                    SELECT 
+                        ec.name as Category,
+                        COUNT(ce.id) as Count,
+                        SUM(ce.amount) as Amount
+                    FROM company_expenses ce
+                    JOIN expense_categories ec ON ce.category_id = ec.id
+                    WHERE ce.expense_date BETWEEN ? AND ?
+                    GROUP BY ec.name
+                    ORDER BY Amount DESC
+                    """
+                    report_df = pd.read_sql_query(query, conn, params=[str(start_date), str(end_date)])
+                    
+                    if not report_df.empty:
+                        st.dataframe(report_df, use_container_width=True)
+                        
+                        total_amount = report_df['Amount'].sum()
+                        st.metric("Total Expenses", f"Rs. {total_amount:,.2f}")
+                        
+                        pdf_bytes = generate_pdf_report(
+                            report_df, 
+                            f"Expense Summary - {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}",
+                            date_range=(start_date, end_date),
+                            totals_cols=["Amount"]
+                        )
+                        st.download_button(
+                            label="📥 Download Expense Summary",
+                            data=pdf_bytes,
+                            file_name=f"Expense_Summary_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.info("No expenses found for the selected period.")
                 
-                if not report_df.empty:
-                    st.dataframe(
-                        report_df.style.format({
-                            'Amount': 'Rs. {:,.2f}'
-                        }),
-                        use_container_width=True
-                    )
+                elif report_type == "Category-wise Report":
+                    query = """
+                    SELECT 
+                        ce.description as Description,
+                        ce.amount as Amount,
+                        ce.expense_date as Date,
+                        ec.name as Category,
+                        e.name as Employee
+                    FROM company_expenses ce
+                    LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                    LEFT JOIN employees e ON ce.employee_id = e.id
+                    WHERE ce.expense_date BETWEEN ? AND ?
+                    ORDER BY ec.name, ce.expense_date
+                    """
+                    report_df = pd.read_sql_query(query, conn, params=[str(start_date), str(end_date)])
                     
-                    total_amount = report_df['Amount'].sum()
-                    st.metric("Total Expenses", f"Rs. {total_amount:,.2f}")
-                    
-                    pdf_bytes = generate_pdf_report(
-                        report_df, 
-                        f"Expense Summary - {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}",
-                        date_range=(start_date, end_date),
-                        totals_cols=["Amount"]
-                    )
-                    st.download_button(
-                        label="📥 Download Expense Summary",
-                        data=pdf_bytes,
-                        file_name=f"Expense_Summary_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf",
-                        mime="application/pdf"
-                    )
-                else:
-                    st.info("No expenses found for the selected period.")
-                    
+                    if not report_df.empty:
+                        st.dataframe(report_df, use_container_width=True)
+                        
+                        pdf_bytes = generate_pdf_report(
+                            report_df, 
+                            f"Category-wise Expenses - {start_date.strftime('%d %b %Y')} to {end_date.strftime('%d %b %Y')}",
+                            date_range=(start_date, end_date),
+                            totals_cols=["Amount"]
+                        )
+                        st.download_button(
+                            label="📥 Download Category Report",
+                            data=pdf_bytes,
+                            file_name=f"Category_Expenses_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf",
+                            mime="application/pdf"
+                        )
+                    else:
+                        st.info("No expenses found for the selected period.")
+                        
             except Exception as e:
                 st.error(f"Error generating company report: {e}")
+    
+    with tab3:
+        st.subheader("Analytics Dashboard")
+        
+        try:
+            employees_df = get_all_employees()
+            conn = get_db_connection()
+            
+            # Employee statistics
+            total_employees = len(employees_df)
+            total_salary = employees_df['salary'].sum()
+            
+            # Expense statistics
+            today = date.today()
+            first_day_month = today.replace(day=1)
+            last_day_month = (first_day_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+            
+            monthly_expenses_df = pd.read_sql_query(
+                "SELECT SUM(amount) as total FROM company_expenses WHERE expense_date BETWEEN ? AND ?",
+                conn,
+                params=(str(first_day_month), str(last_day_month))
+            )
+            monthly_expenses = monthly_expenses_df['total'].iloc[0] if not monthly_expenses_df.empty and monthly_expenses_df['total'].iloc[0] else 0
+            
+            # Display metrics
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Total Employees", total_employees)
+            with col2:
+                st.metric("Monthly Salary", f"Rs. {total_salary:,.2f}")
+            with col3:
+                st.metric("Monthly Expenses", f"Rs. {monthly_expenses:,.2f}")
+            with col4:
+                st.metric("Salary/Expense Ratio", f"{(total_salary/max(monthly_expenses, 1)):.1f}x")
+            
+            # Employee salary distribution
+            if not employees_df.empty:
+                st.subheader("Salary Distribution")
+                salary_chart_data = employees_df[['name', 'salary']].sort_values('salary', ascending=False)
+                st.bar_chart(salary_chart_data.set_index('name')['salary'])
+            
+            # Monthly expense trend (last 6 months)
+            st.subheader("Expense Trend (Last 6 Months)")
+            expense_trend_data = []
+            for i in range(5, -1, -1):
+                month_date = today.replace(day=1) - timedelta(days=30*i)
+                month_first = month_date.replace(day=1)
+                month_last = (month_first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+                
+                monthly_exp_df = pd.read_sql_query(
+                    "SELECT SUM(amount) as total FROM company_expenses WHERE expense_date BETWEEN ? AND ?",
+                    conn,
+                    params=(str(month_first), str(month_last))
+                )
+                monthly_total = monthly_exp_df['total'].iloc[0] if not monthly_exp_df.empty and monthly_exp_df['total'].iloc[0] else 0
+                
+                expense_trend_data.append({
+                    'Month': month_date.strftime('%b %Y'),
+                    'Amount': monthly_total
+                })
+            
+            expense_trend_df = pd.DataFrame(expense_trend_data)
+            if not expense_trend_df.empty:
+                st.line_chart(expense_trend_df.set_index('Month')['Amount'])
+                
+        except Exception as e:
+            st.error(f"Error loading analytics: {e}")
 
-# --- Simplified Data Import/Export Page ---
+# --- Complete Data Import/Export Page ---
 def page_data_import():
     st.title("📤 Data Import & Export")
     
-    tab1, tab2 = st.tabs(["📥 Import Data", "📤 Export Data"])
+    tab1, tab2, tab3 = st.tabs(["📥 Import Data", "📤 Export Data", "🔄 Database Management"])
     
     with tab1:
         st.subheader("Import Data from Excel")
@@ -1546,6 +1759,109 @@ def page_data_import():
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
+        
+        with col2:
+            st.markdown("### 💰 Export Financial Data")
+            st.info("Export transactions and expense data")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("📈 Export Transactions"):
+                    try:
+                        conn = get_db_connection()
+                        transactions_df = pd.read_sql_query(
+                            """
+                            SELECT 
+                                e.name as Employee,
+                                l.entry_date as Date,
+                                l.description as Description,
+                                l.debit as Debit,
+                                l.credit as Credit
+                            FROM employee_ledger l
+                            JOIN employees e ON l.employee_id = e.id
+                            ORDER BY l.entry_date DESC
+                            """,
+                            conn
+                        )
+                        
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            transactions_df.to_excel(writer, sheet_name='Transactions', index=False)
+                        output.seek(0)
+                        
+                        st.download_button(
+                            label="📥 Download Transactions",
+                            data=output,
+                            file_name="transactions_export.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        st.error(f"Error exporting transactions: {e}")
+            
+            with col2:
+                if st.button("🏢 Export Expenses"):
+                    try:
+                        conn = get_db_connection()
+                        expenses_df = pd.read_sql_query(
+                            """
+                            SELECT 
+                                ce.description as Description,
+                                ce.amount as Amount,
+                                ce.expense_date as Date,
+                                ec.name as Category,
+                                e.name as Employee
+                            FROM company_expenses ce
+                            LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                            LEFT JOIN employees e ON ce.employee_id = e.id
+                            ORDER BY ce.expense_date DESC
+                            """,
+                            conn
+                        )
+                        
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                            expenses_df.to_excel(writer, sheet_name='Expenses', index=False)
+                        output.seek(0)
+                        
+                        st.download_button(
+                            label="📥 Download Expenses",
+                            data=output,
+                            file_name="expenses_export.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                    except Exception as e:
+                        st.error(f"Error exporting expenses: {e}")
+    
+    with tab3:
+        st.subheader("Database Management")
+        
+        st.warning("⚠️ These actions affect the entire database. Proceed with caution.")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Clear Cache", help="Clear all cached data"):
+                clear_cache()
+                st.success("✅ Cache cleared successfully!")
+        
+        with col2:
+            if st.button("🗑️ Reset All Data", type="secondary"):
+                st.error("🚨 This will delete ALL data including employees, transactions, and expenses!")
+                if st.button("✅ Confirm Reset", type="primary"):
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM employees")
+                        cursor.execute("DELETE FROM employee_ledger")
+                        cursor.execute("DELETE FROM company_expenses")
+                        conn.commit()
+                        clear_cache()
+                        st.success("✅ All data has been reset!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error resetting data: {e}")
 
 # --- Dashboard Page ---
 def page_dashboard():
@@ -1568,12 +1884,12 @@ def page_dashboard():
     try:
         emp_count, exp_total, cat_count = get_dashboard_stats()
         
-        st.subheader("📊 Quick Overview")
+        st.subheader("📊 Quick Overview (Current Month)")
         cols = st.columns(3)
         with cols[0]:
             st.metric("Total Employees", f"{emp_count}")
         with cols[1]:
-            st.metric("Current Month Expenses", f"Rs. {exp_total:,.2f}")
+            st.metric("Company Expenses", f"Rs. {exp_total:,.2f}")
         with cols[2]:
             st.metric("Expense Categories", f"{cat_count}")
         
@@ -1609,7 +1925,7 @@ def page_dashboard():
             st.markdown("#### 👥 Recent Employees")
             employees_df = get_all_employees()
             if not employees_df.empty:
-                recent_employees = employees_df.tail(3)
+                recent_employees = employees_df.tail(5)
                 for _, emp in recent_employees.iterrows():
                     st.write(f"• **{emp['name']}** - {emp['designation']}")
             else:
@@ -1620,7 +1936,7 @@ def page_dashboard():
             try:
                 conn = get_db_connection()
                 recent_expenses = pd.read_sql_query(
-                    "SELECT description, amount FROM company_expenses ORDER BY expense_date DESC LIMIT 3",
+                    "SELECT description, amount, expense_date FROM company_expenses ORDER BY expense_date DESC LIMIT 5",
                     conn
                 )
                 if not recent_expenses.empty:
