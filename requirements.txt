@@ -10,6 +10,6 @@ fpdf
 plotly
 xlsxwriter
 DatabaseManager
-finally
+
 
 
