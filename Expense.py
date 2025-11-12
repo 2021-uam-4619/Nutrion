@@ -16,7 +16,113 @@ DB_FILE = "nutrion_app.db"
 COMPANY_NAME = "Nutrion"
 DEVELOPER_INFO = "Developed by DataNex Solution | +92320 7429422"
 
-# --- Enhanced PDF Class ---
+# --- Fixed Database Setup ---
+def get_db_connection():
+    """Create a new database connection for each operation"""
+    try:
+        conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+    except Exception as e:
+        st.error(f"Database connection error: {e}")
+        return None
+
+def init_db():
+    """Initialize database with proper error handling"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            st.error("Failed to connect to database")
+            return
+            
+        c = conn.cursor()
+        
+        # Create tables if they don't exist
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS employees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                designation TEXT,
+                salary REAL DEFAULT 0,
+                bank TEXT,
+                account_title TEXT,
+                account_no TEXT,
+                join_date DATE
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS expense_categories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS company_expenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                description TEXT,
+                amount REAL NOT NULL,
+                expense_date DATE NOT NULL,
+                category_id INTEGER,
+                employee_id INTEGER,
+                FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL,
+                FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
+            )
+        ''')
+        
+        c.execute('''
+            CREATE TABLE IF NOT EXISTS employee_ledger (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                employee_id INTEGER NOT NULL,
+                entry_date DATE NOT NULL,
+                description TEXT,
+                debit REAL DEFAULT 0,
+                credit REAL DEFAULT 0,
+                related_expense_id INTEGER,
+                FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
+                FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
+            )
+        ''')
+        
+        # Safely add columns if they don't exist using PRAGMA
+        try:
+            c.execute("PRAGMA table_info(employees)")
+            columns = [column[1] for column in c.fetchall()]
+            if 'join_date' not in columns:
+                c.execute("ALTER TABLE employees ADD COLUMN join_date DATE")
+        except:
+            pass
+        
+        try:
+            c.execute("PRAGMA table_info(employee_ledger)")
+            columns = [column[1] for column in c.fetchall()]
+            if 'related_expense_id' not in columns:
+                c.execute("ALTER TABLE employee_ledger ADD COLUMN related_expense_id INTEGER")
+        except:
+            pass
+        
+        # Pre-populate expense categories
+        default_categories = [
+            "Guard", "Labour", "Bilty Expenses", "Office Rent", "Warehouse Rent",
+            "Import Export", "Office Electricity", "FBR", "Office Entertainment",
+            "PSID", "Advance", "Commission", "Office Stationery Expense",
+            "Employee Expenses", "Other Expense", "Company Expense", "Salary"
+        ]
+        
+        for category in default_categories:
+            try:
+                c.execute("INSERT OR IGNORE INTO expense_categories (name) VALUES (?)", (category,))
+            except:
+                pass
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        st.error(f"Database initialization error: {e}")
+
+# --- PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -25,7 +131,6 @@ class PDF(FPDF):
         self.logo_path = "logo.png"
 
     def header(self):
-        # Add company logo
         try:
             if os.path.exists(self.logo_path):
                 self.image(self.logo_path, 10, 8, 25)
@@ -60,7 +165,6 @@ class PDF(FPDF):
         self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        # ... (keep the existing add_table method as is)
         self.set_font('Arial', 'B', 9)
         self.set_fill_color(224, 235, 255)
         
@@ -203,222 +307,47 @@ class PDF(FPDF):
         
         return final_lines if final_lines else ['']
 
-# --- Fixed Database Setup ---
-@st.cache_resource
-def get_db_connection():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-def safe_alter_table(cursor, table_name, column_name, column_definition):
-    """Safely alter table to add column if it doesn't exist"""
-    try:
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}")
-        return True
-    except sqlite3.OperationalError as e:
-        if "duplicate column name" in str(e).lower():
-            return False  # Column already exists
-        else:
-            raise e  # Re-raise other operational errors
-
-def init_db():
-    conn = get_db_connection()
-    c = conn.cursor()
-    
-    # Create tables if they don't exist
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS employees (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            designation TEXT,
-            salary REAL DEFAULT 0,
-            bank TEXT,
-            account_title TEXT,
-            account_no TEXT,
-            join_date DATE
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS expense_categories (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS company_expenses (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            description TEXT,
-            amount REAL NOT NULL,
-            expense_date DATE NOT NULL,
-            category_id INTEGER,
-            employee_id INTEGER,
-            FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL,
-            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
-        )
-    ''')
-    
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS employee_ledger (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            employee_id INTEGER NOT NULL,
-            entry_date DATE NOT NULL,
-            description TEXT,
-            debit REAL DEFAULT 0,
-            credit REAL DEFAULT 0,
-            related_expense_id INTEGER,
-            FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
-            FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
-        )
-    ''')
-    
-    # Safely add columns if they don't exist
-    try:
-        safe_alter_table(c, 'employees', 'join_date', 'DATE')
-    except:
-        pass  # Ignore errors for existing columns
-    
-    try:
-        safe_alter_table(c, 'employee_ledger', 'related_expense_id', 'INTEGER')
-    except:
-        pass  # Ignore errors for existing columns
-    
-    # Pre-populate expense categories
-    default_categories = [
-        "Guard", "Labour", "Bilty Expenses", "Office Rent", "Warehouse Rent",
-        "Import Export", "Office Electricity", "FBR", "Office Entertainment",
-        "PSID", "Advance", "Commission", "Office Stationery Expense",
-        "Employee Expenses", "Other Expense", "Company Expense", "Salary"
-    ]
-    
-    for category in default_categories:
-        try:
-            c.execute("INSERT OR IGNORE INTO expense_categories (name) VALUES (?)", (category,))
-        except:
-            pass  # Category might already exist
-    
-    conn.commit()
-
-# --- PDF Generation Functions ---
-def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
-    pdf = PDF(orientation='P', unit='mm', format='A4')
-    pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
-    pdf.date_range_str = ""
-    pdf.add_page()
-    
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 12, f"Employee: {emp_details['name']}", 0, 1, 'L')
-    pdf.set_font('Arial', '', 11)
-    pdf.cell(0, 8, f"Designation: {emp_details['designation']}", 0, 1, 'L')
-    pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
-    pdf.ln(8)
-
-    pdf.set_font('Arial', 'B', 12)
-    pdf.set_fill_color(224, 235, 255)
-    pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
-    
-    total_width = pdf.w - 2 * pdf.l_margin
-    desc_width = total_width * 0.6
-    amount_width = (total_width - desc_width) / 2
-    
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
-    pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
-    pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
-
-    pdf.set_font('Arial', '', 9)
-    if ledger_df.empty:
-        pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
-    else:
-        for _, row in ledger_df.iterrows():
-            desc_text = str(row['description'])
-            desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
-            
-            credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
-            debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
-            
-            row_height = max(8, len(desc_lines) * 8)
-            
-            x = pdf.get_x()
-            y = pdf.get_y()
-            pdf.multi_cell(desc_width, 8, desc_text, 1, 'L')
-            
-            pdf.set_xy(x + desc_width, y)
-            pdf.cell(amount_width, row_height, credit_text, 1, 0, 'R')
-            
-            pdf.set_xy(x + desc_width + amount_width, y)
-            pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
-
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
-    pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
-    pdf.cell(amount_width, 8, f"{total_debits:,.2f}", 1, 1, 'R')
-
-    pdf.ln(8)
-    
-    pdf.set_font('Arial', 'B', 14)
-    pdf.set_fill_color(210, 210, 210)
-    pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
-    pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
-    
-    pdf.ln(12)
-    
-    pdf.set_font('Arial', 'B', 11)
-    pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 6, f"  Bank: {emp_details['bank']}", 0, 1, 'L')
-    pdf.cell(0, 6, f"  Account Title: {emp_details['account_title']}", 0, 1, 'L')
-    pdf.cell(0, 6, f"  Account No: {emp_details['account_no']}", 0, 1, 'L')
-
-    return pdf.output(dest='S').encode('latin-1')
-
-def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
-    pdf = PDF(orientation=orientation, unit='mm', format='A4')
-    pdf.report_title = title
-    if date_range:
-        pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
-    else:
-        pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
-        
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_left_margin(10)
-    pdf.set_right_margin(10)
-    pdf.add_page()
-    
-    if df.empty:
-        pdf.set_font('Arial', 'I', 10)
-        pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
-    else:
-        pdf.add_table(df, totals_cols=totals_cols)
-    
-    return pdf.output(dest='S').encode('latin-1')
-
-# --- Helper Functions ---
+# --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
 def get_all_employees():
-    conn = get_db_connection()
+    """Get all employees with proper error handling"""
     try:
+        conn = get_db_connection()
+        if conn is None:
+            return pd.DataFrame()
+            
         df = pd.read_sql_query("SELECT * FROM employees ORDER BY name", conn)
+        conn.close()
+        
         if 'join_date' in df.columns:
             df['join_date'] = df['join_date'].astype(str)
+        return df
+    except Exception as e:
+        st.error(f"Error loading employees: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=60)
+def get_all_categories():
+    """Get all expense categories"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return pd.DataFrame()
+            
+        df = pd.read_sql_query("SELECT * FROM expense_categories ORDER BY name", conn)
+        conn.close()
         return df
     except:
         return pd.DataFrame()
 
 @st.cache_data(ttl=60)
-def get_all_categories():
-    conn = get_db_connection()
-    try:
-        return pd.read_sql_query("SELECT * FROM expense_categories ORDER BY name", conn)
-    except:
-        return pd.DataFrame()
-
-@st.cache_data(ttl=60)
 def get_dashboard_stats():
-    conn = get_db_connection()
-    
+    """Get dashboard statistics"""
     try:
+        conn = get_db_connection()
+        if conn is None:
+            return 0, 0.0, 0
+            
         emp_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM employees", conn)
         emp_count = emp_count_df['count'].iloc[0] if not emp_count_df.empty else 0
         
@@ -436,104 +365,172 @@ def get_dashboard_stats():
         cat_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM expense_categories", conn)
         cat_count = cat_count_df['count'].iloc[0] if not cat_count_df.empty else 0
         
+        conn.close()
         return emp_count, exp_total, cat_count
     except:
         return 0, 0.0, 0
 
 def clear_cache():
+    """Clear Streamlit cache"""
     st.cache_data.clear()
 
 def get_employee_balance(employee_id):
     """Get current balance for an employee"""
-    conn = get_db_connection()
     try:
+        conn = get_db_connection()
+        if conn is None:
+            return 0.0
+            
         balance_df = pd.read_sql_query(
             "SELECT SUM(credit) - SUM(debit) as balance FROM employee_ledger WHERE employee_id = ?",
             conn,
             params=(employee_id,)
         )
+        conn.close()
         return balance_df['balance'].iloc[0] if not balance_df.empty and balance_df['balance'].iloc[0] is not None else 0.0
     except:
         return 0.0
 
+# --- PDF Generation Functions ---
+def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
+    """Generate individual salary slip PDF"""
+    try:
+        pdf = PDF(orientation='P', unit='mm', format='A4')
+        pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
+        pdf.date_range_str = ""
+        pdf.add_page()
+        
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 12, f"Employee: {emp_details['name']}", 0, 1, 'L')
+        pdf.set_font('Arial', '', 11)
+        pdf.cell(0, 8, f"Designation: {emp_details['designation']}", 0, 1, 'L')
+        pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
+        pdf.ln(8)
+
+        pdf.set_font('Arial', 'B', 12)
+        pdf.set_fill_color(224, 235, 255)
+        pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
+        
+        total_width = pdf.w - 2 * pdf.l_margin
+        desc_width = total_width * 0.6
+        amount_width = (total_width - desc_width) / 2
+        
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+
+        pdf.set_font('Arial', '', 9)
+        if ledger_df.empty:
+            pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
+        else:
+            for _, row in ledger_df.iterrows():
+                desc_text = str(row['description'])
+                desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
+                
+                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
+                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
+                
+                row_height = max(8, len(desc_lines) * 8)
+                
+                x = pdf.get_x()
+                y = pdf.get_y()
+                pdf.multi_cell(desc_width, 8, desc_text, 1, 'L')
+                
+                pdf.set_xy(x + desc_width, y)
+                pdf.cell(amount_width, row_height, credit_text, 1, 0, 'R')
+                
+                pdf.set_xy(x + desc_width + amount_width, y)
+                pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
+
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
+        pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
+        pdf.cell(amount_width, 8, f"{total_debits:,.2f}", 1, 1, 'R')
+
+        pdf.ln(8)
+        
+        pdf.set_font('Arial', 'B', 14)
+        pdf.set_fill_color(210, 210, 210)
+        pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
+        pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
+        
+        pdf.ln(12)
+        
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
+        pdf.set_font('Arial', '', 10)
+        pdf.cell(0, 6, f"  Bank: {emp_details.get('bank', 'N/A')}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Account Title: {emp_details.get('account_title', 'N/A')}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Account No: {emp_details.get('account_no', 'N/A')}", 0, 1, 'L')
+
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return None
+
+def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
+    """Generate PDF report"""
+    try:
+        pdf = PDF(orientation=orientation, unit='mm', format='A4')
+        pdf.report_title = title
+        if date_range:
+            pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+        else:
+            pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
+            
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_left_margin(10)
+        pdf.set_right_margin(10)
+        pdf.add_page()
+        
+        if df.empty:
+            pdf.set_font('Arial', 'I', 10)
+            pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
+        else:
+            pdf.add_table(df, totals_cols=totals_cols)
+        
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF report: {e}")
+        return None
+
 # --- Data Import/Export System ---
 class DataImportExport:
     def __init__(self):
-        self.conn = get_db_connection()
+        pass
     
     def export_employees_to_excel(self):
         """Export all employees to Excel format"""
-        employees_df = get_all_employees()
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            employees_df.to_excel(writer, sheet_name='Employees', index=False)
-            
-            workbook = writer.book
-            worksheet = writer.sheets['Employees']
-            
-            header_format = workbook.add_format({
-                'bold': True,
-                'text_wrap': True,
-                'valign': 'top',
-                'fg_color': '#D7E4BC',
-                'border': 1
-            })
-            
-            for col_num, value in enumerate(employees_df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
-            
-            worksheet.set_column('A:A', 20)
-            worksheet.set_column('B:H', 15)
-        
-        output.seek(0)
-        return output
-    
-    def export_transactions_to_excel(self, start_date=None, end_date=None):
-        """Export transactions to Excel format"""
-        query = """
-        SELECT e.name as employee_name, el.entry_date, el.description, 
-               el.debit, el.credit
-        FROM employee_ledger el
-        JOIN employees e ON el.employee_id = e.id
-        """
-        params = []
-        
-        if start_date and end_date:
-            query += " WHERE el.entry_date BETWEEN ? AND ?"
-            params.extend([start_date, end_date])
-        
-        query += " ORDER BY el.entry_date DESC"
-        
         try:
-            transactions_df = pd.read_sql_query(query, self.conn, params=params)
-        except:
-            transactions_df = pd.DataFrame()
+            employees_df = get_all_employees()
+            output = io.BytesIO()
             
-        output = io.BytesIO()
-        
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            transactions_df.to_excel(writer, sheet_name='Transactions', index=False)
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                employees_df.to_excel(writer, sheet_name='Employees', index=False)
+                
+                workbook = writer.book
+                worksheet = writer.sheets['Employees']
+                
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                for col_num, value in enumerate(employees_df.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                
+                worksheet.set_column('A:A', 20)
+                worksheet.set_column('B:H', 15)
             
-            workbook = writer.book
-            worksheet = writer.sheets['Transactions']
-            
-            header_format = workbook.add_format({
-                'bold': True,
-                'bg_color': '#FFE699',
-                'border': 1
-            })
-            
-            for col_num, value in enumerate(transactions_df.columns.values):
-                worksheet.write(0, col_num, value, header_format)
-            
-            worksheet.set_column('A:A', 25)
-            worksheet.set_column('B:B', 15)
-            worksheet.set_column('C:C', 40)
-            worksheet.set_column('D:E', 15)
-        
-        output.seek(0)
-        return output
+            output.seek(0)
+            return output
+        except Exception as e:
+            st.error(f"Error exporting employees: {e}")
+            return io.BytesIO()
     
     def import_employees_from_excel(self, uploaded_file):
         """Import employees from Excel file"""
@@ -548,6 +545,10 @@ class DataImportExport:
             success_count = 0
             error_count = 0
             
+            conn = get_db_connection()
+            if conn is None:
+                return False
+                
             for index, row in df.iterrows():
                 try:
                     name = str(row['name']).strip()
@@ -567,7 +568,7 @@ class DataImportExport:
                     else:
                         join_date = str(join_date)
                     
-                    cursor = self.conn.cursor()
+                    cursor = conn.cursor()
                     cursor.execute('''
                         INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -578,7 +579,8 @@ class DataImportExport:
                 except Exception as e:
                     error_count += 1
             
-            self.conn.commit()
+            conn.commit()
+            conn.close()
             st.success(f"Successfully imported {success_count} employees. Failed: {error_count}")
             clear_cache()
             return True
@@ -597,12 +599,19 @@ def page_employee_expense_management():
         total_employees = len(employees_df)
         total_salary = employees_df['salary'].sum()
         
-        conn = get_db_connection()
-        expenses_df = pd.read_sql_query(
-            "SELECT SUM(debit) as total_debits FROM employee_ledger",
-            conn
-        )
-        total_expenses = expenses_df['total_debits'].iloc[0] if not expenses_df.empty and expenses_df['total_debits'].iloc[0] is not None else 0
+        try:
+            conn = get_db_connection()
+            if conn:
+                expenses_df = pd.read_sql_query(
+                    "SELECT SUM(debit) as total_debits FROM employee_ledger",
+                    conn
+                )
+                conn.close()
+                total_expenses = expenses_df['total_debits'].iloc[0] if not expenses_df.empty and expenses_df['total_debits'].iloc[0] is not None else 0
+            else:
+                total_expenses = 0
+        except:
+            total_expenses = 0
         
         with cols[0]:
             st.metric("Total Employees", total_employees)
@@ -655,6 +664,10 @@ def page_employee_expense_management():
                     if employee_id and amount > 0 and description:
                         try:
                             conn = get_db_connection()
+                            if conn is None:
+                                st.error("Database connection failed")
+                                return
+                                
                             cursor = conn.cursor()
                             
                             if expense_type in ["Personal Expense", "Travel Advance", "Loan Advance", "Other Deduction"]:
@@ -677,11 +690,12 @@ def page_employee_expense_management():
                                 message_type = "credit"
                             
                             conn.commit()
+                            conn.close()
                             employee_name = employees_df[employees_df['id'] == employee_id]['name'].iloc[0]
                             st.success(f"{expense_type} of Rs. {amount:,.2f} added to {employee_name}'s ledger as {message_type}.")
                             clear_cache()
                             st.rerun()
-                        except sqlite3.Error as e:
+                        except Exception as e:
                             st.error(f"Database error: {e}")
                     else:
                         st.error("Please fill in all required fields.")
@@ -720,12 +734,13 @@ def page_employee_expense_management():
                     orientation='L',
                     totals_cols=["Base Salary", "Current Balance", "Net Payable"]
                 )
-                st.download_button(
-                    label="Download PDF",
-                    data=pdf_bytes,
-                    file_name="Employee_Balance_Sheet.pdf",
-                    mime="application/pdf"
-                )
+                if pdf_bytes:
+                    st.download_button(
+                        label="Download PDF",
+                        data=pdf_bytes,
+                        file_name="Employee_Balance_Sheet.pdf",
+                        mime="application/pdf"
+                    )
         else:
             st.info("No employees found.")
     
@@ -753,6 +768,10 @@ def page_employee_expense_management():
             if st.button("🔍 Show Expense History"):
                 try:
                     conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
                     history_df = pd.read_sql_query(
                         """
                         SELECT 
@@ -767,6 +786,7 @@ def page_employee_expense_management():
                         conn,
                         params=(selected_emp_id, str(start_date), str(end_date))
                     )
+                    conn.close()
                     
                     if not history_df.empty:
                         st.dataframe(
@@ -809,6 +829,10 @@ def page_employee_expense_management():
             if st.button("🔄 Generate Salary Credits", use_container_width=True):
                 try:
                     conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
                     cursor = conn.cursor()
                     
                     processed_count = 0
@@ -840,6 +864,7 @@ def page_employee_expense_management():
                             processed_count += 1
                     
                     conn.commit()
+                    conn.close()
                     if processed_count > 0:
                         st.success(f"Salary credits generated for {processed_count} employees.")
                     if skipped_count > 0:
@@ -853,6 +878,10 @@ def page_employee_expense_management():
             if st.button("📊 Generate Salary Sheet", use_container_width=True):
                 try:
                     conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
                     query = f"""
                     SELECT
                         e.name AS "Employee Name",
@@ -871,6 +900,7 @@ def page_employee_expense_management():
                     ORDER BY e.name
                     """
                     salary_df = pd.read_sql_query(query, conn)
+                    conn.close()
 
                     if salary_df.empty:
                         st.warning("No salary data found.")
@@ -890,13 +920,14 @@ def page_employee_expense_management():
                             orientation='L',
                             totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"]
                         )
-                        st.download_button(
-                            label="📥 Download Salary Sheet (PDF)",
-                            data=pdf_bytes,
-                            file_name=f"Salary_Sheet_{selected_month.strftime('%Y_%m')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
+                        if pdf_bytes:
+                            st.download_button(
+                                label="📥 Download Salary Sheet (PDF)",
+                                data=pdf_bytes,
+                                file_name=f"Salary_Sheet_{selected_month.strftime('%Y_%m')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
                         
                 except Exception as e:
                     st.error(f"Error generating salary sheet: {e}")
@@ -926,6 +957,10 @@ def page_employee_expense_management():
                     last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
                     
                     conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
                     emp_details_df = pd.read_sql_query(
                         "SELECT * FROM employees WHERE id = ?", 
                         conn, 
@@ -934,6 +969,7 @@ def page_employee_expense_management():
                     
                     if emp_details_df.empty:
                         st.error("Employee not found.")
+                        conn.close()
                         return
                     
                     emp_details = emp_details_df.iloc[0].to_dict()
@@ -948,6 +984,7 @@ def page_employee_expense_management():
                         conn,
                         params=(selected_emp_id, str(first_day), str(last_day))
                     )
+                    conn.close()
                     
                     total_credits = ledger_df['credit'].sum()
                     total_debits = ledger_df['debit'].sum()
@@ -957,14 +994,15 @@ def page_employee_expense_management():
                         emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary
                     )
                     
-                    employee_name = emp_details['name'].replace(' ', '_')
-                    st.download_button(
-                        label=f"📥 Download {emp_details['name']}'s Salary Slip",
-                        data=pdf_bytes,
-                        file_name=f"Salary_Slip_{employee_name}_{slip_month.strftime('%Y_%m')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                    if pdf_bytes:
+                        employee_name = emp_details['name'].replace(' ', '_')
+                        st.download_button(
+                            label=f"📥 Download {emp_details['name']}'s Salary Slip",
+                            data=pdf_bytes,
+                            file_name=f"Salary_Slip_{employee_name}_{slip_month.strftime('%Y_%m')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
                     
                 except Exception as e:
                     st.error(f"Error generating salary slip: {e}")
@@ -996,6 +1034,10 @@ def page_employee_management():
                 else:
                     try:
                         conn = get_db_connection()
+                        if conn is None:
+                            st.error("Database connection failed")
+                            return
+                            
                         conn.execute(
                             """
                             INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
@@ -1004,9 +1046,10 @@ def page_employee_management():
                             (name, designation, salary, bank, account_title, account_no, str(join_date))
                         )
                         conn.commit()
+                        conn.close()
                         st.success(f"✅ Employee '{name}' added successfully!")
                         clear_cache()
-                    except sqlite3.Error as e:
+                    except Exception as e:
                         st.error(f"❌ Database error: {e}")
 
     with tab2:
@@ -1070,6 +1113,10 @@ def page_employee_management():
                     if update_submitted:
                         try:
                             conn = get_db_connection()
+                            if conn is None:
+                                st.error("Database connection failed")
+                                return
+                                
                             conn.execute(
                                 """
                                 UPDATE employees SET
@@ -1079,6 +1126,7 @@ def page_employee_management():
                                 (edit_name, edit_designation, edit_salary, edit_bank, edit_account_title, edit_account_no, selected_emp_id)
                             )
                             conn.commit()
+                            conn.close()
                             st.success("✅ Employee updated successfully!")
                             clear_cache()
                             st.rerun()
@@ -1088,6 +1136,10 @@ def page_employee_management():
                     if delete_submitted:
                         try:
                             conn = get_db_connection()
+                            if conn is None:
+                                st.error("Database connection failed")
+                                return
+                                
                             ledger_check = pd.read_sql_query(
                                 "SELECT COUNT(*) as count FROM employee_ledger WHERE employee_id = ?",
                                 conn,
@@ -1099,6 +1151,7 @@ def page_employee_management():
                             else:
                                 conn.execute("DELETE FROM employees WHERE id = ?", (selected_emp_id,))
                                 conn.commit()
+                                conn.close()
                                 st.success("✅ Employee deleted successfully!")
                                 clear_cache()
                                 st.rerun()
@@ -1157,6 +1210,10 @@ def page_expense_management():
                 if description and amount > 0:
                     try:
                         conn = get_db_connection()
+                        if conn is None:
+                            st.error("Database connection failed")
+                            return
+                            
                         cursor = conn.cursor()
                         cursor.execute(
                             """
@@ -1166,9 +1223,10 @@ def page_expense_management():
                             (description, amount, str(expense_date), category_id, employee_id)
                         )
                         conn.commit()
+                        conn.close()
                         st.success("✅ Company expense added successfully!")
                         clear_cache()
-                    except sqlite3.Error as e:
+                    except Exception as e:
                         st.error(f"❌ Database error: {e}")
                 else:
                     st.error("❌ Please fill in all required fields.")
@@ -1185,6 +1243,10 @@ def page_expense_management():
         if st.button("🔍 Load Expenses"):
             try:
                 conn = get_db_connection()
+                if conn is None:
+                    st.error("Database connection failed")
+                    return
+                    
                 expenses_df = pd.read_sql_query(
                     """
                     SELECT 
@@ -1202,6 +1264,7 @@ def page_expense_management():
                     conn,
                     params=(str(start_date), str(end_date))
                 )
+                conn.close()
                 
                 if not expenses_df.empty:
                     st.dataframe(
@@ -1232,7 +1295,10 @@ def page_expense_management():
                 last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
                 
                 conn = get_db_connection()
-                
+                if conn is None:
+                    st.error("Database connection failed")
+                    return
+                    
                 if report_type == "Category-wise":
                     report_df = pd.read_sql_query(
                         """
@@ -1264,6 +1330,7 @@ def page_expense_management():
                         conn,
                         params=(str(first_day), str(last_day))
                     )
+                conn.close()
                 
                 if not report_df.empty:
                     st.dataframe(
@@ -1277,12 +1344,13 @@ def page_expense_management():
                         date_range=(first_day, last_day),
                         totals_cols=["Total_Amount"]
                     )
-                    st.download_button(
-                        label="📥 Download PDF Report",
-                        data=pdf_bytes,
-                        file_name=f"Expense_Report_{report_month.strftime('%Y_%m')}.pdf",
-                        mime="application/pdf"
-                    )
+                    if pdf_bytes:
+                        st.download_button(
+                            label="📥 Download PDF Report",
+                            data=pdf_bytes,
+                            file_name=f"Expense_Report_{report_month.strftime('%Y_%m')}.pdf",
+                            mime="application/pdf"
+                        )
                 else:
                     st.info("No data found for the selected period.")
                     
@@ -1318,7 +1386,10 @@ def page_reporting():
                 
                 try:
                     conn = get_db_connection()
-                    
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
                     if report_type == "Salary Sheet":
                         query = """
                         SELECT 
@@ -1350,6 +1421,8 @@ def page_reporting():
                             })
                         report_df = pd.DataFrame(balance_data)
                     
+                    conn.close()
+                    
                     if not report_df.empty:
                         st.dataframe(report_df, use_container_width=True)
                         
@@ -1360,24 +1433,25 @@ def page_reporting():
                             orientation='L'
                         )
                         
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.download_button(
-                                label="📥 Download PDF",
-                                data=pdf_bytes,
-                                file_name=f"Employee_{report_type}_{report_month.strftime('%Y_%m')}.pdf",
-                                mime="application/pdf",
-                                use_container_width=True
-                            )
-                        with col2:
-                            csv = report_df.to_csv(index=False)
-                            st.download_button(
-                                label="📥 Download CSV",
-                                data=csv,
-                                file_name=f"Employee_{report_type}_{report_month.strftime('%Y_%m')}.csv",
-                                mime="text/csv",
-                                use_container_width=True
-                            )
+                        if pdf_bytes:
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.download_button(
+                                    label="📥 Download PDF",
+                                    data=pdf_bytes,
+                                    file_name=f"Employee_{report_type}_{report_month.strftime('%Y_%m')}.pdf",
+                                    mime="application/pdf",
+                                    use_container_width=True
+                                )
+                            with col2:
+                                csv = report_df.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Download CSV",
+                                    data=csv,
+                                    file_name=f"Employee_{report_type}_{report_month.strftime('%Y_%m')}.csv",
+                                    mime="text/csv",
+                                    use_container_width=True
+                                )
                     
                 except Exception as e:
                     st.error(f"Error generating report: {e}")
@@ -1396,7 +1470,10 @@ def page_reporting():
         if st.button("Generate Company Report", key="gen_comp_report"):
             try:
                 conn = get_db_connection()
-                
+                if conn is None:
+                    st.error("Database connection failed")
+                    return
+                    
                 if report_type == "Detailed":
                     query = """
                     SELECT 
@@ -1427,6 +1504,8 @@ def page_reporting():
                     """
                     report_df = pd.read_sql_query(query, conn, params=(str(start_date), str(end_date)))
                 
+                conn.close()
+                
                 if not report_df.empty:
                     st.dataframe(report_df, use_container_width=True)
                     
@@ -1439,24 +1518,25 @@ def page_reporting():
                         date_range=(start_date, end_date)
                     )
                     
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.download_button(
-                            label="📥 Download PDF",
-                            data=pdf_bytes,
-                            file_name=f"Company_Expense_Report_{start_date}_{end_date}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                    with col2:
-                        csv = report_df.to_csv(index=False)
-                        st.download_button(
-                            label="📥 Download CSV",
-                            data=csv,
-                            file_name=f"Company_Expense_Report_{start_date}_{end_date}.csv",
-                            mime="text/csv",
-                            use_container_width=True
-                        )
+                    if pdf_bytes:
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label="📥 Download PDF",
+                                data=pdf_bytes,
+                                file_name=f"Company_Expense_Report_{start_date}_{end_date}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                        with col2:
+                            csv = report_df.to_csv(index=False)
+                            st.download_button(
+                                label="📥 Download CSV",
+                                data=csv,
+                                file_name=f"Company_Expense_Report_{start_date}_{end_date}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
                 else:
                     st.info("No data found for the selected period.")
                     
@@ -1535,24 +1615,6 @@ def page_data_import():
                     mime="application/vnd.ms-excel",
                     use_container_width=True
                 )
-        
-        with col2:
-            st.markdown("### 💸 Transaction Data")
-            col21, col22 = st.columns(2)
-            with col21:
-                trans_start = st.date_input("Start Date", date.today().replace(day=1), key="export_start")
-            with col22:
-                trans_end = st.date_input("End Date", date.today(), key="export_end")
-            
-            if st.button("Export Transactions to Excel", use_container_width=True):
-                excel_data = importer.export_transactions_to_excel(trans_start, trans_end)
-                st.download_button(
-                    label="📥 Download Transactions Excel",
-                    data=excel_data,
-                    file_name=f"Transactions_Export_{trans_start}_{trans_end}.xlsx",
-                    mime="application/vnd.ms-excel",
-                    use_container_width=True
-                )
     
     with tab3:
         st.subheader("Download Templates")
@@ -1576,24 +1638,6 @@ def page_data_import():
                 label="📥 Download Employee Template",
                 data=emp_template_output.getvalue(),
                 file_name="Employee_Import_Template.xlsx",
-                mime="application/vnd.ms-excel",
-                use_container_width=True
-            )
-        
-        with col2:
-            st.markdown("#### 💸 Transaction Template")
-            trans_template_df = pd.DataFrame(columns=[
-                'employee_name', 'entry_date', 'description', 'debit', 'credit'
-            ])
-            trans_template_output = io.BytesIO()
-            with pd.ExcelWriter(trans_template_output, engine='xlsxwriter') as writer:
-                trans_template_df.to_excel(writer, index=False, sheet_name='Transactions')
-            trans_template_output.seek(0)
-            
-            st.download_button(
-                label="📥 Download Transaction Template",
-                data=trans_template_output.getvalue(),
-                file_name="Transaction_Import_Template.xlsx",
                 mime="application/vnd.ms-excel",
                 use_container_width=True
             )
@@ -1642,18 +1686,22 @@ def page_dashboard():
         st.subheader("💼 Recent Expenses")
         try:
             conn = get_db_connection()
-            recent_expenses = pd.read_sql_query(
-                """
-                SELECT description, amount, expense_date 
-                FROM company_expenses 
-                ORDER BY expense_date DESC 
-                LIMIT 5
-                """,
-                conn
-            )
-            if not recent_expenses.empty:
-                for _, exp in recent_expenses.iterrows():
-                    st.write(f"**{exp['description']}** - Rs. {exp['amount']:,.2f} ({exp['expense_date']})")
+            if conn:
+                recent_expenses = pd.read_sql_query(
+                    """
+                    SELECT description, amount, expense_date 
+                    FROM company_expenses 
+                    ORDER BY expense_date DESC 
+                    LIMIT 5
+                    """,
+                    conn
+                )
+                conn.close()
+                if not recent_expenses.empty:
+                    for _, exp in recent_expenses.iterrows():
+                        st.write(f"**{exp['description']}** - Rs. {exp['amount']:,.2f} ({exp['expense_date']})")
+                else:
+                    st.info("No expenses recorded")
             else:
                 st.info("No expenses recorded")
         except:
@@ -1722,7 +1770,10 @@ def page_settings():
         
         try:
             conn = get_db_connection()
-            
+            if conn is None:
+                st.error("Database connection failed")
+                return
+                
             tables = ['employees', 'employee_ledger', 'company_expenses', 'expense_categories']
             table_data = []
             
@@ -1733,6 +1784,8 @@ def page_settings():
                     table_data.append({'Table': table, 'Records': count})
                 except:
                     table_data.append({'Table': table, 'Records': 0})
+            
+            conn.close()
             
             table_df = pd.DataFrame(table_data)
             st.dataframe(table_df, use_container_width=True)
@@ -1784,6 +1837,7 @@ def main():
     </style>
     """, unsafe_allow_html=True)
     
+    # Initialize database
     init_db()
     
     st.sidebar.title(f"{COMPANY_NAME} HR System")
