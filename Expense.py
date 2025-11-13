@@ -1,4 +1,3 @@
-#code
 import streamlit as st
 import pandas as pd
 import sqlite3
@@ -135,15 +134,13 @@ def init_db():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
-# --- Updated PDF Class ---
+# --- PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.report_title = "Report"
         self.date_range_str = ""
         self.logo_path = "logo.png"
-        self.page_totals = []  # Store totals for each page
-        self.current_page_data = []  # Store data for current page
 
     def header(self):
         try:
@@ -161,19 +158,23 @@ class PDF(FPDF):
         self.ln(5)
 
     def footer(self):
-        self.set_y(-25)  # Reduced from -35 to prevent overlapping
-        self.set_font('Arial', 'I', 8)
+        self.set_y(-35)
+        self.set_font('Arial', '', 10)
         
-        # Company details instead of signatures
         footer_width = self.w - self.l_margin - self.r_margin
         
-        # Add page total if available
-        page_total_text = ""
-        if hasattr(self, 'current_page_total') and self.current_page_total > 0:
-            page_total_text = f" | Page Total: Rs. {self.current_page_total:,.2f}"
+        try:
+            self.image('', self.l_margin, self.get_y(), 40)
+            self.ln(15)
+        except:
+            self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
         
-        footer_text = f"{COMPANY_NAME} | {DEVELOPER_INFO}{page_total_text} | Page {self.page_no()}/{{nb}}"
-        self.cell(0, 10, footer_text, 0, 0, 'C')
+        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
+        self.ln(10)
+
+        self.set_font('Arial', 'I', 8)
+        self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
+        self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
         self.set_font('Arial', 'B', 9)
@@ -183,10 +184,6 @@ class PDF(FPDF):
         total_width = self.w - self.l_margin - self.r_margin - 10
         
         col_widths = self.calculate_column_widths(df, total_width, num_cols)
-        
-        # Store current page data for total calculation
-        self.current_page_data = []
-        self.current_page_total = 0
         
         x_position = self.get_x()
         for i, col in enumerate(df.columns):
@@ -219,19 +216,6 @@ class PDF(FPDF):
             row_height = max(line_heights) if line_heights else 6
             max_height = max(max_height, row_height)
             
-            # Check if we need a new page
-            if self.get_y() + max_height > self.page_break_trigger:
-                self.add_page_total(totals_cols)
-                self.add_page()
-                # Re-draw header
-                self.header()
-                # Re-draw table headers
-                x_position = self.get_x()
-                for i, col in enumerate(df.columns):
-                    self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
-                self.ln()
-                fill = False
-            
             x_position = self.get_x()
             for i, col in enumerate(df.columns):
                 cell_text = str(row[col]) if pd.notna(row[col]) else ""
@@ -246,9 +230,6 @@ class PDF(FPDF):
                         else:
                             cell_text = f"{float(cell_value):,.2f}"
                             align = 'R'
-                            # Add to page total if it's an amount column
-                            if totals_cols and col in totals_cols:
-                                self.current_page_total += float(cell_value)
                     except (ValueError, TypeError):
                         align = 'L'
                 
@@ -269,39 +250,20 @@ class PDF(FPDF):
             self.ln(max_height)
             fill = not fill
         
-        # Add page total at the end of the page
-        self.add_page_total(totals_cols)
-
-    def add_page_total(self, totals_cols):
-        """Add page total row"""
-        if hasattr(self, 'current_page_total') and self.current_page_total > 0 and totals_cols:
+        if totals_cols:
             self.set_font('Arial', 'B', 9)
-            self.set_fill_color(220, 220, 220)
+            self.set_fill_color(240, 240, 240)
+            x_position = self.get_x()
             
-            # Find the amount column index
-            amount_col_index = None
-            for i, col in enumerate(self._current_df.columns):
-                if col in totals_cols:
-                    amount_col_index = i
-                    break
-            
-            if amount_col_index is not None:
-                # Calculate column widths
-                total_width = self.w - self.l_margin - self.r_margin - 10
-                col_widths = self.calculate_column_widths(self._current_df, total_width, len(self._current_df.columns))
-                
-                # Add page total row
-                for i, col in enumerate(self._current_df.columns):
-                    if i == 0:
-                        self.cell(col_widths[i], 7, "PAGE TOTAL", 1, 0, 'R', 1)
-                    elif i == amount_col_index:
-                        self.cell(col_widths[i], 7, f"{self.current_page_total:,.2f}", 1, 0, 'R', 1)
-                    else:
-                        self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
-                self.ln()
-            
-            # Reset for next page
-            self.current_page_total = 0
+            for i, col in enumerate(df.columns):
+                if i == 0:
+                    self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
+                elif col in totals_cols:
+                    col_total = pd.to_numeric(df[col], errors='coerce').sum()
+                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                else:
+                    self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
+            self.ln()
 
     def calculate_column_widths(self, df, total_width, num_cols):
         min_width = 15
@@ -595,14 +557,13 @@ def delete_company_expense(expense_id):
         st.error(f"Error deleting expense: {e}")
         return False
 
-# --- Updated PDF Generation Functions ---
+# --- PDF Generation Functions ---
 def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date):
     """Generate employee ledger PDF"""
     try:
         pdf = PDF(orientation='L', unit='mm', format='A4')
         pdf.report_title = f"Employee Ledger - {employee_name}"
         pdf.date_range_str = f"From {start_date} to {end_date}"
-        pdf.set_auto_page_break(auto=True, margin=25)  # Increased margin to prevent footer overlap
         pdf.add_page()
         
         if ledger_df.empty:
@@ -614,7 +575,6 @@ def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date)
             pdf_data.columns = ['Date', 'Description', 'Debit', 'Credit']
             pdf_data['Date'] = pdf_data['Date'].astype(str)
             
-            pdf._current_df = pdf_data  # Store reference for page total calculation
             pdf.add_table(pdf_data, totals_cols=['Debit', 'Credit'])
             
             # Add summary
@@ -637,7 +597,6 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         pdf = PDF(orientation='P', unit='mm', format='A4')
         pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
         pdf.date_range_str = ""
-        pdf.set_auto_page_break(auto=True, margin=25)
         pdf.add_page()
         
         pdf.set_font('Arial', 'B', 14)
@@ -664,23 +623,12 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         if ledger_df.empty:
             pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
         else:
-            # Store data for page total calculation
-            temp_data = []
             for _, row in ledger_df.iterrows():
                 desc_text = str(row['description']) if pd.notna(row['description']) else ""
-                credit_amt = float(row['credit']) if row['credit'] > 0 else 0
-                debit_amt = float(row['debit']) if row['debit'] > 0 else 0
-                
-                temp_data.append({
-                    'Description': desc_text,
-                    'Credit': credit_amt,
-                    'Debit': debit_amt
-                })
-                
                 desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
                 
-                credit_text = f"{credit_amt:,.2f}" if credit_amt > 0 else "0"
-                debit_text = f"{debit_amt:,.2f}" if debit_amt > 0 else "0"
+                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
+                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
                 
                 row_height = max(8, len(desc_lines) * 8)
                 
@@ -694,9 +642,6 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
                 pdf.set_xy(x + desc_width + amount_width, y)
                 pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
 
-            # Store for page total calculation
-            pdf._current_df = pd.DataFrame(temp_data)
-
         # Add advance deduction if any
         if advance_deduction > 0:
             pdf.set_font('Arial', '', 9)
@@ -704,7 +649,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             y = pdf.get_y()
             pdf.multi_cell(desc_width, 8, "Advance Deduction", 1, 'L')
             pdf.set_xy(x + desc_width, y)
-            pdf.cell(amount_width, 8, "0", 1, 0, 'R')
+            pdf.cell(amount_width, 8, "0.00", 1, 0, 'R')
             pdf.set_xy(x + desc_width + amount_width, y)
             pdf.cell(amount_width, 8, f"{advance_deduction:,.2f}", 1, 1, 'R')
 
@@ -755,7 +700,9 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
         else:
             pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
             
-        pdf.set_auto_page_break(auto=True, margin=25)  # Increased margin to prevent footer overlap
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_left_margin(10)
+        pdf.set_right_margin(10)
         pdf.add_page()
         
         if df.empty:
@@ -764,7 +711,6 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
         else:
             # Replace NaN values with empty strings
             df = df.fillna("")
-            pdf._current_df = df  # Store reference for page total calculation
             pdf.add_table(df, totals_cols=totals_cols)
         
         return pdf.output(dest='S').encode('latin-1')
@@ -2487,7 +2433,7 @@ def page_data_import():
                     'Client meeting expenses',
                     'Employee advance'
                 ],
-                'amount': [15000, 8500, 5000],
+                'amount': [15000.00, 8500.00, 5000.00],
                 'expense_date': [
                     date.today().strftime('%Y-%m-%d'),
                     (date.today() - timedelta(days=5)).strftime('%Y-%m-%d'),
