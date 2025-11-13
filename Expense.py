@@ -562,6 +562,55 @@ class DataImportExport:
         except Exception as e:
             st.error(f"Error exporting employees: {e}")
             return io.BytesIO()
+
+    def export_expenses_to_excel(self):
+        """Export all expenses to Excel format"""
+        try:
+            conn = get_db_connection()
+            if conn is None:
+                return io.BytesIO()
+                
+            expenses_df = pd.read_sql_query('''
+                SELECT 
+                    ce.description,
+                    ce.amount,
+                    ce.expense_date,
+                    ec.name as category,
+                    e.name as employee_name
+                FROM company_expenses ce
+                LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                LEFT JOIN employees e ON ce.employee_id = e.id
+                ORDER BY ce.expense_date DESC
+            ''', conn)
+            conn.close()
+            
+            output = io.BytesIO()
+            
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                expenses_df.to_excel(writer, sheet_name='Expenses', index=False)
+                
+                workbook = writer.book
+                worksheet = writer.sheets['Expenses']
+                
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                for col_num, value in enumerate(expenses_df.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                
+                worksheet.set_column('A:A', 30)
+                worksheet.set_column('B:E', 15)
+            
+            output.seek(0)
+            return output
+        except Exception as e:
+            st.error(f"Error exporting expenses: {e}")
+            return io.BytesIO()
     
     def import_employees_from_excel(self, uploaded_file):
         """Import employees from Excel file"""
@@ -613,6 +662,96 @@ class DataImportExport:
             conn.commit()
             conn.close()
             st.success(f"Successfully imported {success_count} employees. Failed: {error_count}")
+            clear_cache()
+            return True
+            
+        except Exception as e:
+            st.error(f"Error reading Excel file: {str(e)}")
+            return False
+
+    def import_expenses_from_excel(self, uploaded_file):
+        """Import expenses from Excel file"""
+        try:
+            df = pd.read_excel(uploaded_file)
+            required_columns = ['description', 'amount', 'expense_date', 'category']
+            
+            if not all(col in df.columns for col in required_columns):
+                st.error(f"Missing required columns. Required: {required_columns}")
+                return False
+            
+            success_count = 0
+            error_count = 0
+            
+            conn = get_db_connection()
+            if conn is None:
+                return False
+            
+            # Get all categories and employees for lookup
+            categories_df = get_all_categories()
+            employees_df = get_all_employees()
+            
+            category_map = {row['name'].lower(): row['id'] for _, row in categories_df.iterrows()}
+            employee_map = {row['name'].lower(): row['id'] for _, row in employees_df.iterrows()}
+                
+            for index, row in df.iterrows():
+                try:
+                    description = str(row['description']).strip()
+                    if not description:
+                        error_count += 1
+                        continue
+                    
+                    amount = float(row['amount'])
+                    expense_date = row['expense_date']
+                    category_name = str(row['category']).strip().lower()
+                    
+                    # Handle expense date
+                    if hasattr(expense_date, 'strftime'):
+                        expense_date = expense_date.strftime('%Y-%m-%d')
+                    else:
+                        expense_date = str(expense_date)
+                    
+                    # Get or create category
+                    if category_name in category_map:
+                        category_id = category_map[category_name]
+                    else:
+                        # Create new category
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO expense_categories (name) VALUES (?)", (category_name.title(),))
+                        category_id = cursor.lastrowid
+                        category_map[category_name] = category_id
+                    
+                    # Get employee ID if provided
+                    employee_id = None
+                    if 'employee_name' in df.columns and pd.notna(row.get('employee_name')):
+                        employee_name = str(row['employee_name']).strip().lower()
+                        if employee_name in employee_map:
+                            employee_id = employee_map[employee_name]
+                    
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (description, amount, expense_date, category_id, employee_id))
+                    
+                    # If expense is linked to an employee, also add to ledger as credit
+                    if employee_id is not None:
+                        cursor.execute(
+                            """
+                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id)
+                            VALUES (?, ?, ?, 0, ?, ?)
+                            """,
+                            (employee_id, expense_date, f"Expense Reimbursement: {description}", amount, cursor.lastrowid)
+                        )
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    error_count += 1
+                    st.error(f"Error in row {index + 2}: {str(e)}")
+            
+            conn.commit()
+            conn.close()
+            st.success(f"Successfully imported {success_count} expenses. Failed: {error_count}")
             clear_cache()
             return True
             
@@ -1767,8 +1906,7 @@ def page_data_import():
                     if import_type == "Employees":
                         success = importer.import_employees_from_excel(uploaded_file)
                     else:
-                        st.info("Expense import coming soon")
-                        success = False
+                        success = importer.import_expenses_from_excel(uploaded_file)
                     
                     if success:
                         st.success(f"✅ {import_type} imported successfully!")
@@ -1788,6 +1926,18 @@ def page_data_import():
                     label="📥 Download Employees Excel",
                     data=excel_data,
                     file_name=f"Employees_Export_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.ms-excel",
+                    use_container_width=True
+                )
+        
+        with col2:
+            st.markdown("### 💼 Expense Data")
+            if st.button("Export Expenses to Excel", use_container_width=True):
+                excel_data = importer.export_expenses_to_excel()
+                st.download_button(
+                    label="📥 Download Expenses Excel",
+                    data=excel_data,
+                    file_name=f"Expenses_Export_{date.today().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.ms-excel",
                     use_container_width=True
                 )
@@ -1817,6 +1967,55 @@ def page_data_import():
                 mime="application/vnd.ms-excel",
                 use_container_width=True
             )
+
+        with col2:
+            st.markdown("#### 💼 Expense Template")
+            # Create sample expense data for template
+            expense_template_df = pd.DataFrame({
+                'description': [
+                    'Office supplies purchase',
+                    'Client meeting expenses',
+                    'Internet bill payment'
+                ],
+                'amount': [15000.00, 8500.00, 4500.00],
+                'expense_date': [
+                    date.today().strftime('%Y-%m-%d'),
+                    (date.today() - timedelta(days=5)).strftime('%Y-%m-%d'),
+                    (date.today() - timedelta(days=10)).strftime('%Y-%m-%d')
+                ],
+                'category': [
+                    'Office Stationery Expense',
+                    'Office Entertainment',
+                    'Office Electricity'
+                ],
+                'employee_name': [
+                    'Ali Ahmed',
+                    '',
+                    'Sara Khan'
+                ]
+            })
+            
+            expense_template_output = io.BytesIO()
+            with pd.ExcelWriter(expense_template_output, engine='xlsxwriter') as writer:
+                expense_template_df.to_excel(writer, index=False, sheet_name='Expenses')
+            expense_template_output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Expense Template",
+                data=expense_template_output.getvalue(),
+                file_name="Expense_Import_Template.xlsx",
+                mime="application/vnd.ms-excel",
+                use_container_width=True
+            )
+            
+            st.markdown("""
+            **Expense Template Columns:**
+            - **description**: Expense description (required)
+            - **amount**: Amount in rupees (required)
+            - **expense_date**: Date of expense (required, format: YYYY-MM-DD)
+            - **category**: Expense category (required)
+            - **employee_name**: Employee name if expense is for specific employee (optional)
+            """)
 
 # --- Dashboard ---
 def page_dashboard():
