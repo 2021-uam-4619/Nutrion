@@ -134,69 +134,69 @@ def init_db():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
-# --- PDF Class ---
+# --- Improved PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.report_title = "Report"
         self.date_range_str = ""
         self.logo_path = "logo.png"
+        self.set_auto_page_break(auto=True, margin=25)
 
     def header(self):
         try:
             if os.path.exists(self.logo_path):
-                self.image(self.logo_path, 10, 8, 25)
+                # Increased logo size from 25 to 40
+                self.image(self.logo_path, 10, 8, 40)
         except:
             pass
         
-        self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
-        self.set_font('Arial', 'B', 12)
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 12, COMPANY_NAME, 0, 1, 'C')
+        self.set_font('Arial', 'B', 14)
         self.cell(0, 10, self.report_title, 0, 1, 'C')
         self.set_font('Arial', '', 10)
-        self.cell(0, 7, self.date_range_str, 0, 1, 'C')
-        self.ln(5)
+        self.cell(0, 8, self.date_range_str, 0, 1, 'C')
+        self.ln(8)
 
     def footer(self):
-        self.set_y(-35)
-        self.set_font('Arial', '', 10)
+        self.set_y(-25)
+        self.set_font('Arial', 'I', 9)
         
         footer_width = self.w - self.l_margin - self.r_margin
         
-        try:
-            self.image('', self.l_margin, self.get_y(), 40)
-            self.ln(15)
-        except:
-            self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
-        
-        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
-        self.ln(10)
+        # Removed signature lines and replaced with system generated message
+        self.cell(0, 8, "This PDF is system generated, not required any signature", 0, 1, 'C')
+        self.ln(2)
 
         self.set_font('Arial', 'I', 8)
-        self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
-        self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
+        self.cell(footer_width / 2, 6, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
+        self.cell(footer_width / 2, 6, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        self.set_font('Arial', 'B', 9)
+        self.set_font('Arial', 'B', 10)
         self.set_fill_color(224, 235, 255)
         
         num_cols = len(df.columns)
         total_width = self.w - self.l_margin - self.r_margin - 10
         
-        col_widths = self.calculate_column_widths(df, total_width, num_cols)
+        # Calculate dynamic column widths based on content
+        col_widths = self.calculate_dynamic_column_widths(df, total_width)
         
+        # Draw header
         x_position = self.get_x()
         for i, col in enumerate(df.columns):
-            self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+            self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
-        self.set_font('Arial', '', 8)
-        self.set_fill_color(255)
+        # Draw rows with auto-adjusting height
+        self.set_font('Arial', '', 9)
         fill = False
         
         for index, row in df.iterrows():
-            max_height = 6
-            line_heights = []
+            # Calculate maximum height needed for this row
+            max_line_count = 1
+            cell_data = []
             
             for i, col in enumerate(df.columns):
                 cell_text = str(row[col]) if pd.notna(row[col]) else ""
@@ -210,115 +210,163 @@ class PDF(FPDF):
                     except (ValueError, TypeError):
                         pass
                 
-                lines = self.wrap_text(cell_text, col_widths[i] - 1)
-                line_heights.append(len(lines) * 6)
+                # Wrap text for this cell
+                lines = self.wrap_text(cell_text, col_widths[i] - 2)
+                cell_data.append(lines)
+                max_line_count = max(max_line_count, len(lines))
             
-            row_height = max(line_heights) if line_heights else 6
-            max_height = max(max_height, row_height)
+            # Calculate row height based on maximum lines
+            row_height = max(6, max_line_count * 4.5)
             
+            # Check if we need a page break
+            if self.get_y() + row_height > self.page_break_trigger:
+                self.add_page()
+                # Redraw header on new page
+                self.set_font('Arial', 'B', 10)
+                self.set_fill_color(224, 235, 255)
+                x_position = self.get_x()
+                for i, col in enumerate(df.columns):
+                    self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+                self.ln()
+                self.set_font('Arial', '', 9)
+            
+            # Draw each cell in the row
             x_position = self.get_x()
-            for i, col in enumerate(df.columns):
-                cell_text = str(row[col]) if pd.notna(row[col]) else ""
+            for i, (col, lines) in enumerate(zip(df.columns, cell_data)):
                 align = 'L'
                 
+                # Right align for numeric columns
                 if pd.api.types.is_numeric_dtype(df[col]):
-                    try:
-                        cell_value = row[col]
-                        if pd.isna(cell_value):
-                            cell_text = ""
-                            align = 'L'
-                        else:
-                            cell_text = f"{float(cell_value):,.2f}"
-                            align = 'R'
-                    except (ValueError, TypeError):
-                        align = 'L'
+                    align = 'R'
                 
-                self.set_xy(x_position, self.get_y())
-                lines = self.wrap_text(cell_text, col_widths[i] - 1)
+                # Set fill color for alternating rows
+                if fill:
+                    self.set_fill_color(245, 245, 245)
+                else:
+                    self.set_fill_color(255, 255, 255)
                 
-                self.set_fill_color(240, 240, 240) if fill else self.set_fill_color(255)
-                self.cell(col_widths[i], max_height, '', 1, 0, 'L', 1)
+                # Draw cell border
+                self.cell(col_widths[i], row_height, '', 1, 0, 'L', 1)
                 
-                self.set_xy(x_position + 1, self.get_y())
+                # Draw text
                 text_y = self.get_y()
                 for j, line in enumerate(lines):
-                    self.set_xy(x_position + 1, text_y + (j * 6))
-                    self.cell(col_widths[i] - 2, 6, line, 0, 0, align)
+                    self.set_xy(x_position + 1, text_y + 1 + (j * 4.5))
+                    self.cell(col_widths[i] - 2, 4.5, line, 0, 0, align)
                 
                 x_position += col_widths[i]
             
-            self.ln(max_height)
+            self.ln(row_height)
             fill = not fill
         
+        # Add totals row if specified
         if totals_cols:
-            self.set_font('Arial', 'B', 9)
+            self.set_font('Arial', 'B', 10)
             self.set_fill_color(240, 240, 240)
             x_position = self.get_x()
             
             for i, col in enumerate(df.columns):
                 if i == 0:
-                    self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 8, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 8, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
-                    self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
+                    self.cell(col_widths[i], 8, "", 1, 0, 'C', 1)
             self.ln()
 
-    def calculate_column_widths(self, df, total_width, num_cols):
-        min_width = 15
+    def calculate_dynamic_column_widths(self, df, total_width):
+        """Calculate column widths dynamically based on content"""
+        min_width = 20
         max_width = total_width / 2
         
+        # Calculate required width for each column
         col_widths = []
         for col in df.columns:
-            header_width = len(str(col).replace('_', ' ').title()) * 2.5
-            content_samples = df[col].astype(str).str[:30]
-            max_content_len = content_samples.str.len().max()
-            content_width = max_content_len * 1.8
+            # Header width
+            header_width = len(str(col).replace('_', ' ').title()) * 2.2
             
+            # Content width - check actual content
+            if not df.empty:
+                # Get sample of content (first 20 rows or all if less)
+                sample_size = min(20, len(df))
+                content_samples = df[col].astype(str).str[:50]  # Limit to 50 chars for calculation
+                max_content_len = content_samples.str.len().max()
+                content_width = max_content_len * 1.6
+            else:
+                content_width = header_width
+            
+            # Use the maximum of header and content width, but within limits
             col_width = max(header_width, content_width, min_width)
             col_width = min(col_width, max_width)
             col_widths.append(col_width)
         
+        # Adjust widths to fit total available width
         total_current_width = sum(col_widths)
+        
         if total_current_width > total_width:
+            # Scale down proportionally
             scale_factor = total_width / total_current_width
             col_widths = [max(min_width, w * scale_factor) for w in col_widths]
         else:
+            # Distribute extra space
             extra_space = total_width - total_current_width
             if extra_space > 0:
-                col_widths = [w + (extra_space / num_cols) for w in col_widths]
+                # Add extra space to columns that need it most
+                width_deficits = [max_width - w for w in col_widths]
+                total_deficit = sum(width_deficits)
+                if total_deficit > 0:
+                    for i in range(len(col_widths)):
+                        col_widths[i] += (width_deficits[i] / total_deficit) * extra_space
         
-        return col_widths
+        return [int(w) for w in col_widths]
 
     def wrap_text(self, text, max_width):
+        """Wrap text to fit within specified width"""
         if not text or text == "None" or pd.isna(text):
             return ['']
         
         text = str(text)
+        
+        # If text is already short enough, return as is
+        if self.get_string_width(text) <= max_width:
+            return [text]
+        
         words = text.split(' ')
         lines = []
         current_line = []
         
         for word in words:
             test_line = ' '.join(current_line + [word])
-            if self.get_string_width(test_line) < max_width:
+            if self.get_string_width(test_line) <= max_width:
                 current_line.append(word)
             else:
                 if current_line:
                     lines.append(' '.join(current_line))
-                current_line = [word] if self.get_string_width(word) < max_width else [word[:int(max_width/2)] + '...']
+                # If a single word is too long, break it
+                if self.get_string_width(word) > max_width:
+                    while word:
+                        # Find how much of the word fits
+                        for i in range(len(word), 0, -1):
+                            if self.get_string_width(word[:i]) <= max_width:
+                                lines.append(word[:i])
+                                word = word[i:]
+                                break
+                        else:
+                            # If no characters fit (shouldn't happen with reasonable max_width), force break
+                            lines.append(word[:20] + '...')
+                            word = word[20:]
+                        if word:
+                            current_line = [word]
+                        else:
+                            current_line = []
+                else:
+                    current_line = [word]
         
         if current_line:
             lines.append(' '.join(current_line))
         
-        final_lines = []
-        for line in lines:
-            while line and self.get_string_width(line) > max_width:
-                line = line[:-1]
-            final_lines.append(line if line else '')
-        
-        return final_lines if final_lines else ['']
+        return lines if lines else ['']
 
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
@@ -360,7 +408,7 @@ def get_dashboard_stats():
         conn = get_db_connection()
         if conn is None:
             return 0, 0.0, 0
-            
+        
         emp_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM employees", conn)
         emp_count = emp_count_df['count'].iloc[0] if not emp_count_df.empty else 0
         
@@ -557,7 +605,7 @@ def delete_company_expense(expense_id):
         st.error(f"Error deleting expense: {e}")
         return False
 
-# --- PDF Generation Functions ---
+# --- Improved PDF Generation Functions ---
 def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date):
     """Generate employee ledger PDF"""
     try:
@@ -961,6 +1009,10 @@ class DataImportExport:
         except Exception as e:
             st.error(f"Error reading Excel file: {str(e)}")
             return False
+
+# [The rest of the application code remains exactly the same...]
+# Continue with all the page functions (page_employee_expense_management, page_employee_management, etc.)
+# and the main() function exactly as in your original code
 
 # --- Employee Expense Management System ---
 def page_employee_expense_management():
@@ -2087,10 +2139,6 @@ def page_expense_management():
                 
         except Exception as e:
             st.error(f"Error loading expenses: {e}")
-
-# --- Continue with the rest of the code (Reporting, Data Import, Dashboard, Settings, Main)...
-# [The rest of the code remains the same as in the previous implementation]
-# ... (Reporting, Data Import, Dashboard, Settings, Main functions)
 
 # --- Reporting System ---
 def page_reporting():
