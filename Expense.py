@@ -484,168 +484,127 @@ def delete_company_expense(expense_id):
     except Exception as e:
         st.error(f"Error deleting expense: {e}")
         return False
+class PDF(FPDF):
+    def __init__(self):
+        super().__init__()
+        self.report_title = ""
+        self.date_range_str = ""
+        self.logo_path = "logo.png"
+        self.set_auto_page_break(auto=True, margin=15)
 
-# --- Improved PDF Generation Functions ---
-def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date):
-    """Generate employee ledger PDF"""
-    try:
-        pdf = PDF(orientation='L', unit='mm', format='A4')
-        pdf.report_title = f"Employee Ledger - {employee_name}"
-        pdf.date_range_str = f"From {start_date} to {end_date}"
-        pdf.add_page()
-        
-        if ledger_df.empty:
-            pdf.set_font('Arial', 'I', 10)
-            pdf.cell(0, 10, "No ledger entries found for the selected period.", 1, 1, 'C')
-        else:
-            # Prepare data for PDF
-            pdf_data = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
-            pdf_data.columns = ['Date', 'Description', 'Debit', 'Credit']
-            pdf_data['Date'] = pdf_data['Date'].astype(str)
-            
-            pdf.add_table(pdf_data, totals_cols=['Debit', 'Credit'])
-            
-            # Add summary
-            total_debit = ledger_df['debit'].sum()
-            total_credit = ledger_df['credit'].sum()
-            net_balance = total_credit - total_debit
-            
-            pdf.ln(10)
-            pdf.set_font('Arial', 'B', 10)
-            pdf.cell(0, 8, f"Total Debit: Rs. {total_debit:,.2f} | Total Credit: Rs. {total_credit:,.2f} | Net Balance: Rs. {net_balance:,.2f}", 0, 1, 'L')
+    def set_header_info(self, title, date_range):
+        self.report_title = title
+        self.date_range_str = date_range
 
-        return pdf.output(dest='S').encode('latin-1')
-    except Exception as e:
-        st.error(f"Error generating PDF: {e}")
-        return None
+    def header(self):
+        try:
+            if os.path.exists(self.logo_path):
+                self.image(self.logo_path, 10, 8, 30)
+        except:
+            pass
+        self.set_font('Arial', 'B', 14)
+        self.cell(0, 10, COMPANY_NAME, ln=1, align='C')
+        self.set_font('Arial', 'B', 12)
+        self.cell(0, 8, self.report_title, ln=1, align='C')
+        self.set_font('Arial', '', 10)
+        self.cell(0, 6, self.date_range_str, ln=1, align='C')
+        self.ln(4)
 
-def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary, advance_deduction=0):
-    """Generate individual salary slip PDF"""
-    try:
-        pdf = PDF(orientation='P', unit='mm', format='A4')
-        pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
-        pdf.date_range_str = ""
-        pdf.add_page()
-        
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 12, f"Employee: {emp_details['name']}", 0, 1, 'L')
-        pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 8, f"Designation: {emp_details['designation']}", 0, 1, 'L')
-        pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
-        pdf.ln(8)
+    def footer(self):
+        self.set_y(-18)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 6, "This PDF is system generated, not required any signature", 0, 1, 'C')
+        self.cell(0, 6, f"Page {self.page_no()}/{{nb}}      {DEVELOPER_INFO}", 0, 0, 'C')
 
-        pdf.set_font('Arial', 'B', 12)
-        pdf.set_fill_color(224, 235, 255)
-        pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
-        
-        total_width = pdf.w - 2 * pdf.l_margin
-        desc_width = total_width * 0.6
-        amount_width = (total_width - desc_width) / 2
-        
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
-        pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
-        pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
-
-        pdf.set_font('Arial', '', 9)
-        if ledger_df.empty:
-            pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
-        else:
-            for _, row in ledger_df.iterrows():
-                desc_text = str(row['description']) if pd.notna(row['description']) else ""
-                desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
-                
-                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
-                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
-                
-                row_height = max(8, len(desc_lines) * 8)
-                
-                x = pdf.get_x()
-                y = pdf.get_y()
-                pdf.multi_cell(desc_width, 8, desc_text, 1, 'L')
-                
-                pdf.set_xy(x + desc_width, y)
-                pdf.cell(amount_width, row_height, credit_text, 1, 0, 'R')
-                
-                pdf.set_xy(x + desc_width + amount_width, y)
-                pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
-
-        # Add advance deduction if any
-        if advance_deduction > 0:
-            pdf.set_font('Arial', '', 9)
-            x = pdf.get_x()
-            y = pdf.get_y()
-            pdf.multi_cell(desc_width, 8, "Advance Deduction", 1, 'L')
-            pdf.set_xy(x + desc_width, y)
-            pdf.cell(amount_width, 8, "0.00", 1, 0, 'R')
-            pdf.set_xy(x + desc_width + amount_width, y)
-            pdf.cell(amount_width, 8, f"{advance_deduction:,.2f}", 1, 1, 'R')
-
-        pdf.set_font('Arial', 'B', 10)
-        pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
-        pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
-        total_debits_with_advance = total_debits + advance_deduction
-        pdf.cell(amount_width, 8, f"{total_debits_with_advance:,.2f}", 1, 1, 'R')
-
-        pdf.ln(8)
-        
-        pdf.set_font('Arial', 'B', 14)
-        pdf.set_fill_color(210, 210, 210)
-        net_salary_with_advance = net_salary - advance_deduction
-        pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
-        pdf.cell(amount_width * 2, 12, f"Rs. {net_salary_with_advance:,.2f}", 1, 1, 'R', fill=True)
-        
-        if advance_deduction > 0:
-            pdf.ln(5)
-            pdf.set_font('Arial', 'I', 9)
-            pdf.cell(0, 6, f"Note: Advance deduction of Rs. {advance_deduction:,.2f} has been applied", 0, 1, 'L')
-        
-        pdf.ln(12)
-        
-        pdf.set_font('Arial', 'B', 11)
-        pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
-        pdf.set_font('Arial', '', 10)
-        bank_info = emp_details.get('bank', '')
-        account_title = emp_details.get('account_title', '')
-        account_no = emp_details.get('account_no', '')
-        
-        pdf.cell(0, 6, f"  Bank: {bank_info if bank_info else 'N/A'}", 0, 1, 'L')
-        pdf.cell(0, 6, f"  Account Title: {account_title if account_title else 'N/A'}", 0, 1, 'L')
-        pdf.cell(0, 6, f"  Account No: {account_no if account_no else 'N/A'}", 0, 1, 'L')
-
-        return pdf.output(dest='S').encode('latin-1')
-    except Exception as e:
-        st.error(f"Error generating PDF: {e}")
-        return None
-
-def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
-    """Generate PDF report"""
-    try:
-        pdf = PDF(orientation=orientation, unit='mm', format='A4')
-        pdf.report_title = title
-        if date_range:
-            pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
-        else:
-            pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
-            
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.set_left_margin(10)
-        pdf.set_right_margin(10)
-        pdf.add_page()
-        
+    def add_table(self, df, totals_cols=None):
         if df.empty:
-            pdf.set_font('Arial', 'I', 10)
-            pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
-        else:
-            # Replace NaN values with empty strings
-            df = df.fillna("")
-            pdf.add_table(df, totals_cols=totals_cols)
-        
-        return pdf.output(dest='S').encode('latin-1')
-    except Exception as e:
-        st.error(f"Error generating PDF report: {e}")
-        return None
+            self.set_font('Arial', 'I', 10)
+            self.cell(0, 8, "No data found.", 1, 1, 'C')
+            return
 
+        self.set_font('Arial', 'B', 9)
+        self.set_fill_color(230, 240, 255)
+        col_widths = self.calculate_optimal_column_widths(df)
+
+        # Header
+        for i, col in enumerate(df.columns):
+            self.cell(col_widths[i], 8, str(col).replace("_", " ").title(), 1, 0, 'C', 1)
+        self.ln()
+
+        self.set_font('Arial', '', 8)
+        fill = False
+        for _, row in df.iterrows():
+            if self.get_y() > 270:
+                self.add_page()
+                self.set_font('Arial', 'B', 9)
+                for i, col in enumerate(df.columns):
+                    self.cell(col_widths[i], 8, str(col).replace("_", " ").title(), 1, 0, 'C', 1)
+                self.ln()
+                self.set_font('Arial', '', 8)
+
+            self.set_fill_color(245, 245, 245) if fill else self.set_fill_color(255, 255, 255)
+            for i, col in enumerate(df.columns):
+                text = str(row[col]) if not pd.isna(row[col]) else ""
+                align = 'R' if pd.api.types.is_numeric_dtype(df[col]) else 'L'
+                self.cell(col_widths[i], 6, text, 1, 0, align, 1)
+            self.ln()
+            fill = not fill
+
+        if totals_cols:
+            self.set_font('Arial', 'B', 9)
+            self.set_fill_color(220, 220, 220)
+            for i, col in enumerate(df.columns):
+                if col in totals_cols:
+                    total_val = pd.to_numeric(df[col], errors='coerce').sum()
+                    self.cell(col_widths[i], 8, f"{total_val:,.2f}", 1, 0, 'R', 1)
+                elif i == 0:
+                    self.cell(col_widths[i], 8, "GRAND TOTAL", 1, 0, 'R', 1)
+                else:
+                    self.cell(col_widths[i], 8, "", 1, 0, 'C', 1)
+            self.ln()
+
+    def calculate_optimal_column_widths(self, df):
+        total_width = self.w - self.l_margin - self.r_margin
+        col_widths = []
+        for col in df.columns:
+            max_len = max(df[col].astype(str).map(len).max(), len(col)) * 1.3
+            col_widths.append(min(max_len, 35))
+        scale = total_width / sum(col_widths)
+        return [w * scale for w in col_widths]
+
+
+# --- Streamlit App ---
+st.title("📄 PDF Report Generator")
+
+uploaded_file = st.file_uploader("Upload CSV file", type=['csv'])
+
+if uploaded_file:
+    df = pd.read_csv(uploaded_file)
+    st.dataframe(df)
+
+    title = st.text_input("Report Title", "Expense or Salary Report")
+    date_range = st.text_input("Date Range", "01 Nov 2025 - 30 Nov 2025")
+
+    if st.button("Generate PDF"):
+        try:
+            pdf = PDF()
+            pdf.set_header_info(title, date_range)
+            pdf.alias_nb_pages()
+            pdf.add_page(orientation='P')
+            pdf.add_table(df, totals_cols=['Amount', 'Base Salary'])
+
+            pdf_buffer = BytesIO()
+            pdf.output(pdf_buffer)
+            pdf_buffer.seek(0)
+
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=pdf_buffer,
+                file_name=f"{title.replace(' ', '_')}.pdf",
+                mime="application/pdf"
+            )
+        except Exception as e:
+            st.error(f"Error generating PDF report: {e}")
 # --- Data Import/Export System ---
 class DataImportExport:
     def __init__(self):
