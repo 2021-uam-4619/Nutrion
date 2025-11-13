@@ -134,6 +134,7 @@ def init_db():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
+#asim chat gpt
 # --- Improved PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
@@ -141,7 +142,8 @@ class PDF(FPDF):
         self.report_title = "Report"
         self.date_range_str = ""
         self.logo_path = "logo.png"
-        self.set_auto_page_break(auto=True, margin=25)
+        # Increased margin to prevent overlap
+        self.set_auto_page_break(auto=True, margin=30)
 
     def header(self):
         try:
@@ -160,18 +162,21 @@ class PDF(FPDF):
         self.ln(8)
 
     def footer(self):
-        self.set_y(-25)
-        self.set_font('Arial', 'I', 9)
-        
-        footer_width = self.w - self.l_margin - self.r_margin
-        
-        # Removed signature lines and replaced with system generated message
-        self.cell(0, 8, "This PDF is system generated, not required any signature", 0, 1, 'C')
-        self.ln(2)
-
+        # --- Updated Footer Section ---
+        self.set_y(-20)
         self.set_font('Arial', 'I', 8)
-        self.cell(footer_width / 2, 6, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
-        self.cell(footer_width / 2, 6, DEVELOPER_INFO, 0, 0, 'R')
+        self.set_text_color(80, 80, 80)
+
+        footer_width = self.w - self.l_margin - self.r_margin
+
+        # First line: Page number (left) + Developer info (right)
+        self.cell(footer_width / 2, 6, f"Page {self.page_no()}/{{nb}}", 0, 0, 'L')
+        self.cell(footer_width / 2, 6, DEVELOPER_INFO, 0, 1, 'R')
+
+        # Second line: System-generated message (centered)
+        self.set_font('Arial', 'I', 8)
+        self.set_text_color(100, 100, 100)
+        self.cell(0, 6, "This PDF is system generated and does not require a signature.", 0, 0, 'C')
 
     def add_table(self, df, totals_cols=None):
         self.set_font('Arial', 'B', 10)
@@ -194,7 +199,6 @@ class PDF(FPDF):
         fill = False
         
         for index, row in df.iterrows():
-            # Calculate maximum height needed for this row
             max_line_count = 1
             cell_data = []
             
@@ -210,18 +214,14 @@ class PDF(FPDF):
                     except (ValueError, TypeError):
                         pass
                 
-                # Wrap text for this cell
                 lines = self.wrap_text(cell_text, col_widths[i] - 2)
                 cell_data.append(lines)
                 max_line_count = max(max_line_count, len(lines))
             
-            # Calculate row height based on maximum lines
             row_height = max(6, max_line_count * 4.5)
             
-            # Check if we need a page break
             if self.get_y() + row_height > self.page_break_trigger:
                 self.add_page()
-                # Redraw header on new page
                 self.set_font('Arial', 'B', 10)
                 self.set_fill_color(224, 235, 255)
                 x_position = self.get_x()
@@ -230,25 +230,19 @@ class PDF(FPDF):
                 self.ln()
                 self.set_font('Arial', '', 9)
             
-            # Draw each cell in the row
             x_position = self.get_x()
             for i, (col, lines) in enumerate(zip(df.columns, cell_data)):
                 align = 'L'
-                
-                # Right align for numeric columns
                 if pd.api.types.is_numeric_dtype(df[col]):
                     align = 'R'
                 
-                # Set fill color for alternating rows
                 if fill:
                     self.set_fill_color(245, 245, 245)
                 else:
                     self.set_fill_color(255, 255, 255)
                 
-                # Draw cell border
                 self.cell(col_widths[i], row_height, '', 1, 0, 'L', 1)
                 
-                # Draw text
                 text_y = self.get_y()
                 for j, line in enumerate(lines):
                     self.set_xy(x_position + 1, text_y + 1 + (j * 4.5))
@@ -259,7 +253,6 @@ class PDF(FPDF):
             self.ln(row_height)
             fill = not fill
         
-        # Add totals row if specified
         if totals_cols:
             self.set_font('Arial', 'B', 10)
             self.set_fill_color(240, 240, 240)
@@ -280,39 +273,30 @@ class PDF(FPDF):
         min_width = 20
         max_width = total_width / 2
         
-        # Calculate required width for each column
         col_widths = []
         for col in df.columns:
-            # Header width
             header_width = len(str(col).replace('_', ' ').title()) * 2.2
             
-            # Content width - check actual content
             if not df.empty:
-                # Get sample of content (first 20 rows or all if less)
                 sample_size = min(20, len(df))
-                content_samples = df[col].astype(str).str[:50]  # Limit to 50 chars for calculation
+                content_samples = df[col].astype(str).str[:50]
                 max_content_len = content_samples.str.len().max()
                 content_width = max_content_len * 1.6
             else:
                 content_width = header_width
             
-            # Use the maximum of header and content width, but within limits
             col_width = max(header_width, content_width, min_width)
             col_width = min(col_width, max_width)
             col_widths.append(col_width)
         
-        # Adjust widths to fit total available width
         total_current_width = sum(col_widths)
         
         if total_current_width > total_width:
-            # Scale down proportionally
             scale_factor = total_width / total_current_width
             col_widths = [max(min_width, w * scale_factor) for w in col_widths]
         else:
-            # Distribute extra space
             extra_space = total_width - total_current_width
             if extra_space > 0:
-                # Add extra space to columns that need it most
                 width_deficits = [max_width - w for w in col_widths]
                 total_deficit = sum(width_deficits)
                 if total_deficit > 0:
@@ -328,7 +312,6 @@ class PDF(FPDF):
         
         text = str(text)
         
-        # If text is already short enough, return as is
         if self.get_string_width(text) <= max_width:
             return [text]
         
@@ -343,17 +326,14 @@ class PDF(FPDF):
             else:
                 if current_line:
                     lines.append(' '.join(current_line))
-                # If a single word is too long, break it
                 if self.get_string_width(word) > max_width:
                     while word:
-                        # Find how much of the word fits
                         for i in range(len(word), 0, -1):
                             if self.get_string_width(word[:i]) <= max_width:
                                 lines.append(word[:i])
                                 word = word[i:]
                                 break
                         else:
-                            # If no characters fit (shouldn't happen with reasonable max_width), force break
                             lines.append(word[:20] + '...')
                             word = word[20:]
                         if word:
@@ -367,7 +347,7 @@ class PDF(FPDF):
             lines.append(' '.join(current_line))
         
         return lines if lines else ['']
-
+#asim end
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
 def get_all_employees():
