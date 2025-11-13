@@ -66,6 +66,7 @@ def init_db():
                 expense_date DATE NOT NULL,
                 category_id INTEGER,
                 employee_id INTEGER,
+                is_advance BOOLEAN DEFAULT 0,
                 FOREIGN KEY (category_id) REFERENCES expense_categories (id) ON DELETE SET NULL,
                 FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE SET NULL
             )
@@ -80,6 +81,7 @@ def init_db():
                 debit REAL DEFAULT 0,
                 credit REAL DEFAULT 0,
                 related_expense_id INTEGER,
+                is_advance BOOLEAN DEFAULT 0,
                 FOREIGN KEY (employee_id) REFERENCES employees (id) ON DELETE CASCADE,
                 FOREIGN KEY (related_expense_id) REFERENCES company_expenses (id) ON DELETE SET NULL
             )
@@ -99,6 +101,16 @@ def init_db():
             columns = [column[1] for column in c.fetchall()]
             if 'related_expense_id' not in columns:
                 c.execute("ALTER TABLE employee_ledger ADD COLUMN related_expense_id INTEGER")
+            if 'is_advance' not in columns:
+                c.execute("ALTER TABLE employee_ledger ADD COLUMN is_advance BOOLEAN DEFAULT 0")
+        except:
+            pass
+        
+        try:
+            c.execute("PRAGMA table_info(company_expenses)")
+            columns = [column[1] for column in c.fetchall()]
+            if 'is_advance' not in columns:
+                c.execute("ALTER TABLE company_expenses ADD COLUMN is_advance BOOLEAN DEFAULT 0")
         except:
             pass
         
@@ -122,69 +134,69 @@ def init_db():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
-# --- PDF Class ---
+# --- Improved PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.report_title = "Report"
         self.date_range_str = ""
         self.logo_path = "logo.png"
+        self.set_auto_page_break(auto=True, margin=25)
 
     def header(self):
         try:
             if os.path.exists(self.logo_path):
-                self.image(self.logo_path, 10, 8, 25)
+                # Increased logo size from 25 to 40
+                self.image(self.logo_path, 10, 8, 40)
         except:
             pass
         
-        self.set_font('Arial', 'B', 15)
-        self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
-        self.set_font('Arial', 'B', 12)
+        self.set_font('Arial', 'B', 16)
+        self.cell(0, 12, COMPANY_NAME, 0, 1, 'C')
+        self.set_font('Arial', 'B', 14)
         self.cell(0, 10, self.report_title, 0, 1, 'C')
         self.set_font('Arial', '', 10)
-        self.cell(0, 7, self.date_range_str, 0, 1, 'C')
-        self.ln(5)
+        self.cell(0, 8, self.date_range_str, 0, 1, 'C')
+        self.ln(8)
 
     def footer(self):
-        self.set_y(-35)
-        self.set_font('Arial', '', 10)
+        self.set_y(-25)
+        self.set_font('Arial', 'I', 9)
         
         footer_width = self.w - self.l_margin - self.r_margin
         
-        try:
-            self.image('', self.l_margin, self.get_y(), 40)
-            self.ln(15)
-        except:
-            self.cell(footer_width / 2, 10, "Prepared by: ___________________", 0, 0, 'L')
-        
-        self.cell(footer_width / 2, 10, "Approved by: _______________", 0, 1, 'R')
-        self.ln(10)
+        # Removed signature lines and replaced with system generated message
+        self.cell(0, 8, "This PDF is system generated, not required any signature", 0, 1, 'C')
+        self.ln(2)
 
         self.set_font('Arial', 'I', 8)
-        self.cell(footer_width / 2, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
-        self.cell(footer_width / 2, 10, DEVELOPER_INFO, 0, 0, 'R')
+        self.cell(footer_width / 2, 6, f'Page {self.page_no()}/{{nb}}', 0, 0, 'L')
+        self.cell(footer_width / 2, 6, DEVELOPER_INFO, 0, 0, 'R')
 
     def add_table(self, df, totals_cols=None):
-        self.set_font('Arial', 'B', 9)
+        self.set_font('Arial', 'B', 10)
         self.set_fill_color(224, 235, 255)
         
         num_cols = len(df.columns)
         total_width = self.w - self.l_margin - self.r_margin - 10
         
-        col_widths = self.calculate_column_widths(df, total_width, num_cols)
+        # Calculate dynamic column widths based on content
+        col_widths = self.calculate_dynamic_column_widths(df, total_width)
         
+        # Draw header
         x_position = self.get_x()
         for i, col in enumerate(df.columns):
-            self.cell(col_widths[i], 7, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+            self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
-        self.set_font('Arial', '', 8)
-        self.set_fill_color(255)
+        # Draw rows with auto-adjusting height
+        self.set_font('Arial', '', 9)
         fill = False
         
         for index, row in df.iterrows():
-            max_height = 6
-            line_heights = []
+            # Calculate maximum height needed for this row
+            max_line_count = 1
+            cell_data = []
             
             for i, col in enumerate(df.columns):
                 cell_text = str(row[col]) if pd.notna(row[col]) else ""
@@ -198,115 +210,163 @@ class PDF(FPDF):
                     except (ValueError, TypeError):
                         pass
                 
-                lines = self.wrap_text(cell_text, col_widths[i] - 1)
-                line_heights.append(len(lines) * 6)
+                # Wrap text for this cell
+                lines = self.wrap_text(cell_text, col_widths[i] - 2)
+                cell_data.append(lines)
+                max_line_count = max(max_line_count, len(lines))
             
-            row_height = max(line_heights) if line_heights else 6
-            max_height = max(max_height, row_height)
+            # Calculate row height based on maximum lines
+            row_height = max(6, max_line_count * 4.5)
             
+            # Check if we need a page break
+            if self.get_y() + row_height > self.page_break_trigger:
+                self.add_page()
+                # Redraw header on new page
+                self.set_font('Arial', 'B', 10)
+                self.set_fill_color(224, 235, 255)
+                x_position = self.get_x()
+                for i, col in enumerate(df.columns):
+                    self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
+                self.ln()
+                self.set_font('Arial', '', 9)
+            
+            # Draw each cell in the row
             x_position = self.get_x()
-            for i, col in enumerate(df.columns):
-                cell_text = str(row[col]) if pd.notna(row[col]) else ""
+            for i, (col, lines) in enumerate(zip(df.columns, cell_data)):
                 align = 'L'
                 
+                # Right align for numeric columns
                 if pd.api.types.is_numeric_dtype(df[col]):
-                    try:
-                        cell_value = row[col]
-                        if pd.isna(cell_value):
-                            cell_text = ""
-                            align = 'L'
-                        else:
-                            cell_text = f"{float(cell_value):,.2f}"
-                            align = 'R'
-                    except (ValueError, TypeError):
-                        align = 'L'
+                    align = 'R'
                 
-                self.set_xy(x_position, self.get_y())
-                lines = self.wrap_text(cell_text, col_widths[i] - 1)
+                # Set fill color for alternating rows
+                if fill:
+                    self.set_fill_color(245, 245, 245)
+                else:
+                    self.set_fill_color(255, 255, 255)
                 
-                self.set_fill_color(240, 240, 240) if fill else self.set_fill_color(255)
-                self.cell(col_widths[i], max_height, '', 1, 0, 'L', 1)
+                # Draw cell border
+                self.cell(col_widths[i], row_height, '', 1, 0, 'L', 1)
                 
-                self.set_xy(x_position + 1, self.get_y())
+                # Draw text
                 text_y = self.get_y()
                 for j, line in enumerate(lines):
-                    self.set_xy(x_position + 1, text_y + (j * 6))
-                    self.cell(col_widths[i] - 2, 6, line, 0, 0, align)
+                    self.set_xy(x_position + 1, text_y + 1 + (j * 4.5))
+                    self.cell(col_widths[i] - 2, 4.5, line, 0, 0, align)
                 
                 x_position += col_widths[i]
             
-            self.ln(max_height)
+            self.ln(row_height)
             fill = not fill
         
+        # Add totals row if specified
         if totals_cols:
-            self.set_font('Arial', 'B', 9)
+            self.set_font('Arial', 'B', 10)
             self.set_fill_color(240, 240, 240)
             x_position = self.get_x()
             
             for i, col in enumerate(df.columns):
                 if i == 0:
-                    self.cell(col_widths[i], 7, "GRAND TOTAL", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 8, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
                     col_total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_widths[i], 7, f"{col_total:,.2f}", 1, 0, 'R', 1)
+                    self.cell(col_widths[i], 8, f"{col_total:,.2f}", 1, 0, 'R', 1)
                 else:
-                    self.cell(col_widths[i], 7, "", 1, 0, 'C', 1)
+                    self.cell(col_widths[i], 8, "", 1, 0, 'C', 1)
             self.ln()
 
-    def calculate_column_widths(self, df, total_width, num_cols):
-        min_width = 15
+    def calculate_dynamic_column_widths(self, df, total_width):
+        """Calculate column widths dynamically based on content"""
+        min_width = 20
         max_width = total_width / 2
         
+        # Calculate required width for each column
         col_widths = []
         for col in df.columns:
-            header_width = len(str(col).replace('_', ' ').title()) * 2.5
-            content_samples = df[col].astype(str).str[:30]
-            max_content_len = content_samples.str.len().max()
-            content_width = max_content_len * 1.8
+            # Header width
+            header_width = len(str(col).replace('_', ' ').title()) * 2.2
             
+            # Content width - check actual content
+            if not df.empty:
+                # Get sample of content (first 20 rows or all if less)
+                sample_size = min(20, len(df))
+                content_samples = df[col].astype(str).str[:50]  # Limit to 50 chars for calculation
+                max_content_len = content_samples.str.len().max()
+                content_width = max_content_len * 1.6
+            else:
+                content_width = header_width
+            
+            # Use the maximum of header and content width, but within limits
             col_width = max(header_width, content_width, min_width)
             col_width = min(col_width, max_width)
             col_widths.append(col_width)
         
+        # Adjust widths to fit total available width
         total_current_width = sum(col_widths)
+        
         if total_current_width > total_width:
+            # Scale down proportionally
             scale_factor = total_width / total_current_width
             col_widths = [max(min_width, w * scale_factor) for w in col_widths]
         else:
+            # Distribute extra space
             extra_space = total_width - total_current_width
             if extra_space > 0:
-                col_widths = [w + (extra_space / num_cols) for w in col_widths]
+                # Add extra space to columns that need it most
+                width_deficits = [max_width - w for w in col_widths]
+                total_deficit = sum(width_deficits)
+                if total_deficit > 0:
+                    for i in range(len(col_widths)):
+                        col_widths[i] += (width_deficits[i] / total_deficit) * extra_space
         
-        return col_widths
+        return [int(w) for w in col_widths]
 
     def wrap_text(self, text, max_width):
-        if not text:
+        """Wrap text to fit within specified width"""
+        if not text or text == "None" or pd.isna(text):
             return ['']
         
-        text = str(text) if text is not None else ""
+        text = str(text)
+        
+        # If text is already short enough, return as is
+        if self.get_string_width(text) <= max_width:
+            return [text]
+        
         words = text.split(' ')
         lines = []
         current_line = []
         
         for word in words:
             test_line = ' '.join(current_line + [word])
-            if self.get_string_width(test_line) < max_width:
+            if self.get_string_width(test_line) <= max_width:
                 current_line.append(word)
             else:
                 if current_line:
                     lines.append(' '.join(current_line))
-                current_line = [word] if self.get_string_width(word) < max_width else [word[:int(max_width/2)] + '...']
+                # If a single word is too long, break it
+                if self.get_string_width(word) > max_width:
+                    while word:
+                        # Find how much of the word fits
+                        for i in range(len(word), 0, -1):
+                            if self.get_string_width(word[:i]) <= max_width:
+                                lines.append(word[:i])
+                                word = word[i:]
+                                break
+                        else:
+                            # If no characters fit (shouldn't happen with reasonable max_width), force break
+                            lines.append(word[:20] + '...')
+                            word = word[20:]
+                        if word:
+                            current_line = [word]
+                        else:
+                            current_line = []
+                else:
+                    current_line = [word]
         
         if current_line:
             lines.append(' '.join(current_line))
         
-        final_lines = []
-        for line in lines:
-            while line and self.get_string_width(line) > max_width:
-                line = line[:-1]
-            final_lines.append(line if line else '')
-        
-        return final_lines if final_lines else ['']
+        return lines if lines else ['']
 
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
@@ -322,7 +382,7 @@ def get_all_employees():
         
         if 'join_date' in df.columns:
             df['join_date'] = df['join_date'].astype(str)
-        return df.fillna('')
+        return df.fillna("")
     except Exception as e:
         st.error(f"Error loading employees: {e}")
         return pd.DataFrame()
@@ -337,7 +397,7 @@ def get_all_categories():
             
         df = pd.read_sql_query("SELECT * FROM expense_categories ORDER BY name", conn)
         conn.close()
-        return df.fillna('')
+        return df.fillna("")
     except:
         return pd.DataFrame()
 
@@ -348,7 +408,7 @@ def get_dashboard_stats():
         conn = get_db_connection()
         if conn is None:
             return 0, 0.0, 0
-
+        
         emp_count_df = pd.read_sql_query("SELECT COUNT(id) as count FROM employees", conn)
         emp_count = emp_count_df['count'].iloc[0] if not emp_count_df.empty else 0
         
@@ -376,14 +436,14 @@ def clear_cache():
     st.cache_data.clear()
 
 def get_employee_balance(employee_id):
-    """Get current balance for an employee"""
+    """Get current balance for an employee (excluding advances)"""
     try:
         conn = get_db_connection()
         if conn is None:
             return 0.0
             
         balance_df = pd.read_sql_query(
-            "SELECT SUM(credit) - SUM(debit) as balance FROM employee_ledger WHERE employee_id = ?",
+            "SELECT SUM(credit) - SUM(debit) as balance FROM employee_ledger WHERE employee_id = ? AND is_advance = 0",
             conn,
             params=(employee_id,)
         )
@@ -392,62 +452,194 @@ def get_employee_balance(employee_id):
     except:
         return 0.0
 
-def get_employee_advances(employee_id, period_start=None, period_end=None):
-    """Get total advances for an employee (optionally within period)"""
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return 0.0
-            
-        if period_start and period_end:
-            query = """
-            SELECT SUM(debit) as total_advance 
-            FROM employee_ledger 
-            WHERE employee_id = ? 
-            AND description LIKE '%Advance%'
-            AND entry_date BETWEEN ? AND ?
-            """
-            params = (employee_id, str(period_start), str(period_end))
-        else:
-            query = """
-            SELECT SUM(debit) as total_advance 
-            FROM employee_ledger 
-            WHERE employee_id = ? 
-            AND description LIKE '%Advance%'
-            """
-            params = (employee_id,)
-            
-        advance_df = pd.read_sql_query(query, conn, params=params)
-        conn.close()
-        return advance_df['total_advance'].iloc[0] if not advance_df.empty and advance_df['total_advance'].iloc[0] is not None else 0.0
-    except:
-        return 0.0
-
-def get_employee_advances_in_period(employee_id, start_date, end_date):
-    """Get total advances for an employee within specific period"""
+def get_employee_advance_balance(employee_id):
+    """Get advance balance for an employee"""
     try:
         conn = get_db_connection()
         if conn is None:
             return 0.0
             
         advance_df = pd.read_sql_query(
-            """
-            SELECT SUM(debit) as total_advance 
-            FROM employee_ledger 
-            WHERE employee_id = ? 
-            AND description LIKE '%Advance%'
-            AND entry_date BETWEEN ? AND ?
-            """,
+            "SELECT SUM(debit) - SUM(credit) as advance_balance FROM employee_ledger WHERE employee_id = ? AND is_advance = 1",
             conn,
-            params=(employee_id, str(start_date), str(end_date))
+            params=(employee_id,)
         )
         conn.close()
-        return advance_df['total_advance'].iloc[0] if not advance_df.empty and advance_df['total_advance'].iloc[0] is not None else 0.0
+        return advance_df['advance_balance'].iloc[0] if not advance_df.empty and advance_df['advance_balance'].iloc[0] is not None else 0.0
     except:
         return 0.0
 
-# --- PDF Generation Functions ---
-def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary):
+def get_employee_advance_details(employee_id):
+    """Get advance details for an employee"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return 0.0, pd.DataFrame()
+            
+        advance_df = pd.read_sql_query(
+            """
+            SELECT id, entry_date, description, debit, credit 
+            FROM employee_ledger 
+            WHERE employee_id = ? AND is_advance = 1
+            ORDER BY entry_date DESC
+            """,
+            conn,
+            params=(employee_id,)
+        )
+        conn.close()
+        
+        total_advance = advance_df['debit'].sum() - advance_df['credit'].sum()
+        return total_advance, advance_df.fillna("")
+    except:
+        return 0.0, pd.DataFrame()
+
+def get_employee_ledger_entries(employee_id, start_date=None, end_date=None):
+    """Get all ledger entries for an employee"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return pd.DataFrame()
+            
+        query = """
+        SELECT id, entry_date, description, debit, credit, is_advance
+        FROM employee_ledger 
+        WHERE employee_id = ?
+        """
+        params = [employee_id]
+        
+        if start_date and end_date:
+            query += " AND entry_date BETWEEN ? AND ?"
+            params.extend([str(start_date), str(end_date)])
+            
+        query += " ORDER BY entry_date DESC, id DESC"
+        
+        ledger_df = pd.read_sql_query(query, conn, params=params)
+        conn.close()
+        return ledger_df.fillna("")
+    except Exception as e:
+        st.error(f"Error loading ledger entries: {e}")
+        return pd.DataFrame()
+
+def update_employee_ledger_entry(entry_id, entry_date, description, debit, credit, is_advance):
+    """Update a ledger entry"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return False
+            
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE employee_ledger 
+            SET entry_date = ?, description = ?, debit = ?, credit = ?, is_advance = ?
+            WHERE id = ?
+            """,
+            (str(entry_date), description, debit, credit, 1 if is_advance else 0, entry_id)
+        )
+        conn.commit()
+        conn.close()
+        clear_cache()
+        return True
+    except Exception as e:
+        st.error(f"Error updating ledger entry: {e}")
+        return False
+
+def delete_employee_ledger_entry(entry_id):
+    """Delete a ledger entry"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return False
+            
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM employee_ledger WHERE id = ?", (entry_id,))
+        conn.commit()
+        conn.close()
+        clear_cache()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting ledger entry: {e}")
+        return False
+
+def update_company_expense(expense_id, description, amount, expense_date, category_id, employee_id, is_advance):
+    """Update a company expense"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return False
+            
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            UPDATE company_expenses 
+            SET description = ?, amount = ?, expense_date = ?, category_id = ?, employee_id = ?, is_advance = ?
+            WHERE id = ?
+            """,
+            (description, amount, str(expense_date), category_id, employee_id, 1 if is_advance else 0, expense_id)
+        )
+        conn.commit()
+        conn.close()
+        clear_cache()
+        return True
+    except Exception as e:
+        st.error(f"Error updating expense: {e}")
+        return False
+
+def delete_company_expense(expense_id):
+    """Delete a company expense"""
+    try:
+        conn = get_db_connection()
+        if conn is None:
+            return False
+            
+        cursor = conn.cursor()
+        # First delete related ledger entries
+        cursor.execute("DELETE FROM employee_ledger WHERE related_expense_id = ?", (expense_id,))
+        # Then delete the expense
+        cursor.execute("DELETE FROM company_expenses WHERE id = ?", (expense_id,))
+        conn.commit()
+        conn.close()
+        clear_cache()
+        return True
+    except Exception as e:
+        st.error(f"Error deleting expense: {e}")
+        return False
+
+# --- Improved PDF Generation Functions ---
+def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date):
+    """Generate employee ledger PDF"""
+    try:
+        pdf = PDF(orientation='L', unit='mm', format='A4')
+        pdf.report_title = f"Employee Ledger - {employee_name}"
+        pdf.date_range_str = f"From {start_date} to {end_date}"
+        pdf.add_page()
+        
+        if ledger_df.empty:
+            pdf.set_font('Arial', 'I', 10)
+            pdf.cell(0, 10, "No ledger entries found for the selected period.", 1, 1, 'C')
+        else:
+            # Prepare data for PDF
+            pdf_data = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
+            pdf_data.columns = ['Date', 'Description', 'Debit', 'Credit']
+            pdf_data['Date'] = pdf_data['Date'].astype(str)
+            
+            pdf.add_table(pdf_data, totals_cols=['Debit', 'Credit'])
+            
+            # Add summary
+            total_debit = ledger_df['debit'].sum()
+            total_credit = ledger_df['credit'].sum()
+            net_balance = total_credit - total_debit
+            
+            pdf.ln(10)
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(0, 8, f"Total Debit: Rs. {total_debit:,.2f} | Total Credit: Rs. {total_credit:,.2f} | Net Balance: Rs. {net_balance:,.2f}", 0, 1, 'L')
+
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return None
+
+def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary, advance_deduction=0):
     """Generate individual salary slip PDF"""
     try:
         pdf = PDF(orientation='P', unit='mm', format='A4')
@@ -498,30 +690,48 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
                 pdf.set_xy(x + desc_width + amount_width, y)
                 pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
 
+        # Add advance deduction if any
+        if advance_deduction > 0:
+            pdf.set_font('Arial', '', 9)
+            x = pdf.get_x()
+            y = pdf.get_y()
+            pdf.multi_cell(desc_width, 8, "Advance Deduction", 1, 'L')
+            pdf.set_xy(x + desc_width, y)
+            pdf.cell(amount_width, 8, "0.00", 1, 0, 'R')
+            pdf.set_xy(x + desc_width + amount_width, y)
+            pdf.cell(amount_width, 8, f"{advance_deduction:,.2f}", 1, 1, 'R')
+
         pdf.set_font('Arial', 'B', 10)
         pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
         pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
-        pdf.cell(amount_width, 8, f"{total_debits:,.2f}", 1, 1, 'R')
+        total_debits_with_advance = total_debits + advance_deduction
+        pdf.cell(amount_width, 8, f"{total_debits_with_advance:,.2f}", 1, 1, 'R')
 
         pdf.ln(8)
         
         pdf.set_font('Arial', 'B', 14)
         pdf.set_fill_color(210, 210, 210)
+        net_salary_with_advance = net_salary - advance_deduction
         pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
-        pdf.cell(amount_width * 2, 12, f"Rs. {net_salary:,.2f}", 1, 1, 'R', fill=True)
+        pdf.cell(amount_width * 2, 12, f"Rs. {net_salary_with_advance:,.2f}", 1, 1, 'R', fill=True)
+        
+        if advance_deduction > 0:
+            pdf.ln(5)
+            pdf.set_font('Arial', 'I', 9)
+            pdf.cell(0, 6, f"Note: Advance deduction of Rs. {advance_deduction:,.2f} has been applied", 0, 1, 'L')
         
         pdf.ln(12)
         
         pdf.set_font('Arial', 'B', 11)
         pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
         pdf.set_font('Arial', '', 10)
-        bank = emp_details.get('bank', '') or 'N/A'
-        account_title = emp_details.get('account_title', '') or 'N/A'
-        account_no = emp_details.get('account_no', '') or 'N/A'
+        bank_info = emp_details.get('bank', '')
+        account_title = emp_details.get('account_title', '')
+        account_no = emp_details.get('account_no', '')
         
-        pdf.cell(0, 6, f"  Bank: {bank}", 0, 1, 'L')
-        pdf.cell(0, 6, f"  Account Title: {account_title}", 0, 1, 'L')
-        pdf.cell(0, 6, f"  Account No: {account_no}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Bank: {bank_info if bank_info else 'N/A'}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Account Title: {account_title if account_title else 'N/A'}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Account No: {account_no if account_no else 'N/A'}", 0, 1, 'L')
 
         return pdf.output(dest='S').encode('latin-1')
     except Exception as e:
@@ -547,6 +757,8 @@ def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols
             pdf.set_font('Arial', 'I', 10)
             pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
         else:
+            # Replace NaN values with empty strings
+            df = df.fillna("")
             pdf.add_table(df, totals_cols=totals_cols)
         
         return pdf.output(dest='S').encode('latin-1')
@@ -590,6 +802,56 @@ class DataImportExport:
         except Exception as e:
             st.error(f"Error exporting employees: {e}")
             return io.BytesIO()
+
+    def export_expenses_to_excel(self):
+        """Export all expenses to Excel format"""
+        try:
+            conn = get_db_connection()
+            if conn is None:
+                return io.BytesIO()
+                
+            expenses_df = pd.read_sql_query('''
+                SELECT 
+                    ce.description,
+                    ce.amount,
+                    ce.expense_date,
+                    ec.name as category,
+                    e.name as employee_name,
+                    CASE WHEN ce.is_advance = 1 THEN 'Yes' ELSE 'No' END as is_advance
+                FROM company_expenses ce
+                LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                LEFT JOIN employees e ON ce.employee_id = e.id
+                ORDER BY ce.expense_date DESC
+            ''', conn)
+            conn.close()
+            
+            output = io.BytesIO()
+            
+            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                expenses_df.to_excel(writer, sheet_name='Expenses', index=False)
+                
+                workbook = writer.book
+                worksheet = writer.sheets['Expenses']
+                
+                header_format = workbook.add_format({
+                    'bold': True,
+                    'text_wrap': True,
+                    'valign': 'top',
+                    'fg_color': '#D7E4BC',
+                    'border': 1
+                })
+                
+                for col_num, value in enumerate(expenses_df.columns.values):
+                    worksheet.write(0, col_num, value, header_format)
+                
+                worksheet.set_column('A:A', 30)
+                worksheet.set_column('B:F', 15)
+            
+            output.seek(0)
+            return output
+        except Exception as e:
+            st.error(f"Error exporting expenses: {e}")
+            return io.BytesIO()
     
     def import_employees_from_excel(self, uploaded_file):
         """Import employees from Excel file"""
@@ -610,22 +872,22 @@ class DataImportExport:
                 
             for index, row in df.iterrows():
                 try:
-                    name = str(row['name']).strip() if pd.notna(row['name']) else ""
+                    name = str(row['name']).strip()
                     if not name:
                         error_count += 1
                         continue
                     
-                    designation = str(row.get('designation', '')).strip() if pd.notna(row.get('designation')) else ""
-                    salary = float(row.get('salary', 0)) if pd.notna(row.get('salary')) else 0.0
-                    bank = str(row.get('bank', '')).strip() if pd.notna(row.get('bank')) else ""
-                    account_title = str(row.get('account_title', '')).strip() if pd.notna(row.get('account_title')) else ""
-                    account_no = str(row.get('account_no', '')).strip() if pd.notna(row.get('account_no')) else ""
+                    designation = str(row.get('designation', '')).strip()
+                    salary = float(row.get('salary', 0))
+                    bank = str(row.get('bank', '')).strip()
+                    account_title = str(row.get('account_title', '')).strip()
+                    account_no = str(row.get('account_no', '')).strip()
                     join_date = row.get('join_date', date.today())
                     
                     if hasattr(join_date, 'strftime'):
                         join_date = join_date.strftime('%Y-%m-%d')
                     else:
-                        join_date = str(join_date) if pd.notna(join_date) else str(date.today())
+                        join_date = str(join_date)
                     
                     cursor = conn.cursor()
                     cursor.execute('''
@@ -637,7 +899,6 @@ class DataImportExport:
                     
                 except Exception as e:
                     error_count += 1
-                    st.error(f"Error in row {index}: {e}")
             
             conn.commit()
             conn.close()
@@ -648,6 +909,110 @@ class DataImportExport:
         except Exception as e:
             st.error(f"Error reading Excel file: {str(e)}")
             return False
+
+    def import_expenses_from_excel(self, uploaded_file):
+        """Import expenses from Excel file"""
+        try:
+            df = pd.read_excel(uploaded_file)
+            required_columns = ['description', 'amount', 'expense_date', 'category']
+            
+            if not all(col in df.columns for col in required_columns):
+                st.error(f"Missing required columns. Required: {required_columns}")
+                return False
+            
+            success_count = 0
+            error_count = 0
+            
+            conn = get_db_connection()
+            if conn is None:
+                return False
+            
+            # Get all categories and employees for lookup
+            categories_df = get_all_categories()
+            employees_df = get_all_employees()
+            
+            category_map = {row['name'].lower(): row['id'] for _, row in categories_df.iterrows()}
+            employee_map = {row['name'].lower(): row['id'] for _, row in employees_df.iterrows()}
+                
+            for index, row in df.iterrows():
+                try:
+                    description = str(row['description']).strip()
+                    if not description:
+                        error_count += 1
+                        continue
+                    
+                    amount = float(row['amount'])
+                    expense_date = row['expense_date']
+                    category_name = str(row['category']).strip().lower()
+                    is_advance = row.get('is_advance', False)
+                    
+                    # Handle expense date
+                    if hasattr(expense_date, 'strftime'):
+                        expense_date = expense_date.strftime('%Y-%m-%d')
+                    else:
+                        expense_date = str(expense_date)
+                    
+                    # Get or create category
+                    if category_name in category_map:
+                        category_id = category_map[category_name]
+                    else:
+                        # Create new category
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO expense_categories (name) VALUES (?)", (category_name.title(),))
+                        category_id = cursor.lastrowid
+                        category_map[category_name] = category_id
+                    
+                    # Get employee ID if provided
+                    employee_id = None
+                    if 'employee_name' in df.columns and pd.notna(row.get('employee_name')):
+                        employee_name = str(row['employee_name']).strip().lower()
+                        if employee_name in employee_map:
+                            employee_id = employee_map[employee_name]
+                    
+                    cursor = conn.cursor()
+                    cursor.execute('''
+                        INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id, is_advance)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (description, amount, expense_date, category_id, employee_id, 1 if is_advance else 0))
+                    
+                    # If expense is linked to an employee and is not advance, add to ledger as credit (expense claim)
+                    if employee_id is not None and not is_advance:
+                        cursor.execute(
+                            """
+                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, is_advance)
+                            VALUES (?, ?, ?, 0, ?, ?, 0)
+                            """,
+                            (employee_id, expense_date, f"Expense Claim: {description}", amount, cursor.lastrowid)
+                        )
+                    # If it's an advance, add to ledger as debit (employee owes company)
+                    elif employee_id is not None and is_advance:
+                        cursor.execute(
+                            """
+                            INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, is_advance)
+                            VALUES (?, ?, ?, ?, 0, ?, 1)
+                            """,
+                            (employee_id, expense_date, f"Advance: {description}", amount, cursor.lastrowid)
+                        )
+                    
+                    success_count += 1
+                    
+                except Exception as e:
+                    error_count += 1
+                    st.error(f"Error in row {index + 2}: {str(e)}")
+            
+            conn.commit()
+            conn.close()
+            st.success(f"Successfully imported {success_count} expenses. Failed: {error_count}")
+            clear_cache()
+            return True
+            
+        except Exception as e:
+            st.error(f"Error reading Excel file: {str(e)}")
+            return False
+
+# [The rest of the application code remains exactly the same...]
+# Continue with all the page functions (page_employee_expense_management, page_employee_management, etc.)
+# and the main() function exactly as in your original code
 
 # --- Employee Expense Management System ---
 def page_employee_expense_management():
@@ -663,7 +1028,7 @@ def page_employee_expense_management():
             conn = get_db_connection()
             if conn:
                 expenses_df = pd.read_sql_query(
-                    "SELECT SUM(debit) as total_debits FROM employee_ledger",
+                    "SELECT SUM(debit) as total_debits FROM employee_ledger WHERE is_advance = 0",
                     conn
                 )
                 conn.close()
@@ -685,10 +1050,13 @@ def page_employee_expense_management():
     
     st.divider()
     
-    tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["➕ Add Expense", "📊 Employee Balances", "🔍 Expense History", "💸 Salary Processing", "📄 Salary Slips", "💳 Advance Details"])
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "➕ Add Expense/Advance", "📊 Employee Balances", "🔍 Expense History", 
+        "💸 Salary Processing", "📄 Salary Slips", "💰 Advance Details", "✏️ Edit Entries"
+    ])
     
     with tab1:
-        st.subheader("Add Employee Expense/Advance")
+        st.subheader("Add Employee Expense Claim or Advance")
         
         if employees_df.empty:
             st.warning("No employees found. Please add employees first.")
@@ -706,22 +1074,22 @@ def page_employee_expense_management():
                         key="expense_employee"
                     )
                     current_balance = get_employee_balance(employee_id)
-                    total_advances = get_employee_advances(employee_id)
+                    advance_balance = get_employee_advance_balance(employee_id)
                     st.info(f"Current Balance: Rs. {current_balance:,.2f}")
-                    st.info(f"Total Advances: Rs. {total_advances:,.2f}")
+                    st.info(f"Advance Balance: Rs. {advance_balance:,.2f}")
                     
                 with cols[1]:
-                    expense_date = st.date_input("Expense Date", date.today())
+                    expense_date = st.date_input("Date", date.today())
                     amount = st.number_input("Amount (Rs.)", min_value=0.01, step=100.0, format="%.2f")
                 
                 with cols[2]:
-                    expense_type = st.selectbox(
-                        "Expense Type",
-                        ["Personal Expense", "Travel Advance", "Loan Advance", "Other Deduction", "Bonus", "Other Credit", "Salary Advance"]
+                    transaction_type = st.selectbox(
+                        "Transaction Type",
+                        ["Expense Claim", "Advance Payment", "Advance Settlement", "Other Adjustment"]
                     )
                     description = st.text_input("Description", placeholder="e.g., Travel allowance, Meal expense")
                 
-                submitted = st.form_submit_button("💾 Add Expense")
+                submitted = st.form_submit_button("💾 Add Transaction")
                 if submitted:
                     if employee_id and amount > 0 and description:
                         try:
@@ -732,29 +1100,64 @@ def page_employee_expense_management():
                                 
                             cursor = conn.cursor()
                             
-                            if expense_type in ["Personal Expense", "Travel Advance", "Loan Advance", "Other Deduction", "Salary Advance"]:
+                            if transaction_type == "Expense Claim":
+                                # Expense claim - credit to employee (company owes employee)
                                 cursor.execute(
                                     """
-                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                    VALUES (?, ?, ?, ?, 0)
+                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                    VALUES (?, ?, ?, 0, ?, 0)
                                     """,
-                                    (employee_id, str(expense_date), f"{expense_type}: {description}", amount)
+                                    (employee_id, str(expense_date), f"Expense Claim: {description}", amount)
                                 )
-                                message_type = "expense/advance"
-                            else:
+                                message_type = "expense claim"
+                                
+                            elif transaction_type == "Advance Payment":
+                                # Advance payment - debit to employee (employee owes company)
                                 cursor.execute(
                                     """
-                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                    VALUES (?, ?, ?, 0, ?)
+                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                    VALUES (?, ?, ?, ?, 0, 1)
                                     """,
-                                    (employee_id, str(expense_date), f"{expense_type}: {description}", amount)
+                                    (employee_id, str(expense_date), f"Advance: {description}", amount)
                                 )
-                                message_type = "credit"
+                                message_type = "advance payment"
+                                
+                            elif transaction_type == "Advance Settlement":
+                                # Advance settlement - credit to employee (reducing advance balance)
+                                cursor.execute(
+                                    """
+                                    INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                    VALUES (?, ?, ?, 0, ?, 1)
+                                    """,
+                                    (employee_id, str(expense_date), f"Advance Settlement: {description}", amount)
+                                )
+                                message_type = "advance settlement"
+                                
+                            else:  # Other Adjustment
+                                # Let user choose debit or credit
+                                adjustment_type = st.radio("Adjustment Type", ["Credit to Employee", "Debit to Employee"])
+                                if adjustment_type == "Credit to Employee":
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                        VALUES (?, ?, ?, 0, ?, 0)
+                                        """,
+                                        (employee_id, str(expense_date), f"Adjustment: {description}", amount)
+                                    )
+                                else:
+                                    cursor.execute(
+                                        """
+                                        INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                        VALUES (?, ?, ?, ?, 0, 0)
+                                        """,
+                                        (employee_id, str(expense_date), f"Adjustment: {description}", amount)
+                                    )
+                                message_type = "adjustment"
                             
                             conn.commit()
                             conn.close()
                             employee_name = employees_df[employees_df['id'] == employee_id]['name'].iloc[0]
-                            st.success(f"{expense_type} of Rs. {amount:,.2f} added to {employee_name}'s ledger as {message_type}.")
+                            st.success(f"{transaction_type} of Rs. {amount:,.2f} added to {employee_name}'s ledger as {message_type}.")
                             clear_cache()
                             st.rerun()
                         except Exception as e:
@@ -769,24 +1172,24 @@ def page_employee_expense_management():
             balance_data = []
             for _, emp in employees_df.iterrows():
                 balance = get_employee_balance(emp['id'])
-                total_advances = get_employee_advances(emp['id'])
+                advance_balance = get_employee_advance_balance(emp['id'])
                 balance_data.append({
                     'Employee ID': emp['id'],
                     'Name': emp['name'],
                     'Designation': emp['designation'],
                     'Base Salary': emp['salary'],
-                    'Current Balance': balance,
-                    'Total Advances': total_advances,
-                    'Net Payable': emp['salary'] + balance
+                    'Expense Balance': balance,  # Company owes employee
+                    'Advance Balance': advance_balance,  # Employee owes company
+                    'Net Payable': emp['salary'] + balance - advance_balance
                 })
             
-            balance_df = pd.DataFrame(balance_data).fillna('')
+            balance_df = pd.DataFrame(balance_data).fillna("")
             
             st.dataframe(
                 balance_df.style.format({
                     'Base Salary': 'Rs. {:,.2f}',
-                    'Current Balance': 'Rs. {:,.2f}',
-                    'Total Advances': 'Rs. {:,.2f}',
+                    'Expense Balance': 'Rs. {:,.2f}',
+                    'Advance Balance': 'Rs. {:,.2f}',
                     'Net Payable': 'Rs. {:,.2f}'
                 }),
                 use_container_width=True
@@ -797,7 +1200,7 @@ def page_employee_expense_management():
                     balance_df, 
                     "Employee Balance Sheet",
                     orientation='L',
-                    totals_cols=["Base Salary", "Current Balance", "Total Advances", "Net Payable"]
+                    totals_cols=["Base Salary", "Expense Balance", "Advance Balance", "Net Payable"]
                 )
                 if pdf_bytes:
                     st.download_button(
@@ -830,49 +1233,40 @@ def page_employee_expense_management():
             with cols[2]:
                 end_date = st.date_input("End Date", date.today())
             
-            if st.button("🔍 Show Expense History"):
-                try:
-                    conn = get_db_connection()
-                    if conn is None:
-                        st.error("Database connection failed")
-                        return
-                        
-                    history_df = pd.read_sql_query(
-                        """
-                        SELECT 
-                            entry_date as "Date",
-                            description as "Description",
-                            debit as "Debit",
-                            credit as "Credit"
-                        FROM employee_ledger 
-                        WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
-                        ORDER BY entry_date DESC
-                        """,
-                        conn,
-                        params=(selected_emp_id, str(start_date), str(end_date))
-                    )
-                    conn.close()
+            if st.button("🔍 Show Ledger History"):
+                ledger_df = get_employee_ledger_entries(selected_emp_id, start_date, end_date)
+                
+                if not ledger_df.empty:
+                    # Display the ledger
+                    display_df = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
+                    display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
                     
-                    if not history_df.empty:
-                        history_df = history_df.fillna('')
-                        st.dataframe(
-                            history_df.style.format({
-                                'Debit': 'Rs. {:,.2f}',
-                                'Credit': 'Rs. {:,.2f}'
-                            }),
-                            use_container_width=True
+                    st.dataframe(
+                        display_df.style.format({
+                            'Debit': 'Rs. {:,.2f}',
+                            'Credit': 'Rs. {:,.2f}'
+                        }),
+                        use_container_width=True
+                    )
+                    
+                    total_debit = ledger_df['debit'].sum()
+                    total_credit = ledger_df['credit'].sum()
+                    net_balance = total_credit - total_debit
+                    
+                    st.metric("Net Balance for Period", f"Rs. {net_balance:,.2f}")
+                    
+                    # Download PDF option
+                    employee_name = employee_list[selected_emp_id]
+                    pdf_bytes = generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date)
+                    if pdf_bytes:
+                        st.download_button(
+                            label="📥 Download Ledger PDF",
+                            data=pdf_bytes,
+                            file_name=f"Ledger_{employee_name}_{start_date}_{end_date}.pdf",
+                            mime="application/pdf"
                         )
-                        
-                        total_debit = history_df['Debit'].sum()
-                        total_credit = history_df['Credit'].sum()
-                        net_balance = total_credit - total_debit
-                        
-                        st.metric("Net Balance for Period", f"Rs. {net_balance:,.2f}")
-                    else:
-                        st.info("No expenses found for the selected period.")
-                        
-                except Exception as e:
-                    st.error(f"Error loading expense history: {e}")
+                else:
+                    st.info("No ledger entries found for the selected period.")
     
     with tab4:
         st.subheader("Salary Processing")
@@ -883,27 +1277,14 @@ def page_employee_expense_management():
         2. Generate salary credits for all employees
         3. Review and download salary sheets
         4. Process payments
-        
-        **Note:** Employee expenses are tracked separately and do not affect base salary.
-        Salary remains the same, and expenses are claimed from the company.
         """)
         
         selected_month = st.date_input("Select Salary Month", date.today().replace(day=1), key="salary_month")
         first_day = selected_month.replace(day=1)
         last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         
-        # Add advance deduction option
-        employees_df = get_all_employees()
-        if not employees_df.empty:
-            employee_options = {row['id']: row['name'] for _, row in employees_df.iterrows()}
-            
-            st.subheader("Advance Deduction Settings")
-            exclude_advance_deduction = st.multiselect(
-                "Exclude these employees from advance deduction:",
-                options=list(employee_options.keys()),
-                format_func=lambda x: employee_options[x],
-                help="Selected employees will not have their advances deducted from salary"
-            )
+        # Advance deduction option
+        deduct_advances = st.checkbox("Deduct Advances from Salary", value=True)
         
         col1, col2 = st.columns(2)
         
@@ -938,8 +1319,8 @@ def page_employee_expense_management():
                                 
                             cursor.execute(
                                 """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                VALUES (?, ?, ?, 0, ?)
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                VALUES (?, ?, ?, 0, ?, 0)
                                 """,
                                 (emp['id'], str(first_day), description, salary)
                             )
@@ -963,90 +1344,73 @@ def page_employee_expense_management():
                     if conn is None:
                         st.error("Database connection failed")
                         return
-                    
-                    # Build query based on advance deduction settings
-                    if exclude_advance_deduction:
-                        # Complex query to exclude advances for selected employees
-                        exclude_ids = ','.join(['?' for _ in exclude_advance_deduction])
+                        
+                    # Build query based on whether to deduct advances
+                    if deduct_advances:
                         query = f"""
                         SELECT
-                            e.id AS "Employee ID",
                             e.name AS "Employee Name",
                             e.designation AS "Designation",
                             e.salary AS "Base Salary",
-                            COALESCE(SUM(CASE 
-                                WHEN e.id IN ({exclude_ids}) AND l.description LIKE '%Advance%' THEN 0
-                                ELSE l.debit 
-                            END), 0) AS "Total Deductions",
-                            COALESCE(SUM(l.credit), 0) AS "Total Credits",
-                            (COALESCE(SUM(l.credit), 0) - COALESCE(SUM(CASE 
-                                WHEN e.id IN ({exclude_ids}) AND l.description LIKE '%Advance%' THEN 0
-                                ELSE l.debit 
-                            END), 0)) AS "Net Salary",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.credit ELSE 0 END), 0) AS "Total Credits",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.debit ELSE 0 END), 0) AS "Total Deductions",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0) AS "Advance Balance",
+                            (COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.credit ELSE 0 END), 0) - 
+                             COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.debit ELSE 0 END), 0) -
+                             COALESCE(SUM(CASE WHEN l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0)) AS "Net Salary",
                             e.bank AS "Bank",
                             e.account_title AS "Account Title",
                             e.account_no AS "Account No"
                         FROM employees e
                         LEFT JOIN employee_ledger l ON e.id = l.employee_id
-                            AND l.entry_date BETWEEN ? AND ?
+                            AND l.entry_date BETWEEN '{first_day}' AND '{last_day}'
                         GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
                         ORDER BY e.name
                         """
-                        params = exclude_advance_deduction + exclude_advance_deduction + [str(first_day), str(last_day)]
                     else:
-                        query = """
+                        query = f"""
                         SELECT
-                            e.id AS "Employee ID",
                             e.name AS "Employee Name",
                             e.designation AS "Designation",
                             e.salary AS "Base Salary",
-                            COALESCE(SUM(l.debit), 0) AS "Total Deductions",
                             COALESCE(SUM(l.credit), 0) AS "Total Credits",
+                            COALESCE(SUM(l.debit), 0) AS "Total Deductions",
                             (COALESCE(SUM(l.credit), 0) - COALESCE(SUM(l.debit), 0)) AS "Net Salary",
                             e.bank AS "Bank",
                             e.account_title AS "Account Title",
                             e.account_no AS "Account No"
                         FROM employees e
                         LEFT JOIN employee_ledger l ON e.id = l.employee_id
-                            AND l.entry_date BETWEEN ? AND ?
+                            AND l.entry_date BETWEEN '{first_day}' AND '{last_day}'
                         GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
                         ORDER BY e.name
                         """
-                        params = [str(first_day), str(last_day)]
                     
-                    salary_df = pd.read_sql_query(query, conn, params=params)
+                    salary_df = pd.read_sql_query(query, conn)
                     conn.close()
 
                     if salary_df.empty:
                         st.warning("No salary data found.")
                     else:
-                        salary_df = salary_df.fillna('')
-                        
-                        # Add advance information for excluded employees
-                        if exclude_advance_deduction:
-                            advance_info = []
-                            for emp_id in exclude_advance_deduction:
-                                advance_amount = get_employee_advances(emp_id)
-                                emp_name = employees_df[employees_df['id'] == emp_id]['name'].iloc[0]
-                                advance_info.append(f"{emp_name}: Rs. {advance_amount:,.2f}")
-                            
-                            if advance_info:
-                                st.info(f"**Advances excluded for:** {', '.join(advance_info)}")
-                        
+                        salary_df = salary_df.fillna("")
                         st.dataframe(salary_df, use_container_width=True)
                         
                         total_base = salary_df['Base Salary'].sum()
                         total_net = salary_df['Net Salary'].sum()
                         total_deductions = salary_df['Total Deductions'].sum()
                         
-                        st.success(f"**Summary:** Base Salary: Rs. {total_base:,.2f} | Deductions: Rs. {total_deductions:,.2f} | Net Payable: Rs. {total_net:,.2f}")
+                        if deduct_advances:
+                            total_advances = salary_df['Advance Balance'].sum()
+                            st.success(f"**Summary:** Base Salary: Rs. {total_base:,.2f} | Deductions: Rs. {total_deductions:,.2f} | Advances: Rs. {total_advances:,.2f} | Net Payable: Rs. {total_net:,.2f}")
+                        else:
+                            st.success(f"**Summary:** Base Salary: Rs. {total_base:,.2f} | Deductions: Rs. {total_deductions:,.2f} | Net Payable: Rs. {total_net:,.2f}")
                         
                         pdf_bytes = generate_pdf_report(
                             salary_df, 
                             f"Salary Sheet - {selected_month.strftime('%B %Y')}", 
                             date_range=(first_day, last_day),
                             orientation='L',
-                            totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"]
+                            totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"] + (["Advance Balance"] if deduct_advances else [])
                         )
                         if pdf_bytes:
                             st.download_button(
@@ -1079,6 +1443,8 @@ def page_employee_expense_management():
             with col2:
                 slip_month = st.date_input("Salary Month", date.today().replace(day=1), key="slip_month")
             
+            deduct_advance_slip = st.checkbox("Deduct Advance from Salary Slip", value=True, key="slip_advance")
+            
             if st.button("Generate Salary Slip", use_container_width=True):
                 try:
                     first_day = slip_month.replace(day=1)
@@ -1102,9 +1468,10 @@ def page_employee_expense_management():
                     
                     emp_details = emp_details_df.iloc[0].to_dict()
                     
+                    # Get ledger entries for the month
                     ledger_df = pd.read_sql_query(
                         """
-                        SELECT description, debit, credit 
+                        SELECT description, debit, credit, is_advance
                         FROM employee_ledger 
                         WHERE employee_id = ? AND entry_date BETWEEN ? AND ?
                         ORDER BY entry_date
@@ -1114,12 +1481,20 @@ def page_employee_expense_management():
                     )
                     conn.close()
                     
-                    total_credits = ledger_df['credit'].sum()
-                    total_debits = ledger_df['debit'].sum()
+                    # Calculate totals
+                    regular_entries = ledger_df[ledger_df['is_advance'] == 0]
+                    total_credits = regular_entries['credit'].sum()
+                    total_debits = regular_entries['debit'].sum()
                     net_salary = total_credits - total_debits
                     
+                    # Calculate advance deduction if requested
+                    advance_deduction = 0
+                    if deduct_advance_slip:
+                        advance_entries = ledger_df[ledger_df['is_advance'] == 1]
+                        advance_deduction = advance_entries['debit'].sum() - advance_entries['credit'].sum()
+                    
                     pdf_bytes = generate_individual_slip_pdf(
-                        emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary
+                        emp_details, regular_entries.fillna(""), slip_month, total_credits, total_debits, net_salary, advance_deduction
                     )
                     
                     if pdf_bytes:
@@ -1151,54 +1526,112 @@ def page_employee_expense_management():
             )
             
             if selected_emp_id:
-                try:
-                    conn = get_db_connection()
-                    if conn is None:
-                        st.error("Database connection failed")
-                        return
-                        
-                    advance_df = pd.read_sql_query(
-                        """
-                        SELECT 
-                            entry_date as "Date",
-                            description as "Description",
-                            debit as "Advance Amount",
-                            credit as "Credit"
-                        FROM employee_ledger 
-                        WHERE employee_id = ? AND description LIKE '%Advance%'
-                        ORDER BY entry_date DESC
-                        """,
-                        conn,
-                        params=(selected_emp_id,)
-                    )
-                    conn.close()
+                total_advance, advance_df = get_employee_advance_details(selected_emp_id)
+                
+                st.metric("Total Advance Balance", f"Rs. {total_advance:,.2f}")
+                
+                if not advance_df.empty:
+                    st.subheader("Advance Transaction History")
                     
-                    if not advance_df.empty:
-                        advance_df = advance_df.fillna('')
-                        st.dataframe(
-                            advance_df.style.format({
-                                'Advance Amount': 'Rs. {:,.2f}',
-                                'Credit': 'Rs. {:,.2f}'
-                            }),
-                            use_container_width=True
+                    # Display advance transactions
+                    display_df = advance_df[['entry_date', 'description', 'debit', 'credit']].copy()
+                    display_df.columns = ['Date', 'Description', 'Debit', 'Credit']
+                    
+                    st.dataframe(
+                        display_df.style.format({
+                            'Debit': 'Rs. {:,.2f}',
+                            'Credit': 'Rs. {:,.2f}'
+                        }),
+                        use_container_width=True
+                    )
+                    
+                    # Download advance details PDF
+                    if st.button("📥 Download Advance Details PDF"):
+                        pdf_bytes = generate_pdf_report(
+                            display_df,
+                            f"Advance Details - {employee_list[selected_emp_id]}",
+                            orientation='L',
+                            totals_cols=['Debit', 'Credit']
                         )
+                        if pdf_bytes:
+                            st.download_button(
+                                label="Download PDF",
+                                data=pdf_bytes,
+                                file_name=f"Advance_Details_{employee_list[selected_emp_id]}.pdf",
+                                mime="application/pdf"
+                            )
+                else:
+                    st.info("No advance transactions found for this employee.")
+    
+    with tab7:
+        st.subheader("Edit/Delete Ledger Entries")
+        
+        if employees_df.empty:
+            st.warning("No employees found.")
+        else:
+            employee_list = {row['id']: row['name'] for index, row in employees_df.iterrows()}
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                selected_emp_id = st.selectbox(
+                    "Select Employee",
+                    options=list(employee_list.keys()),
+                    format_func=lambda x: employee_list[x],
+                    key="edit_employee"
+                )
+            with col2:
+                # Get all ledger entries for the employee
+                ledger_df = get_employee_ledger_entries(selected_emp_id)
+                
+                if not ledger_df.empty:
+                    # Create a list of entries for selection
+                    entry_options = {}
+                    for _, row in ledger_df.iterrows():
+                        entry_date = row['entry_date']
+                        desc = row['description'][:50]  # Truncate long descriptions
+                        debit = row['debit']
+                        credit = row['credit']
+                        entry_type = "Advance" if row['is_advance'] == 1 else "Regular"
+                        option_text = f"{entry_date} - {desc} - Debit: {debit:,.2f} - Credit: {credit:,.2f} - {entry_type}"
+                        entry_options[option_text] = row['id']
+                    
+                    selected_entry = st.selectbox(
+                        "Select Entry to Edit/Delete",
+                        options=list(entry_options.keys())
+                    )
+                    
+                    if selected_entry:
+                        entry_id = entry_options[selected_entry]
+                        entry_data = ledger_df[ledger_df['id'] == entry_id].iloc[0]
                         
-                        total_advances = advance_df['Advance Amount'].sum()
-                        total_credits = advance_df['Credit'].sum()
-                        net_advance = total_advances - total_credits
-                        
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("Total Advances", f"Rs. {total_advances:,.2f}")
-                        with col2:
-                            st.metric("Total Credits", f"Rs. {total_credits:,.2f}")
-                        with col3:
-                            st.metric("Net Advance Balance", f"Rs. {net_advance:,.2f}")
-                    else:
-                        st.info("No advance records found for this employee.")
-                        
-                except Exception as e:
-                    st.error(f"Error loading advance details: {e}")
+                        st.subheader("Edit Entry")
+                        with st.form("edit_ledger_form"):
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                new_date = st.date_input("Date", value=datetime.strptime(entry_data['entry_date'], '%Y-%m-%d').date())
+                                new_description = st.text_input("Description", value=entry_data['description'])
+                            with col2:
+                                new_debit = st.number_input("Debit Amount", value=float(entry_data['debit']), min_value=0.0, format="%.2f")
+                                new_credit = st.number_input("Credit Amount", value=float(entry_data['credit']), min_value=0.0, format="%.2f")
+                                new_is_advance = st.checkbox("Is Advance Entry", value=bool(entry_data['is_advance']))
+                            
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                update_clicked = st.form_submit_button("💾 Update Entry")
+                            with col2:
+                                delete_clicked = st.form_submit_button("🗑️ Delete Entry")
+                            
+                            if update_clicked:
+                                if update_employee_ledger_entry(entry_id, new_date, new_description, new_debit, new_credit, new_is_advance):
+                                    st.success("Entry updated successfully!")
+                                    st.rerun()
+                            
+                            if delete_clicked:
+                                if delete_employee_ledger_entry(entry_id):
+                                    st.success("Entry deleted successfully!")
+                                    st.rerun()
+                else:
+                    st.info("No ledger entries found for this employee.")
 
 # --- Employee Management ---
 def page_employee_management():
@@ -1236,7 +1669,7 @@ def page_employee_management():
                             INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
                             """,
-                            (name.strip(), designation.strip(), salary, bank.strip(), account_title.strip(), account_no.strip(), str(join_date))
+                            (name, designation, salary, bank, account_title, account_no, str(join_date))
                         )
                         conn.commit()
                         conn.close()
@@ -1255,21 +1688,26 @@ def page_employee_management():
                 return
 
             balance_data = []
+            advance_data = []
             for _, emp in employees_df.iterrows():
                 balance = get_employee_balance(emp['id'])
+                advance_balance = get_employee_advance_balance(emp['id'])
                 balance_data.append(balance)
+                advance_data.append(advance_balance)
             
-            employees_df['Current Balance'] = balance_data
-            employees_df['Net Payable'] = employees_df['salary'] + employees_df['Current Balance']
+            employees_df['Expense Balance'] = balance_data
+            employees_df['Advance Balance'] = advance_data
+            employees_df['Net Payable'] = employees_df['salary'] + employees_df['Expense Balance'] - employees_df['Advance Balance']
 
-            display_cols = ['id', 'name', 'designation', 'salary', 'Current Balance', 'Net Payable', 'bank', 'join_date']
+            display_cols = ['id', 'name', 'designation', 'salary', 'Advance Balance', 'Expense Balance', 'Net Payable', 'bank', 'join_date']
             if all(col in employees_df.columns for col in display_cols):
-                display_df = employees_df[display_cols].copy().fillna('')
+                display_df = employees_df[display_cols].copy().fillna("")
                 
                 st.dataframe(
                     display_df.style.format({
                         'salary': 'Rs. {:,.2f}',
-                        'Current Balance': 'Rs. {:,.2f}',
+                        'Advance Balance': 'Rs. {:,.2f}',
+                        'Expense Balance': 'Rs. {:,.2f}',
                         'Net Payable': 'Rs. {:,.2f}'
                     }),
                     use_container_width=True
@@ -1316,7 +1754,7 @@ def page_employee_management():
                                 name = ?, designation = ?, salary = ?, bank = ?, account_title = ?, account_no = ?
                                 WHERE id = ?
                                 """,
-                                (edit_name.strip(), edit_designation.strip(), edit_salary, edit_bank.strip(), edit_account_title.strip(), edit_account_no.strip(), selected_emp_id)
+                                (edit_name, edit_designation, edit_salary, edit_bank, edit_account_title, edit_account_no, selected_emp_id)
                             )
                             conn.commit()
                             conn.close()
@@ -1359,14 +1797,10 @@ def page_expense_management():
     st.title("💼 Company Expense Management")
     
     st.info("""
-    **Note:** 
-    - **Employee Expenses**: When you select "Employee Expenses" category and choose an employee, the amount will be added as credit to their ledger (company paying employee's expense)
-    - **Salary**: When you select "Salary" category, the amount will be added as credit to employee's ledger
-    - **Advance**: When you select "Advance" category, the amount will be added as debit to employee's ledger (employee owes company)
-    - Company expenses don't affect employee salaries directly
+    **Note:** This page is for company expenses. Use the Employee Expense Management page for employee-specific transactions.
     """)
     
-    tab1, tab2, tab3 = st.tabs(["➕ Add Expense", "📋 View Expenses", "📊 Expense Reports"])
+    tab1, tab2, tab3, tab4 = st.tabs(["➕ Add Expense", "📋 View Expenses", "📊 Expense Reports", "✏️ Edit Expenses"])
     
     with tab1:
         st.subheader("Add Company Expense")
@@ -1388,26 +1822,24 @@ def page_expense_management():
                         options=list(category_options.keys()),
                         format_func=lambda x: category_options[x]
                     )
-                    selected_category = category_options[category_id]
                 else:
                     category_id = 1
-                    selected_category = "Other Expense"
                     st.info("Using default category")
                 
+                # Check if this is an advance
+                is_advance = st.checkbox("This is an Advance Payment")
+                
                 employee_options = [None]
+                employee_names = {None: "None (Company Expense)"}
                 if not employees_df.empty:
                     employee_options.extend([row['id'] for _, row in employees_df.iterrows()])
+                    employee_names.update({row['id']: f"{row['name']} - {row['designation']}" for _, row in employees_df.iterrows()})
                 
                 employee_id = st.selectbox(
                     "Related Employee (Optional)",
                     options=employee_options,
-                    format_func=lambda x: "None" if x is None else employees_df[employees_df['id'] == x]['name'].iloc[0]
+                    format_func=lambda x: employee_names[x]
                 )
-                
-                # Show employee current balance if employee selected
-                if employee_id:
-                    current_balance = get_employee_balance(employee_id)
-                    st.info(f"Current Balance of {employees_df[employees_df['id'] == employee_id]['name'].iloc[0]}: Rs. {current_balance:,.2f}")
             
             submitted = st.form_submit_button("💾 Add Expense")
             if submitted:
@@ -1419,45 +1851,37 @@ def page_expense_management():
                             return
                             
                         cursor = conn.cursor()
-                        
-                        # Insert company expense
                         cursor.execute(
                             """
-                            INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id)
-                            VALUES (?, ?, ?, ?, ?)
+                            INSERT INTO company_expenses (description, amount, expense_date, category_id, employee_id, is_advance)
+                            VALUES (?, ?, ?, ?, ?, ?)
                             """,
-                            (description.strip(), amount, str(expense_date), category_id, employee_id)
+                            (description, amount, str(expense_date), category_id, employee_id, 1 if is_advance else 0)
                         )
                         
-                        # If category is Employee Expenses or Salary and employee is selected, add to employee ledger as CREDIT
-                        if employee_id and selected_category in ["Employee Expenses", "Salary"]:
+                        # If expense is linked to an employee and is NOT an advance, add to ledger as credit (expense claim)
+                        if employee_id is not None and not is_advance:
                             cursor.execute(
                                 """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                VALUES (?, ?, ?, 0, ?)
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, is_advance)
+                                VALUES (?, ?, ?, 0, ?, ?, 0)
                                 """,
-                                (employee_id, str(expense_date), f"Company {selected_category}: {description}", amount)
+                                (employee_id, str(expense_date), f"Expense Claim: {description}", amount, cursor.lastrowid)
                             )
-                            st.success(f"✅ Company expense added and Rs. {amount:,.2f} credited to employee's ledger!")
-                        
-                        # If category is Advance and employee is selected, add to employee ledger as DEBIT
-                        elif employee_id and selected_category == "Advance":
+                        # If it's an advance to employee, add to ledger as debit
+                        elif employee_id is not None and is_advance:
                             cursor.execute(
                                 """
-                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit)
-                                VALUES (?, ?, ?, ?, 0)
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, related_expense_id, is_advance)
+                                VALUES (?, ?, ?, ?, 0, ?, 1)
                                 """,
-                                (employee_id, str(expense_date), f"Company Advance: {description}", amount)
+                                (employee_id, str(expense_date), f"Advance: {description}", amount, cursor.lastrowid)
                             )
-                            st.success(f"✅ Company advance added and Rs. {amount:,.2f} debited to employee's ledger!")
                         
-                        else:
-                            st.success("✅ Company expense added successfully!")
-                            
                         conn.commit()
                         conn.close()
+                        st.success("✅ Company expense added successfully!")
                         clear_cache()
-                        
                     except Exception as e:
                         st.error(f"❌ Database error: {e}")
                 else:
@@ -1482,11 +1906,13 @@ def page_expense_management():
                 expenses_df = pd.read_sql_query(
                     """
                     SELECT 
+                        ce.id,
                         ce.description,
                         ce.amount,
                         ce.expense_date,
                         ec.name as category,
-                        e.name as employee_name
+                        e.name as employee_name,
+                        CASE WHEN ce.is_advance = 1 THEN 'Yes' ELSE 'No' END as is_advance
                     FROM company_expenses ce
                     LEFT JOIN expense_categories ec ON ce.category_id = ec.id
                     LEFT JOIN employees e ON ce.employee_id = e.id
@@ -1499,7 +1925,7 @@ def page_expense_management():
                 conn.close()
                 
                 if not expenses_df.empty:
-                    expenses_df = expenses_df.fillna('')
+                    expenses_df = expenses_df.fillna("")
                     st.dataframe(
                         expenses_df.style.format({'amount': 'Rs. {:,.2f}'}),
                         use_container_width=True
@@ -1520,7 +1946,7 @@ def page_expense_management():
         with col1:
             report_month = st.date_input("Report Month", date.today().replace(day=1), key="exp_report_month")
         with col2:
-            report_type = st.selectbox("Report Type", ["Category-wise", "Monthly Summary"])
+            report_type = st.selectbox("Report Type", ["Category-wise", "Monthly Summary", "Employee-wise"])
         
         if st.button("📊 Generate Report"):
             try:
@@ -1548,7 +1974,7 @@ def page_expense_management():
                         conn,
                         params=(str(first_day), str(last_day))
                     )
-                else:
+                elif report_type == "Monthly Summary":
                     report_df = pd.read_sql_query(
                         """
                         SELECT 
@@ -1563,10 +1989,26 @@ def page_expense_management():
                         conn,
                         params=(str(first_day), str(last_day))
                     )
+                else:  # Employee-wise
+                    report_df = pd.read_sql_query(
+                        """
+                        SELECT 
+                            e.name as Employee,
+                            COUNT(ce.id) as Count,
+                            SUM(ce.amount) as Total_Amount
+                        FROM company_expenses ce
+                        LEFT JOIN employees e ON ce.employee_id = e.id
+                        WHERE ce.expense_date BETWEEN ? AND ?
+                        GROUP BY e.name
+                        ORDER BY Total_Amount DESC
+                        """,
+                        conn,
+                        params=(str(first_day), str(last_day))
+                    )
                 conn.close()
                 
                 if not report_df.empty:
-                    report_df = report_df.fillna('')
+                    report_df = report_df.fillna("")
                     st.dataframe(
                         report_df.style.format({'Total_Amount': 'Rs. {:,.2f}'}),
                         use_container_width=True
@@ -1590,6 +2032,113 @@ def page_expense_management():
                     
             except Exception as e:
                 st.error(f"Error generating report: {e}")
+    
+    with tab4:
+        st.subheader("Edit/Delete Company Expenses")
+        
+        try:
+            conn = get_db_connection()
+            if conn is None:
+                st.error("Database connection failed")
+                return
+                
+            expenses_df = pd.read_sql_query(
+                """
+                SELECT 
+                    ce.id,
+                    ce.description,
+                    ce.amount,
+                    ce.expense_date,
+                    ec.name as category,
+                    e.name as employee_name,
+                    ce.is_advance
+                FROM company_expenses ce
+                LEFT JOIN expense_categories ec ON ce.category_id = ec.id
+                LEFT JOIN employees e ON ce.employee_id = e.id
+                ORDER BY ce.expense_date DESC
+                LIMIT 100
+                """,
+                conn
+            )
+            conn.close()
+            
+            if not expenses_df.empty:
+                expenses_df = expenses_df.fillna("")
+                
+                # Create selection options
+                expense_options = {}
+                for _, row in expenses_df.iterrows():
+                    option_text = f"{row['expense_date']} - {row['description']} - Rs. {row['amount']:,.2f}"
+                    if row['employee_name']:
+                        option_text += f" - {row['employee_name']}"
+                    if row['is_advance']:
+                        option_text += " - [Advance]"
+                    expense_options[option_text] = row['id']
+                
+                selected_expense = st.selectbox(
+                    "Select Expense to Edit/Delete",
+                    options=list(expense_options.keys())
+                )
+                
+                if selected_expense:
+                    expense_id = expense_options[selected_expense]
+                    expense_data = expenses_df[expenses_df['id'] == expense_id].iloc[0]
+                    
+                    st.subheader("Edit Expense")
+                    with st.form("edit_company_expense_form"):
+                        categories_df = get_all_categories()
+                        employees_df = get_all_employees()
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            new_description = st.text_input("Description", value=expense_data['description'])
+                            new_amount = st.number_input("Amount", value=float(expense_data['amount']), min_value=0.01, format="%.2f")
+                            new_date = st.date_input("Date", value=datetime.strptime(expense_data['expense_date'], '%Y-%m-%d').date())
+                        with col2:
+                            # Category selection
+                            category_options = {row['name']: row['id'] for _, row in categories_df.iterrows()}
+                            current_category = expense_data['category']
+                            current_category_id = list(category_options.keys())[list(category_options.values()).index(current_category)] if current_category in category_options.values() else list(category_options.values())[0]
+                            new_category_id = st.selectbox("Category", options=list(category_options.values()), 
+                                                         format_func=lambda x: list(category_options.keys())[list(category_options.values()).index(x)])
+                            
+                            # Employee selection
+                            employee_options = {None: "None"}
+                            employee_options.update({row['id']: row['name'] for _, row in employees_df.iterrows()})
+                            current_employee = expense_data['employee_name']
+                            current_employee_id = None
+                            if current_employee:
+                                for emp_id, emp_name in employee_options.items():
+                                    if emp_id is not None and emp_name == current_employee:
+                                        current_employee_id = emp_id
+                                        break
+                            
+                            new_employee_id = st.selectbox("Employee", options=list(employee_options.keys()), 
+                                                         format_func=lambda x: employee_options[x],
+                                                         index=list(employee_options.keys()).index(current_employee_id) if current_employee_id in employee_options else 0)
+                            
+                            new_is_advance = st.checkbox("Is Advance", value=bool(expense_data['is_advance']))
+                        
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            update_clicked = st.form_submit_button("💾 Update Expense")
+                        with col2:
+                            delete_clicked = st.form_submit_button("🗑️ Delete Expense")
+                        
+                        if update_clicked:
+                            if update_company_expense(expense_id, new_description, new_amount, new_date, new_category_id, new_employee_id, new_is_advance):
+                                st.success("Expense updated successfully!")
+                                st.rerun()
+                        
+                        if delete_clicked:
+                            if delete_company_expense(expense_id):
+                                st.success("Expense deleted successfully!")
+                                st.rerun()
+            else:
+                st.info("No expenses found.")
+                
+        except Exception as e:
+            st.error(f"Error loading expenses: {e}")
 
 # --- Reporting System ---
 def page_reporting():
@@ -1608,7 +2157,7 @@ def page_reporting():
             with col1:
                 report_type = st.selectbox(
                     "Report Type",
-                    ["Salary Sheet", "Balance Summary"],
+                    ["Salary Sheet", "Balance Summary", "Advance Summary"],
                     key="emp_report_type"
                 )
             with col2:
@@ -1630,35 +2179,52 @@ def page_reporting():
                             e.name AS "Employee Name",
                             e.designation AS "Designation",
                             e.salary AS "Base Salary",
-                            COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? THEN l.credit ELSE 0 END), 0) AS "Total Credits",
-                            COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? THEN l.debit ELSE 0 END), 0) AS "Total Deductions",
-                            (COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? THEN l.credit ELSE 0 END), 0) - 
-                             COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? THEN l.debit ELSE 0 END), 0)) AS "Net Salary"
+                            COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 0 THEN l.credit ELSE 0 END), 0) AS "Total Credits",
+                            COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 0 THEN l.debit ELSE 0 END), 0) AS "Total Deductions",
+                            COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0) AS "Advance Balance",
+                            (COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 0 THEN l.credit ELSE 0 END), 0) - 
+                             COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 0 THEN l.debit ELSE 0 END), 0) -
+                             COALESCE(SUM(CASE WHEN l.entry_date BETWEEN ? AND ? AND l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0)) AS "Net Salary"
                         FROM employees e
                         LEFT JOIN employee_ledger l ON e.id = l.employee_id
                         GROUP BY e.id, e.name, e.designation, e.salary
                         ORDER BY e.name
                         """
-                        params = [str(first_day), str(last_day)] * 4
+                        params = [str(first_day), str(last_day)] * 6
                         report_df = pd.read_sql_query(query, conn, params=params)
                         
                     elif report_type == "Balance Summary":
                         balance_data = []
                         for _, emp in employees_df.iterrows():
                             balance = get_employee_balance(emp['id'])
+                            advance_balance = get_employee_advance_balance(emp['id'])
                             balance_data.append({
                                 'Employee Name': emp['name'],
                                 'Designation': emp['designation'],
                                 'Base Salary': emp['salary'],
-                                'Current Balance': balance,
-                                'Net Payable': emp['salary'] + balance
+                                'Expense Balance': balance,
+                                'Advance Balance': advance_balance,
+                                'Net Payable': emp['salary'] + balance - advance_balance
                             })
                         report_df = pd.DataFrame(balance_data)
+                    
+                    else:  # Advance Summary
+                        advance_data = []
+                        for _, emp in employees_df.iterrows():
+                            advance_balance = get_employee_advance_balance(emp['id'])
+                            if advance_balance > 0:
+                                advance_data.append({
+                                    'Employee Name': emp['name'],
+                                    'Designation': emp['designation'],
+                                    'Advance Balance': advance_balance,
+                                    'Base Salary': emp['salary']
+                                })
+                        report_df = pd.DataFrame(advance_data)
                     
                     conn.close()
                     
                     if not report_df.empty:
-                        report_df = report_df.fillna('')
+                        report_df = report_df.fillna("")
                         st.dataframe(report_df, use_container_width=True)
                         
                         pdf_bytes = generate_pdf_report(
@@ -1687,6 +2253,8 @@ def page_reporting():
                                     mime="text/csv",
                                     use_container_width=True
                                 )
+                    else:
+                        st.info("No data found for the selected report type.")
                     
                 except Exception as e:
                     st.error(f"Error generating report: {e}")
@@ -1700,7 +2268,7 @@ def page_reporting():
         with col2:
             end_date = st.date_input("End Date", date.today(), key="comp_report_end")
         
-        report_type = st.selectbox("Report Type", ["Detailed", "Summary by Category"])
+        report_type = st.selectbox("Report Type", ["Detailed", "Summary by Category", "Employee-wise"])
         
         if st.button("Generate Company Report", key="gen_comp_report"):
             try:
@@ -1716,7 +2284,8 @@ def page_reporting():
                         ce.amount,
                         ce.expense_date,
                         ec.name as category,
-                        e.name as employee_name
+                        e.name as employee_name,
+                        CASE WHEN ce.is_advance = 1 THEN 'Yes' ELSE 'No' END as is_advance
                     FROM company_expenses ce
                     LEFT JOIN expense_categories ec ON ce.category_id = ec.id
                     LEFT JOIN employees e ON ce.employee_id = e.id
@@ -1739,10 +2308,24 @@ def page_reporting():
                     """
                     report_df = pd.read_sql_query(query, conn, params=(str(start_date), str(end_date)))
                 
+                else:  # Employee-wise
+                    query = """
+                    SELECT 
+                        e.name as Employee,
+                        COUNT(ce.id) as Count,
+                        SUM(ce.amount) as Total_Amount
+                    FROM company_expenses ce
+                    LEFT JOIN employees e ON ce.employee_id = e.id
+                    WHERE ce.expense_date BETWEEN ? AND ?
+                    GROUP BY e.name
+                    ORDER BY Total_Amount DESC
+                    """
+                    report_df = pd.read_sql_query(query, conn, params=(str(start_date), str(end_date)))
+                
                 conn.close()
                 
                 if not report_df.empty:
-                    report_df = report_df.fillna('')
+                    report_df = report_df.fillna("")
                     st.dataframe(report_df, use_container_width=True)
                     
                     total_amount = report_df['Total_Amount'].sum() if 'Total_Amount' in report_df.columns else report_df['amount'].sum()
@@ -1827,8 +2410,7 @@ def page_data_import():
                     if import_type == "Employees":
                         success = importer.import_employees_from_excel(uploaded_file)
                     else:
-                        st.info("Expense import coming soon")
-                        success = False
+                        success = importer.import_expenses_from_excel(uploaded_file)
                     
                     if success:
                         st.success(f"✅ {import_type} imported successfully!")
@@ -1848,6 +2430,18 @@ def page_data_import():
                     label="📥 Download Employees Excel",
                     data=excel_data,
                     file_name=f"Employees_Export_{date.today().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.ms-excel",
+                    use_container_width=True
+                )
+        
+        with col2:
+            st.markdown("### 💼 Expense Data")
+            if st.button("Export Expenses to Excel", use_container_width=True):
+                excel_data = importer.export_expenses_to_excel()
+                st.download_button(
+                    label="📥 Download Expenses Excel",
+                    data=excel_data,
+                    file_name=f"Expenses_Export_{date.today().strftime('%Y%m%d')}.xlsx",
                     mime="application/vnd.ms-excel",
                     use_container_width=True
                 )
@@ -1877,6 +2471,57 @@ def page_data_import():
                 mime="application/vnd.ms-excel",
                 use_container_width=True
             )
+
+        with col2:
+            st.markdown("#### 💼 Expense Template")
+            # Create sample expense data for template
+            expense_template_df = pd.DataFrame({
+                'description': [
+                    'Office supplies purchase',
+                    'Client meeting expenses',
+                    'Employee advance'
+                ],
+                'amount': [15000.00, 8500.00, 5000.00],
+                'expense_date': [
+                    date.today().strftime('%Y-%m-%d'),
+                    (date.today() - timedelta(days=5)).strftime('%Y-%m-%d'),
+                    (date.today() - timedelta(days=10)).strftime('%Y-%m-%d')
+                ],
+                'category': [
+                    'Office Stationery Expense',
+                    'Office Entertainment',
+                    'Advance'
+                ],
+                'employee_name': [
+                    '',
+                    'Ali Ahmed',
+                    'Sara Khan'
+                ],
+                'is_advance': [False, False, True]
+            })
+            
+            expense_template_output = io.BytesIO()
+            with pd.ExcelWriter(expense_template_output, engine='xlsxwriter') as writer:
+                expense_template_df.to_excel(writer, index=False, sheet_name='Expenses')
+            expense_template_output.seek(0)
+            
+            st.download_button(
+                label="📥 Download Expense Template",
+                data=expense_template_output.getvalue(),
+                file_name="Expense_Import_Template.xlsx",
+                mime="application/vnd.ms-excel",
+                use_container_width=True
+            )
+            
+            st.markdown("""
+            **Expense Template Columns:**
+            - **description**: Expense description (required)
+            - **amount**: Amount in rupees (required)
+            - **expense_date**: Date of expense (required, format: YYYY-MM-DD)
+            - **category**: Expense category (required)
+            - **employee_name**: Employee name if expense is for specific employee (optional)
+            - **is_advance**: Mark as TRUE if this is an advance payment
+            """)
 
 # --- Dashboard ---
 def page_dashboard():
@@ -1934,6 +2579,7 @@ def page_dashboard():
                 )
                 conn.close()
                 if not recent_expenses.empty:
+                    recent_expenses = recent_expenses.fillna("")
                     for _, exp in recent_expenses.iterrows():
                         st.write(f"**{exp['description']}** - Rs. {exp['amount']:,.2f} ({exp['expense_date']})")
                 else:
