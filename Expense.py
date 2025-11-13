@@ -627,8 +627,8 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
                 desc_text = str(row['description']) if pd.notna(row['description']) else ""
                 desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
                 
-                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
-                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
+                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0"
+                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0"
                 
                 row_height = max(8, len(desc_lines) * 8)
                 
@@ -649,7 +649,7 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
             y = pdf.get_y()
             pdf.multi_cell(desc_width, 8, "Advance Deduction", 1, 'L')
             pdf.set_xy(x + desc_width, y)
-            pdf.cell(amount_width, 8, "0.00", 1, 0, 'R')
+            pdf.cell(amount_width, 8, "0", 1, 0, 'R')
             pdf.set_xy(x + desc_width + amount_width, y)
             pdf.cell(amount_width, 8, f"{advance_deduction:,.2f}", 1, 1, 'R')
 
@@ -2433,7 +2433,7 @@ def page_data_import():
                     'Client meeting expenses',
                     'Employee advance'
                 ],
-                'amount': [15000.00, 8500.00, 5000.00],
+                'amount': [15000, 8500, 5000],
                 'expense_date': [
                     date.today().strftime('%Y-%m-%d'),
                     (date.today() - timedelta(days=5)).strftime('%Y-%m-%d'),
