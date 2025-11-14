@@ -670,8 +670,8 @@ def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credi
         account_no = emp_details.get('account_no', '')
         
         pdf.cell(0, 6, f"  Bank: {bank_info if bank_info else 'N/A'}", 0, 1, 'L')
-        pdf.cell(0, 6, f"  Account Title: {account_title if account_title else 'N/A'}", 0, 3, 'L')
-        pdf.cell(0, 6, f"  Account No: {account_no if account_no else 'N/A'}", 0, 3, 'L')
+        pdf.cell(0, 6, f"  Account Title: {account_title if account_title else 'N/A'}", 0,1, 'L')
+        pdf.cell(0, 6, f"  Account No: {account_no if account_no else 'N/A'}", 0, 1, 'L')
 
         return pdf.output(dest='S').encode('latin-1')
     except Exception as e:
