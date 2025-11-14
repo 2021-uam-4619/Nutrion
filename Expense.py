@@ -134,7 +134,6 @@ def init_db():
     except Exception as e:
         st.error(f"Database initialization error: {e}")
 
-#asim chat gpt
 # --- Improved PDF Class ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
@@ -153,10 +152,8 @@ class PDF(FPDF):
         
         self.set_font('Arial', 'B', 16)
         self.cell(0, 12, COMPANY_NAME, 0, 1, 'C')
-
         self.set_font('Arial', 'B', 14)
         self.cell(0, 10, self.report_title, 0, 1, 'C')
-
         self.set_font('Arial', '', 10)
         self.cell(0, 8, self.date_range_str, 0, 1, 'C')
         self.ln(8)
@@ -175,8 +172,6 @@ class PDF(FPDF):
         self.set_text_color(100, 100, 100)
         self.cell(0, 6, "This PDF is system generated and does not require a signature.", 0, 0, 'C')
 
-    # ---------------------------------------------------------------------
-
     def add_table(self, df, totals_cols=None):
         self.set_font('Arial', 'B', 10)
         self.set_fill_color(224, 235, 255)
@@ -186,7 +181,7 @@ class PDF(FPDF):
 
         col_widths = self.calculate_dynamic_column_widths(df, total_width)
 
-        # draw header
+        # Draw header
         for i, col in enumerate(df.columns):
             self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
@@ -194,61 +189,63 @@ class PDF(FPDF):
         self.set_font('Arial', '', 9)
         fill = False
 
-        for idx, row in df.iterrows():
-
-            # prepare wrapped text
-            row_wrapped = []
-            max_lines = 1
+        for index, row in df.iterrows():
+            max_line_count = 1
+            cell_data = []
 
             for i, col in enumerate(df.columns):
-                text = str(row[col]) if pd.notna(row[col]) else ""
+                cell_text = str(row[col]) if pd.notna(row[col]) else ""
 
                 if pd.api.types.is_numeric_dtype(df[col]):
                     try:
-                        text = f"{float(text):,.2f}"
+                        val = row[col]
+                        if pd.isna(val):
+                            cell_text = ""
+                        else:
+                            cell_text = f"{float(val):,.2f}"
                     except:
                         pass
 
-                wrapped = self.wrap_text(text, col_widths[i] - 2)
-                row_wrapped.append(wrapped)
-                max_lines = max(max_lines, len(wrapped))
+                lines = self.wrap_text(cell_text, col_widths[i] - 4)
+                cell_data.append(lines)
+                max_line_count = max(max_line_count, len(lines))
 
-            row_height = max_lines * 5
+            row_height = max(7, max_line_count * 5)
 
-            # page break check
             if self.get_y() + row_height > self.page_break_trigger:
                 self.add_page()
                 self.set_font('Arial', 'B', 10)
                 self.set_fill_color(224, 235, 255)
-
                 for i, col in enumerate(df.columns):
                     self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
                 self.ln()
                 self.set_font('Arial', '', 9)
 
-            # draw row background and border
-            x = self.get_x()
-            y = self.get_y()
+            x_start = self.get_x()
+            y_start = self.get_y()
 
-            for i, lines in enumerate(row_wrapped):
-                self.set_xy(x, y)
-                self.set_fill_color(245, 245, 245) if fill else self.set_fill_color(255, 255, 255)
-                self.cell(col_widths[i], row_height, "", border=1, fill=True)
-                x += col_widths[i]
+            for i, (col, lines) in enumerate(zip(df.columns, cell_data)):
+                align = 'R' if pd.api.types.is_numeric_dtype(df[col]) else 'L'
 
-            # draw text inside cells
-            x = self.get_x() - sum(col_widths)
-            for i, lines in enumerate(row_wrapped):
+                if fill:
+                    self.set_fill_color(245, 245, 245)
+                else:
+                    self.set_fill_color(255, 255, 255)
+
+                self.rect(x_start, y_start, col_widths[i], row_height, 'DF')
+
                 for j, line in enumerate(lines):
-                    self.set_xy(x + 1, y + (j * 5) + 1)
-                    align = 'R' if pd.api.types.is_numeric_dtype(df[df.columns[i]]) else 'L'
-                    self.cell(col_widths[i] - 2, 5, line, 0, 0, align)
-                x += col_widths[i]
+                    text_x = x_start + 1.5
+                    text_y = y_start + 1.5 + (j * 5)
+
+                    self.set_xy(text_x, text_y)
+                    self.cell(col_widths[i] - 3, 5, line, 0, 0, align)
+
+                x_start += col_widths[i]
 
             self.ln(row_height)
             fill = not fill
 
-        # totals section
         if totals_cols:
             self.set_font('Arial', 'B', 10)
             self.set_fill_color(240, 240, 240)
@@ -257,53 +254,59 @@ class PDF(FPDF):
                 if i == 0:
                     self.cell(col_widths[i], 8, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
-                    total = pd.to_numeric(df[col], errors="coerce").sum()
+                    total = pd.to_numeric(df[col], errors='coerce').sum()
                     self.cell(col_widths[i], 8, f"{total:,.2f}", 1, 0, 'R', 1)
                 else:
                     self.cell(col_widths[i], 8, "", 1, 0, 'C', 1)
-
             self.ln()
 
-    # ---------------------------------------------------------------------
-
     def calculate_dynamic_column_widths(self, df, total_width):
-        min_width = 22
+        min_width = 25
         max_width = total_width / 2
-        col_widths = []
 
+        col_widths = []
         for col in df.columns:
-            header_width = self.get_string_width(str(col)) + 10
-            content_width = max(df[col].astype(str).str.len().fillna(1).max() * 2.2, header_width)
-            width = min(max(content_width, min_width), max_width)
+            header_w = len(str(col)) * 2.2
+
+            if not df.empty:
+                content_len = df[col].astype(str).str.len().max()
+                content_w = content_len * 1.6
+            else:
+                content_w = header_w
+
+            width = max(header_w, content_w, min_width)
+            width = min(width, max_width)
             col_widths.append(width)
 
         scale = total_width / sum(col_widths)
-        col_widths = [w * scale for w in col_widths]
+        col_widths = [int(w * scale) for w in col_widths]
+
         return col_widths
 
-    # ---------------------------------------------------------------------
-
     def wrap_text(self, text, max_width):
-        if not text:
-            return [""]
+        if not text or text == "None":
+            return ['']
+
+        text = str(text)
+
+        if self.get_string_width(text) <= max_width:
+            return [text]
 
         words = text.split()
         lines = []
-        current = ""
+        cur = ""
 
         for w in words:
-            test = current + " " + w if current else w
-            if self.get_string_width(test) <= max_width:
-                current = test
+            if self.get_string_width(cur + " " + w) <= max_width:
+                cur += " " + w if cur else w
             else:
-                lines.append(current)
-                current = w
+                lines.append(cur)
+                cur = w
 
-        if current:
-            lines.append(current)
+        if cur:
+            lines.append(cur)
 
         return lines
-
 #asim end
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
