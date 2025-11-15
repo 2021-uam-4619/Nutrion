@@ -307,7 +307,7 @@ class PDF(FPDF):
             lines.append(cur)
 
         return lines
-#asim end
+
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
 def get_all_employees():
@@ -950,10 +950,6 @@ class DataImportExport:
             st.error(f"Error reading Excel file: {str(e)}")
             return False
 
-# [The rest of the application code remains exactly the same...]
-# Continue with all the page functions (page_employee_expense_management, page_employee_management, etc.)
-# and the main() function exactly as in your original code
-
 # --- Employee Expense Management System ---
 def page_employee_expense_management():
     st.title("💰 Employee Expense Management")
@@ -1287,7 +1283,7 @@ def page_employee_expense_management():
                         
                     # Build query based on whether to deduct advances
                     if deduct_advances:
-                        query = f"""
+                        query = """
                         SELECT
                             e.name AS "Employee Name",
                             e.designation AS "Designation",
@@ -1303,12 +1299,12 @@ def page_employee_expense_management():
                             e.account_no AS "Account No"
                         FROM employees e
                         LEFT JOIN employee_ledger l ON e.id = l.employee_id
-                            AND l.entry_date BETWEEN '{first_day}' AND '{last_day}'
+                            AND l.entry_date BETWEEN ? AND ?
                         GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
                         ORDER BY e.name
                         """
                     else:
-                        query = f"""
+                        query = """
                         SELECT
                             e.name AS "Employee Name",
                             e.designation AS "Designation",
@@ -1321,12 +1317,12 @@ def page_employee_expense_management():
                             e.account_no AS "Account No"
                         FROM employees e
                         LEFT JOIN employee_ledger l ON e.id = l.employee_id
-                            AND l.entry_date BETWEEN '{first_day}' AND '{last_day}'
+                            AND l.entry_date BETWEEN ? AND ?
                         GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
                         ORDER BY e.name
                         """
                     
-                    salary_df = pd.read_sql_query(query, conn)
+                    salary_df = pd.read_sql_query(query, conn, params=(str(first_day), str(last_day)))
                     conn.close()
 
                     if salary_df.empty:
@@ -1604,7 +1600,8 @@ def page_employee_management():
                             st.error("Database connection failed")
                             return
                             
-                        conn.execute(
+                        cursor = conn.cursor()
+                        cursor.execute(
                             """
                             INSERT INTO employees (name, designation, salary, bank, account_title, account_no, join_date)
                             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -1688,7 +1685,8 @@ def page_employee_management():
                                 st.error("Database connection failed")
                                 return
                                 
-                            conn.execute(
+                            cursor = conn.cursor()
+                            cursor.execute(
                                 """
                                 UPDATE employees SET
                                 name = ?, designation = ?, salary = ?, bank = ?, account_title = ?, account_no = ?
@@ -1711,6 +1709,7 @@ def page_employee_management():
                                 st.error("Database connection failed")
                                 return
                                 
+                            cursor = conn.cursor()
                             ledger_check = pd.read_sql_query(
                                 "SELECT COUNT(*) as count FROM employee_ledger WHERE employee_id = ?",
                                 conn,
@@ -1720,7 +1719,7 @@ def page_employee_management():
                             if ledger_check['count'].iloc[0] > 0:
                                 st.error("❌ Cannot delete employee with existing ledger entries. Please clear ledger first.")
                             else:
-                                conn.execute("DELETE FROM employees WHERE id = ?", (selected_emp_id,))
+                                cursor.execute("DELETE FROM employees WHERE id = ?", (selected_emp_id,))
                                 conn.commit()
                                 conn.close()
                                 st.success("✅ Employee deleted successfully!")
@@ -2038,9 +2037,18 @@ def page_expense_management():
                             # Category selection
                             category_options = {row['name']: row['id'] for _, row in categories_df.iterrows()}
                             current_category = expense_data['category']
-                            current_category_id = list(category_options.keys())[list(category_options.values()).index(current_category)] if current_category in category_options.values() else list(category_options.values())[0]
+                            current_category_id = None
+                            for cat_name, cat_id in category_options.items():
+                                if cat_name == current_category:
+                                    current_category_id = cat_id
+                                    break
+                            
+                            if current_category_id is None:
+                                current_category_id = list(category_options.values())[0]
+                            
                             new_category_id = st.selectbox("Category", options=list(category_options.values()), 
-                                                         format_func=lambda x: list(category_options.keys())[list(category_options.values()).index(x)])
+                                                         format_func=lambda x: list(category_options.keys())[list(category_options.values()).index(x)],
+                                                         index=list(category_options.values()).index(current_category_id))
                             
                             # Employee selection
                             employee_options = {None: "None"}
