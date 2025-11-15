@@ -32,7 +32,8 @@ class PDF(FPDF):
                 # We save the current x/y to position text correctly
                 x = self.get_x()
                 y = self.get_y()
-                self.image(self.signature_img_obj, x=x, y=y, w=40)
+                # We must specify the type ('PNG') when using a file-like object
+                self.image(self.signature_img_obj, x=x, y=y, w=40, type='PNG')
                 # Move below the image for the text
                 self.set_y(y + 25) 
             except Exception as e:
