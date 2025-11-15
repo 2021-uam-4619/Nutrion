@@ -133,8 +133,391 @@ def init_db():
         
     except Exception as e:
         st.error(f"Database initialization error: {e}")
+        #asimpdf
+# --- Improved PDF Generation Functions ---
+def generate_employee_ledger_pdf(employee_name, ledger_df, start_date, end_date):
+    """Generate employee ledger PDF"""
+    try:
+        pdf = PDF(orientation='L', unit='mm', format='A4')
+        pdf.report_title = f"Employee Ledger - {employee_name}"
+        pdf.date_range_str = f"From {start_date} to {end_date}"
+        pdf.add_page()
+        
+        if ledger_df.empty:
+            pdf.set_font('Arial', 'I', 10)
+            pdf.cell(0, 10, "No ledger entries found for the selected period.", 1, 1, 'C')
+        else:
+            # Prepare data for PDF
+            pdf_data = ledger_df[['entry_date', 'description', 'debit', 'credit']].copy()
+            pdf_data.columns = ['Date', 'Description', 'Debit', 'Credit']
+            pdf_data['Date'] = pdf_data['Date'].astype(str)
+            
+            pdf.add_table(pdf_data, totals_cols=['Debit', 'Credit'])
+            
+            # Add summary
+            total_debit = ledger_df['debit'].sum()
+            total_credit = ledger_df['credit'].sum()
+            net_balance = total_credit - total_debit
+            
+            pdf.ln(10)
+            pdf.set_font('Arial', 'B', 10)
+            pdf.cell(0, 8, f"Total Debit: Rs. {total_debit:,.2f} | Total Credit: Rs. {total_credit:,.2f} | Net Balance: Rs. {net_balance:,.2f}", 0, 1, 'L')
 
-# --- Improved PDF Class ---
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return None
+
+def generate_individual_slip_pdf(emp_details, ledger_df, slip_month, total_credits, total_debits, net_salary, advance_deduction=0):
+    """Generate individual salary slip PDF"""
+    try:
+        pdf = PDF(orientation='P', unit='mm', format='A4')
+        pdf.report_title = f"Salary Slip - {slip_month.strftime('%B %Y')}"
+        pdf.date_range_str = ""
+        pdf.add_page()
+        
+        pdf.set_font('Arial', 'B', 14)
+        pdf.cell(0, 12, f"Employee: {emp_details['name']}", 0, 1, 'L')
+        pdf.set_font('Arial', '', 11)
+        pdf.cell(0, 8, f"Designation: {emp_details['designation']}", 0, 1, 'L')
+        pdf.cell(0, 8, f"Base Salary: Rs. {emp_details['salary']:,.2f}", 0, 1, 'L')
+        pdf.ln(8)
+
+        pdf.set_font('Arial', 'B', 12)
+        pdf.set_fill_color(224, 235, 255)
+        pdf.cell(0, 10, "Earnings & Deductions", 1, 1, 'C', fill=True)
+        
+        total_width = pdf.w - 2 * pdf.l_margin
+        desc_width = total_width * 0.6
+        amount_width = (total_width - desc_width) / 2
+        
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(desc_width, 8, "Description", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Credits (Rs.)", 1, 0, 'C')
+        pdf.cell(amount_width, 8, "Debits (Rs.)", 1, 1, 'C')
+
+        pdf.set_font('Arial', '', 9)
+        if ledger_df.empty:
+            pdf.cell(0, 8, "No ledger activity found for this month.", 1, 1, 'C')
+        else:
+            for _, row in ledger_df.iterrows():
+                desc_text = str(row['description']) if pd.notna(row['description']) else ""
+                desc_lines = pdf.wrap_text(desc_text, desc_width - 2)
+                
+                credit_text = f"{row['credit']:,.2f}" if row['credit'] > 0 else "0.00"
+                debit_text = f"{row['debit']:,.2f}" if row['debit'] > 0 else "0.00"
+                
+                row_height = max(8, len(desc_lines) * 8)
+                
+                x = pdf.get_x()
+                y = pdf.get_y()
+                pdf.multi_cell(desc_width, 8, desc_text, 1, 'L')
+                
+                pdf.set_xy(x + desc_width, y)
+                pdf.cell(amount_width, row_height, credit_text, 1, 0, 'R')
+                
+                pdf.set_xy(x + desc_width + amount_width, y)
+                pdf.cell(amount_width, row_height, debit_text, 1, 1, 'R')
+
+        # Add advance deduction if any
+        if advance_deduction > 0:
+            pdf.set_font('Arial', '', 9)
+            x = pdf.get_x()
+            y = pdf.get_y()
+            pdf.multi_cell(desc_width, 8, "Advance Deduction", 1, 'L')
+            pdf.set_xy(x + desc_width, y)
+            pdf.cell(amount_width, 8, "0.00", 1, 0, 'R')
+            pdf.set_xy(x + desc_width + amount_width, y)
+            pdf.cell(amount_width, 8, f"{advance_deduction:,.2f}", 1, 1, 'R')
+
+        pdf.set_font('Arial', 'B', 10)
+        pdf.cell(desc_width, 8, "Total", 1, 0, 'R')
+        pdf.cell(amount_width, 8, f"{total_credits:,.2f}", 1, 0, 'R')
+        total_debits_with_advance = total_debits + advance_deduction
+        pdf.cell(amount_width, 8, f"{total_debits_with_advance:,.2f}", 1, 1, 'R')
+
+        pdf.ln(8)
+        
+        pdf.set_font('Arial', 'B', 14)
+        pdf.set_fill_color(210, 210, 210)
+        net_salary_with_advance = net_salary - advance_deduction
+        pdf.cell(desc_width, 12, "Net Salary Payable", 1, 0, 'R', fill=True)
+        pdf.cell(amount_width * 2, 12, f"Rs. {net_salary_with_advance:,.2f}", 1, 1, 'R', fill=True)
+        
+        if advance_deduction > 0:
+            pdf.ln(5)
+            pdf.set_font('Arial', 'I', 9)
+            pdf.cell(0, 6, f"Note: Advance deduction of Rs. {advance_deduction:,.2f} has been applied", 0, 1, 'L')
+        
+        pdf.ln(12)
+        
+        pdf.set_font('Arial', 'B', 11)
+        pdf.cell(0, 8, "Bank Details", 0, 1, 'L')
+        pdf.set_font('Arial', '', 10)
+        bank_info = emp_details.get('bank', '')
+        account_title = emp_details.get('account_title', '')
+        account_no = emp_details.get('account_no', '')
+        
+        pdf.cell(0, 6, f"  Bank: {bank_info if bank_info else 'N/A'}", 0, 1, 'L')
+        pdf.cell(0, 6, f"  Account Title: {account_title if account_title else 'N/A'}", 0,1, 'L')
+        pdf.cell(0, 6, f"  Account No: {account_no if account_no else 'N/A'}", 0, 1, 'L')
+
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF: {e}")
+        return None
+
+def generate_pdf_report(df, title, date_range=None, orientation='L', totals_cols=None):
+    """Generate PDF report with improved table handling"""
+    try:
+        pdf = PDF(orientation=orientation, unit='mm', format='A4')
+        pdf.report_title = title
+        if date_range:
+            pdf.date_range_str = f"{date_range[0].strftime('%d %b %Y')} to {date_range[1].strftime('%d %b %Y')}"
+        else:
+            pdf.date_range_str = "As of " + date.today().strftime('%d %b %Y')
+            
+        pdf.set_auto_page_break(auto=True, margin=15)
+        pdf.set_left_margin(10)
+        pdf.set_right_margin(10)
+        pdf.add_page()
+        
+        if df.empty:
+            pdf.set_font('Arial', 'I', 10)
+            pdf.cell(0, 10, "No data found for the selected criteria.", 1, 1, 'C')
+        else:
+            # Replace NaN values with empty strings and ensure proper formatting
+            df = df.fillna("")
+            
+            # Format numeric columns
+            for col in df.columns:
+                if df[col].dtype in ['float64', 'int64']:
+                    df[col] = df[col].apply(lambda x: f"{x:,.2f}" if pd.notna(x) and x != "" else "0.00")
+                elif 'salary' in col.lower() or 'amount' in col.lower() or 'balance' in col.lower():
+                    # Try to convert to numeric and format
+                    try:
+                        df[col] = pd.to_numeric(df[col], errors='ignore')
+                        df[col] = df[col].apply(lambda x: f"{float(x):,.2f}" if pd.notna(x) and x != "" and str(x).replace('.','').isdigit() else str(x))
+                    except:
+                        pass
+            
+            pdf.add_table(df, totals_cols=totals_cols)
+        
+        return pdf.output(dest='S').encode('latin-1')
+    except Exception as e:
+        st.error(f"Error generating PDF report: {e}")
+        return None
+
+# --- Fix the Salary Sheet Generation in the Employee Expense Management ---
+def page_employee_expense_management():
+    st.title("💰 Employee Expense Management")
+    
+    employees_df = get_all_employees()
+    if not employees_df.empty:
+        cols = st.columns(4)
+        total_employees = len(employees_df)
+        total_salary = employees_df['salary'].sum()
+        
+        try:
+            conn = get_db_connection()
+            if conn:
+                expenses_df = pd.read_sql_query(
+                    "SELECT SUM(debit) as total_debits FROM employee_ledger WHERE is_advance = 0",
+                    conn
+                )
+                conn.close()
+                total_expenses = expenses_df['total_debits'].iloc[0] if not expenses_df.empty and expenses_df['total_debits'].iloc[0] is not None else 0
+            else:
+                total_expenses = 0
+        except:
+            total_expenses = 0
+        
+        with cols[0]:
+            st.metric("Total Employees", total_employees)
+        with cols[1]:
+            st.metric("Total Monthly Salary", f"Rs. {total_salary:,.2f}")
+        with cols[2]:
+            st.metric("Total Employee Expenses", f"Rs. {total_expenses:,.2f}")
+        with cols[3]:
+            net_payable = total_salary - total_expenses
+            st.metric("Net Salary Payable", f"Rs. {net_payable:,.2f}")
+    
+    st.divider()
+    
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+        "➕ Add Expense/Advance", "📊 Employee Balances", "🔍 Expense History", 
+        "💸 Salary Processing", "📄 Salary Slips", "💰 Advance Details", "✏️ Edit Entries"
+    ])
+    
+    # ... [Previous tabs code remains the same until tab4] ...
+    
+    with tab4:
+        st.subheader("Salary Processing")
+        
+        st.info("""
+        **Salary Processing Steps:**
+        1. Add all employee expenses and advances throughout the month
+        2. Generate salary credits for all employees
+        3. Review and download salary sheets
+        4. Process payments
+        """)
+        
+        selected_month = st.date_input("Select Salary Month", date.today().replace(day=1), key="salary_month")
+        first_day = selected_month.replace(day=1)
+        last_day = (first_day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        
+        # Advance deduction option
+        deduct_advances = st.checkbox("Deduct Advances from Salary", value=True)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🔄 Generate Salary Credits", use_container_width=True):
+                try:
+                    conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
+                    cursor = conn.cursor()
+                    
+                    processed_count = 0
+                    skipped_count = 0
+                    
+                    with st.spinner("Processing salary credits..."):
+                        for _, emp in employees_df.iterrows():
+                            salary = emp['salary']
+                            if salary <= 0:
+                                skipped_count += 1
+                                continue
+                            
+                            description = f"Monthly Salary Credit - {selected_month.strftime('%B %Y')}"
+                            cursor.execute(
+                                "SELECT 1 FROM employee_ledger WHERE employee_id = ? AND description = ? AND entry_date BETWEEN ? AND ?",
+                                (emp['id'], description, str(first_day), str(last_day))
+                            )
+                            if cursor.fetchone():
+                                skipped_count += 1
+                                continue
+                                
+                            cursor.execute(
+                                """
+                                INSERT INTO employee_ledger (employee_id, entry_date, description, debit, credit, is_advance)
+                                VALUES (?, ?, ?, 0, ?, 0)
+                                """,
+                                (emp['id'], str(first_day), description, salary)
+                            )
+                            processed_count += 1
+                    
+                    conn.commit()
+                    conn.close()
+                    if processed_count > 0:
+                        st.success(f"Salary credits generated for {processed_count} employees.")
+                    if skipped_count > 0:
+                        st.info(f"Skipped {skipped_count} employees (already processed or zero salary).")
+                    clear_cache()
+                    
+                except Exception as e:
+                    st.error(f"Error generating salary credits: {e}")
+        
+        with col2:
+            if st.button("📊 Generate Salary Sheet", use_container_width=True):
+                try:
+                    conn = get_db_connection()
+                    if conn is None:
+                        st.error("Database connection failed")
+                        return
+                        
+                    # Build query based on whether to deduct advances
+                    if deduct_advances:
+                        query = """
+                        SELECT
+                            e.name AS "Employee Name",
+                            e.designation AS "Designation",
+                            e.salary AS "Base Salary",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.credit ELSE 0 END), 0) AS "Total Credits",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.debit ELSE 0 END), 0) AS "Total Deductions",
+                            COALESCE(SUM(CASE WHEN l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0) AS "Advance Balance",
+                            (e.salary + 
+                             COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.credit ELSE 0 END), 0) - 
+                             COALESCE(SUM(CASE WHEN l.is_advance = 0 THEN l.debit ELSE 0 END), 0) -
+                             COALESCE(SUM(CASE WHEN l.is_advance = 1 THEN l.debit - l.credit ELSE 0 END), 0)) AS "Net Salary",
+                            e.bank AS "Bank",
+                            e.account_title AS "Account Title",
+                            e.account_no AS "Account No"
+                        FROM employees e
+                        LEFT JOIN employee_ledger l ON e.id = l.employee_id
+                            AND l.entry_date BETWEEN ? AND ?
+                        GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
+                        ORDER BY e.name
+                        """
+                    else:
+                        query = """
+                        SELECT
+                            e.name AS "Employee Name",
+                            e.designation AS "Designation",
+                            e.salary AS "Base Salary",
+                            COALESCE(SUM(l.credit), 0) AS "Total Credits",
+                            COALESCE(SUM(l.debit), 0) AS "Total Deductions",
+                            (e.salary + COALESCE(SUM(l.credit), 0) - COALESCE(SUM(l.debit), 0)) AS "Net Salary",
+                            e.bank AS "Bank",
+                            e.account_title AS "Account Title",
+                            e.account_no AS "Account No"
+                        FROM employees e
+                        LEFT JOIN employee_ledger l ON e.id = l.employee_id
+                            AND l.entry_date BETWEEN ? AND ?
+                        GROUP BY e.id, e.name, e.designation, e.salary, e.bank, e.account_title, e.account_no
+                        ORDER BY e.name
+                        """
+                    
+                    salary_df = pd.read_sql_query(query, conn, params=(str(first_day), str(last_day)))
+                    conn.close()
+
+                    if salary_df.empty:
+                        st.warning("No salary data found.")
+                    else:
+                        # Ensure proper data types and formatting
+                        numeric_cols = ['Base Salary', 'Total Credits', 'Total Deductions', 'Net Salary']
+                        if deduct_advances:
+                            numeric_cols.append('Advance Balance')
+                        
+                        for col in numeric_cols:
+                            if col in salary_df.columns:
+                                salary_df[col] = pd.to_numeric(salary_df[col], errors='coerce').fillna(0)
+                        
+                        salary_df = salary_df.fillna("")
+                        st.dataframe(salary_df, use_container_width=True)
+                        
+                        total_base = salary_df['Base Salary'].sum()
+                        total_net = salary_df['Net Salary'].sum()
+                        total_deductions = salary_df['Total Deductions'].sum()
+                        
+                        if deduct_advances:
+                            total_advances = salary_df['Advance Balance'].sum()
+                            st.success(f"**Summary:** Base Salary: Rs. {total_base:,.2f} | Deductions: Rs. {total_deductions:,.2f} | Advances: Rs. {total_advances:,.2f} | Net Payable: Rs. {total_net:,.2f}")
+                        else:
+                            st.success(f"**Summary:** Base Salary: Rs. {total_base:,.2f} | Deductions: Rs. {total_deductions:,.2f} | Net Payable: Rs. {total_net:,.2f}")
+                        
+                        pdf_bytes = generate_pdf_report(
+                            salary_df, 
+                            f"Salary Sheet - {selected_month.strftime('%B %Y')}", 
+                            date_range=(first_day, last_day),
+                            orientation='L',
+                            totals_cols=["Base Salary", "Total Credits", "Total Deductions", "Net Salary"] + (["Advance Balance"] if deduct_advances else [])
+                        )
+                        if pdf_bytes:
+                            st.download_button(
+                                label="📥 Download Salary Sheet (PDF)",
+                                data=pdf_bytes,
+                                file_name=f"Salary_Sheet_{selected_month.strftime('%Y_%m')}.pdf",
+                                mime="application/pdf",
+                                use_container_width=True
+                            )
+                        
+                except Exception as e:
+                    st.error(f"Error generating salary sheet: {e}")
+
+# --- Also fix the PDF class table method for better column handling ---
 class PDF(FPDF):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -173,11 +556,11 @@ class PDF(FPDF):
         self.cell(0, 6, "This PDF is system generated and does not require a signature.", 0, 0, 'C')
 
     def add_table(self, df, totals_cols=None):
-        self.set_font('Arial', 'B', 10)
+        self.set_font('Arial', 'B', 9)  # Reduced font size for better fit
         self.set_fill_color(224, 235, 255)
 
         num_cols = len(df.columns)
-        total_width = self.w - self.l_margin - self.r_margin - 10
+        total_width = self.w - self.l_margin - self.r_margin
 
         col_widths = self.calculate_dynamic_column_widths(df, total_width)
 
@@ -186,7 +569,7 @@ class PDF(FPDF):
             self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
         self.ln()
 
-        self.set_font('Arial', '', 9)
+        self.set_font('Arial', '', 8)  # Reduced font size for content
         fill = False
 
         for index, row in df.iterrows():
@@ -196,36 +579,44 @@ class PDF(FPDF):
             for i, col in enumerate(df.columns):
                 cell_text = str(row[col]) if pd.notna(row[col]) else ""
 
-                if pd.api.types.is_numeric_dtype(df[col]):
+                # Format numeric values
+                if any(keyword in col.lower() for keyword in ['salary', 'amount', 'balance', 'credit', 'debit', 'total']):
                     try:
-                        val = row[col]
-                        if pd.isna(val):
-                            cell_text = ""
-                        else:
-                            cell_text = f"{float(val):,.2f}"
+                        # Remove any existing formatting and convert to float
+                        clean_text = cell_text.replace(',', '').replace('Rs.', '').replace(' ', '')
+                        if clean_text and clean_text != 'None' and clean_text != 'nan':
+                            numeric_val = float(clean_text)
+                            cell_text = f"{numeric_val:,.2f}"
+                        elif cell_text == '' or cell_text == 'None' or cell_text == 'nan':
+                            cell_text = "0.00"
                     except:
+                        # If conversion fails, keep original text
                         pass
 
                 lines = self.wrap_text(cell_text, col_widths[i] - 4)
                 cell_data.append(lines)
                 max_line_count = max(max_line_count, len(lines))
 
-            row_height = max(7, max_line_count * 5)
+            row_height = max(8, max_line_count * 4)  # Reduced line height
 
             if self.get_y() + row_height > self.page_break_trigger:
                 self.add_page()
-                self.set_font('Arial', 'B', 10)
+                self.set_font('Arial', 'B', 9)
                 self.set_fill_color(224, 235, 255)
                 for i, col in enumerate(df.columns):
                     self.cell(col_widths[i], 8, str(col).replace('_', ' ').title(), 1, 0, 'C', 1)
                 self.ln()
-                self.set_font('Arial', '', 9)
+                self.set_font('Arial', '', 8)
 
             x_start = self.get_x()
             y_start = self.get_y()
 
             for i, (col, lines) in enumerate(zip(df.columns, cell_data)):
-                align = 'R' if pd.api.types.is_numeric_dtype(df[col]) else 'L'
+                # Determine alignment
+                if any(keyword in col.lower() for keyword in ['salary', 'amount', 'balance', 'credit', 'debit', 'total']):
+                    align = 'R'
+                else:
+                    align = 'L'
 
                 if fill:
                     self.set_fill_color(245, 245, 245)
@@ -236,42 +627,46 @@ class PDF(FPDF):
 
                 for j, line in enumerate(lines):
                     text_x = x_start + 1.5
-                    text_y = y_start + 1.5 + (j * 5)
+                    text_y = y_start + 1.5 + (j * 4)  # Reduced spacing
 
                     self.set_xy(text_x, text_y)
-                    self.cell(col_widths[i] - 3, 5, line, 0, 0, align)
+                    self.cell(col_widths[i] - 3, 4, line, 0, 0, align)  # Reduced height
 
                 x_start += col_widths[i]
 
             self.ln(row_height)
             fill = not fill
 
-        if totals_cols:
-            self.set_font('Arial', 'B', 10)
+        if totals_cols and not df.empty:
+            self.set_font('Arial', 'B', 9)
             self.set_fill_color(240, 240, 240)
 
             for i, col in enumerate(df.columns):
                 if i == 0:
                     self.cell(col_widths[i], 8, "GRAND TOTAL", 1, 0, 'R', 1)
                 elif col in totals_cols:
-                    total = pd.to_numeric(df[col], errors='coerce').sum()
-                    self.cell(col_widths[i], 8, f"{total:,.2f}", 1, 0, 'R', 1)
+                    try:
+                        # Extract numeric values for total calculation
+                        total_series = df[col].apply(lambda x: float(str(x).replace(',', '')) if str(x).replace(',', '').replace('.', '').isdigit() else 0)
+                        total = total_series.sum()
+                        self.cell(col_widths[i], 8, f"{total:,.2f}", 1, 0, 'R', 1)
+                    except:
+                        self.cell(col_widths[i], 8, "0.00", 1, 0, 'R', 1)
                 else:
                     self.cell(col_widths[i], 8, "", 1, 0, 'C', 1)
             self.ln()
 
     def calculate_dynamic_column_widths(self, df, total_width):
-        #asim pdf
-        min_width = 30
-        max_width = total_width / 3
+        min_width = 20  # Reduced minimum width
+        max_width = total_width / 3  # Reduced maximum width
 
         col_widths = []
         for col in df.columns:
-            header_w = len(str(col)) * 2.2
+            header_w = len(str(col)) * 1.8  # Reduced multiplier
 
             if not df.empty:
                 content_len = df[col].astype(str).str.len().max()
-                content_w = content_len * 1.6
+                content_w = content_len * 1.4  # Reduced multiplier
             else:
                 content_w = header_w
 
@@ -279,13 +674,22 @@ class PDF(FPDF):
             width = min(width, max_width)
             col_widths.append(width)
 
-        scale = total_width / sum(col_widths)
-        col_widths = [int(w * scale) for w in col_widths]
+        # Ensure total doesn't exceed available width
+        total_col_width = sum(col_widths)
+        if total_col_width > total_width:
+            scale = total_width / total_col_width
+            col_widths = [int(w * scale) for w in col_widths]
+        else:
+            # Distribute extra space proportionally
+            extra_space = total_width - total_col_width
+            if extra_space > 0:
+                scale = total_width / total_col_width
+                col_widths = [int(w * scale) for w in col_widths]
 
         return col_widths
 
     def wrap_text(self, text, max_width):
-        if not text or text == "None":
+        if not text or text == "None" or text == "nan":
             return ['']
 
         text = str(text)
@@ -298,17 +702,19 @@ class PDF(FPDF):
         cur = ""
 
         for w in words:
-            if self.get_string_width(cur + " " + w) <= max_width:
-                cur += " " + w if cur else w
+            test_line = cur + " " + w if cur else w
+            if self.get_string_width(test_line) <= max_width:
+                cur = test_line
             else:
-                lines.append(cur)
+                if cur:
+                    lines.append(cur)
                 cur = w
 
         if cur:
             lines.append(cur)
 
         return lines
-
+        #asimend
 # --- Helper Functions with Proper DB Handling ---
 @st.cache_data(ttl=60)
 def get_all_employees():
