@@ -207,12 +207,15 @@ elif template_choice == 'Authority Letter':
         elif not recipient_name or not authorized_person:
             st.error("Please fill in at least the Recipient and Authorized Person fields.")
         else:
+            # Create a new BytesIO object from the uploaded file's bytes
+            sig_file_like = io.BytesIO(signature_image.getvalue())
+            
             pdf_bytes = generate_authority_letter(
                 recipient_name,
                 recipient_address,
                 subject,
                 body_text,
-                signature_image
+                sig_file_like # Pass the new BytesIO object
             )
             st.download_button(
                 label="Download Authority Letter PDF",
@@ -248,12 +251,15 @@ elif template_choice == 'Tax Exemption Certificate':
         elif not client_name or not invoice_no:
             st.error("Please fill in at least the Client Name and Invoice # fields.")
         else:
+            # Create a new BytesIO object from the uploaded file's bytes
+            sig_file_like = io.BytesIO(signature_image.getvalue())
+
             pdf_bytes = generate_tax_exemption(
                 client_name,
                 invoice_no,
                 ntn,
                 body_text,
-                signature_image
+                sig_file_like # Pass the new BytesIO object
             )
             st.download_button(
                 label="Download Tax Exemption PDF",
@@ -287,10 +293,13 @@ elif template_choice == 'To Whom It May Concern':
         elif not subject or not body_text:
             st.error("Please fill in all fields.")
         else:
+            # Create a new BytesIO object from the uploaded file's bytes
+            sig_file_like = io.BytesIO(signature_image.getvalue())
+
             pdf_bytes = generate_generic_letter(
                 subject,
                 body_text,
-                signature_image
+                sig_file_like # Pass the new BytesIO object
             )
             st.download_button(
                 label="Download PDF",
