@@ -261,8 +261,9 @@ class PDF(FPDF):
             self.ln()
 
     def calculate_dynamic_column_widths(self, df, total_width):
-        min_width = 25
-        max_width = total_width / 2
+        #asim pdf
+        min_width = 30
+        max_width = total_width / 3
 
         col_widths = []
         for col in df.columns:
