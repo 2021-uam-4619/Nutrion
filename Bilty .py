@@ -37,6 +37,17 @@ PAKISTAN_CITIES = [
     "Malakand Agency", "Tank", "Karak", "Hyderabad", "Bhimber", "Mirpur"
 ]
 
+# List of available status options, reflecting the new, detailed flow
+STATUS_OPTIONS = [
+    "New Order", 
+    "Under Process", 
+    "Departed (Multan)", 
+    "Arrived at Destination Hub", 
+    "Out for Delivery", 
+    "Delivered", 
+    "Cancelled"
+]
+
 # Define the expected columns and their initial status for new entries
 COLUMNS = [
     "ID",
@@ -46,13 +57,11 @@ COLUMNS = [
     "Quantity (Units)",
     "Payment Status (Bilty)",
     "Destination Location",
+    "Current Location", # New column for real-time tracking
     "Received Date",
     "Status",
     "Receiver Contact"
 ]
-
-# List of available status options, reflecting the new flow
-STATUS_OPTIONS = ["New Order", "Under Process", "In Transit", "Delivered", "Cancelled"]
 
 
 # --- Core Data Functions ---
@@ -81,10 +90,14 @@ def add_shipment(data):
     # Automated status logic for initial entry
     if data['rec_date']:
         initial_status = "Delivered"
+        initial_location = data['location']
     elif data['dep_date']:
-        initial_status = "In Transit"
+        initial_status = "Departed (Multan)"
+        initial_location = "In Transit (From Multan)"
     else:
-        initial_status = data['status'] # Use manual override (New Order/Under Process/etc.)
+        # Default to 'New Order' if no dates provided, or use the manual selection
+        initial_status = data['status'] 
+        initial_location = "Multan Warehouse"
 
     new_row = pd.DataFrame([{
         "ID": new_id,
@@ -94,6 +107,7 @@ def add_shipment(data):
         "Quantity (Units)": data['quantity'],
         "Payment Status (Bilty)": data['bilty_status'],
         "Destination Location": data['location'],
+        "Current Location": initial_location,
         "Received Date": data['rec_date'].strftime('%Y-%m-%d') if data['rec_date'] else None,
         "Status": initial_status,
         "Receiver Contact": data['receiver_number']
@@ -129,8 +143,7 @@ def delete_shipment(shipment_id):
 
 def apply_status_automation(df):
     """
-    Applies the automatic status change logic to the DataFrame based on date fields.
-    This function is called right before saving edits.
+    Applies the automatic status change logic and updates Current Location based on status changes.
     """
     df_copy = df.copy()
     
@@ -138,17 +151,35 @@ def apply_status_automation(df):
     df_copy['Departure Date (Multan)'] = pd.to_datetime(df_copy['Departure Date (Multan)'], errors='coerce')
     df_copy['Received Date'] = pd.to_datetime(df_copy['Received Date'], errors='coerce')
 
+    # Status precedence logic
+    
     # 2. Automation: Received Date set -> Status is 'Delivered' (Highest priority)
-    # Only apply if status is not already Delivered or Cancelled
     rec_mask = (pd.notna(df_copy['Received Date'])) & (~df_copy['Status'].isin(['Delivered', 'Cancelled']))
     df_copy.loc[rec_mask, 'Status'] = 'Delivered'
+    df_copy.loc[rec_mask, 'Current Location'] = df_copy.loc[rec_mask, 'Destination Location'] + " (Delivered)"
 
-    # 3. Automation: Departure Date set -> Status is 'In Transit'
-    # Only apply if status is not already Delivered, In Transit, or Cancelled
-    dep_mask = (pd.notna(df_copy['Departure Date (Multan)'])) & (~df_copy['Status'].isin(['In Transit', 'Delivered', 'Cancelled']))
-    df_copy.loc[dep_mask, 'Status'] = 'In Transit'
+    # 3. Automation: Departure Date set -> Status is 'Departed (Multan)'
+    # Only applies if not already a post-departure status
+    post_depart_statuses = ['Departed (Multan)', 'Arrived at Destination Hub', 'Out for Delivery', 'Delivered', 'Cancelled']
+    dep_mask = (pd.notna(df_copy['Departure Date (Multan)'])) & (~df_copy['Status'].isin(post_depart_statuses))
+    df_copy.loc[dep_mask, 'Status'] = 'Departed (Multan)'
+    df_copy.loc[dep_mask, 'Current Location'] = "In Transit (From Multan)"
     
-    # 4. Convert dates back to string format for consistency
+    # 4. Handle manual status progression updates (to update Current Location)
+    
+    # Arrived at Hub
+    arrived_mask = (df_copy['Status'] == 'Arrived at Destination Hub')
+    df_copy.loc[arrived_mask, 'Current Location'] = df_copy.loc[arrived_mask, 'Destination Location'] + " Hub"
+
+    # Out for Delivery
+    out_mask = (df_copy['Status'] == 'Out for Delivery')
+    df_copy.loc[out_mask, 'Current Location'] = "Local Delivery in " + df_copy.loc[out_mask, 'Destination Location']
+    
+    # Pre-transit status
+    pre_transit_mask = (df_copy['Status'].isin(['New Order', 'Under Process']))
+    df_copy.loc[pre_transit_mask, 'Current Location'] = "Multan Warehouse"
+
+    # 5. Convert dates back to string format for consistency
     df_copy['Departure Date (Multan)'] = df_copy['Departure Date (Multan)'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Departure Date (Multan)']))
     df_copy['Received Date'] = df_copy['Received Date'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Received Date']))
     
@@ -162,6 +193,14 @@ if 'shipments' not in st.session_state:
             df = pd.read_csv(DATA_FILE)
             st.session_state.shipments = df
             st.session_state.shipments['ID'] = st.session_state.shipments['ID'].astype('Int64') 
+            
+            # Add missing 'Current Location' column if loading an old file
+            if 'Current Location' not in st.session_state.shipments.columns:
+                 st.session_state.shipments['Current Location'] = "Multan Warehouse"
+                 # Run automation once to set initial locations based on dates
+                 st.session_state.shipments = apply_status_automation(st.session_state.shipments)
+                 save_data() # Save updated structure
+            
         except Exception as e:
             st.warning(f"Error loading existing data from CSV: {e}. Starting with an empty table.")
             st.session_state.shipments = pd.DataFrame(columns=COLUMNS)
@@ -195,12 +234,15 @@ with st.sidebar:
         product_name = st.selectbox("Product Name", options=PRODUCT_LIST, key="product_name_select")
         quantity = st.number_input("Quantity (Units)", min_value=1, step=1, key="quantity_input")
         
-        location = st.selectbox(
-            "Destination City",
-            options=PAKISTAN_CITIES,
-            placeholder="Select city...",
-            key="location_select"
+        # User can add city name or location manually, but we offer suggestions
+        location_input = st.text_input(
+            "Destination City / Location",
+            placeholder="Enter full city name (e.g., Lahore)",
+            key="location_input"
         )
+        
+        # Allow user to pick from list or use their input
+        location = location_input if location_input else "N/A"
         
         bilty_status = st.radio(
             "Payment Status (Bilty)",
@@ -209,13 +251,13 @@ with st.sidebar:
             key="bilty_status_radio"
         )
         
-        st.subheader("Dates & Status")
+        st.subheader("Dates & Process")
 
         dep_date = st.date_input(
             "Departure Date (from Multan)",
             value=None,
             max_value=datetime.today(),
-            help="Sets status to 'In Transit'."
+            help="Sets status to 'Departed (Multan)'."
         )
         
         rec_date = st.date_input(
@@ -262,16 +304,16 @@ st.title("Nutrion Logistics Management Dashboard")
 col1, col2, col3, col4, col5 = st.columns(5)
 total_shipments = len(st.session_state.shipments)
 new_orders = st.session_state.shipments[st.session_state.shipments['Status'] == 'New Order'].shape[0]
-in_transit = st.session_state.shipments[st.session_state.shipments['Status'] == 'In Transit'].shape[0]
+under_process = st.session_state.shipments[st.session_state.shipments['Status'] == 'Under Process'].shape[0]
+in_transit_related = st.session_state.shipments[st.session_state.shipments['Status'].isin(["Departed (Multan)", "Arrived at Destination Hub", "Out for Delivery"])].shape[0]
 delivered = st.session_state.shipments[st.session_state.shipments['Status'] == 'Delivered'].shape[0]
-paid = st.session_state.shipments[st.session_state.shipments['Payment Status (Bilty)'] == 'Paid'].shape[0]
 
 
 col1.metric("Total Shipments", total_shipments)
 col2.metric("New Orders", new_orders)
-col3.metric("In Transit", in_transit)
-col4.metric("Delivered", delivered, delta=f"{delivered/total_shipments*100 if total_shipments > 0 else 0:.1f}% success", delta_color="normal")
-col5.metric("Bilty Paid", paid)
+col3.metric("Under Process", under_process, delta="Needs Action", delta_color="inverse")
+col4.metric("In Transit / Delivery", in_transit_related)
+col5.metric("Delivered", delivered, delta=f"{delivered/total_shipments*100 if total_shipments > 0 else 0:.1f}% success", delta_color="normal")
 
 st.markdown("---")
 
@@ -281,16 +323,61 @@ tab_live, tab_reports, tab_manage = st.tabs(["📊 Live Tracker & Update", "📋
 
 with tab_live:
     
-    st.subheader("Filter and Update Shipments")
+    # 1. Dedicated Section for Under Process Orders
+    st.header("⏳ Urgent Action Required: Under Process Orders")
+    
+    df_under_process = st.session_state.shipments[st.session_state.shipments['Status'] == 'Under Process'].copy()
+    
+    if not df_under_process.empty:
+        st.info(f"You have **{len(df_under_process)}** orders currently under preparation. Please assign Departure Dates to move them to **In Transit**.")
+        
+        # Display as a clean list of tiles
+        cols = st.columns(min(len(df_under_process), 4)) # Max 4 columns
+        
+        for i, row in df_under_process.head(4).iterrows(): # Show top 4 in columns for visual appeal
+            with cols[i % len(cols)]:
+                with st.container(border=True):
+                    st.markdown(f"**Shipment ID:** {row['ID']}")
+                    st.markdown(f"**Client:** {row['Client Name']}")
+                    st.markdown(f"**Destination:** {row['Destination Location']}")
+                    st.markdown(f"**Product:** {row['Product Name']}")
+                    st.markdown(f"**Status:** :orange[**{row['Status']}**]")
+                    
+                    # Add a simple button to jump to the editor for this item
+                    if st.button(f"Update #{row['ID']}", key=f"update_btn_{row['ID']}", use_container_width=True):
+                        # Simply display a message directing them to the table below
+                        st.session_state.filter_client_live = row['Client Name']
+                        st.toast(f"Filter set for Client: {row['Client Name']}. Scroll down to the table.", icon="🔍")
+
+
+    st.markdown("---")
+    st.header("🚚 Active Tracking & Updates")
     
     if st.session_state.shipments.empty:
         st.info("No shipment records found. Use the sidebar to add a new entry!")
     else:
-        # --- Filtering Section (Moved into the tab) ---
+        # --- Filtering Section ---
         col_f1, col_f2, col_f3 = st.columns(3)
         
-        filter_status = col_f1.multiselect("Filter by Status", options=STATUS_OPTIONS, default=["In Transit", "Under Process"])
-        filter_client = col_f2.text_input("Search by Client Name", placeholder="e.g., ABC Farms")
+        filter_status = col_f1.multiselect(
+            "Filter by Tracking Stage", 
+            options=STATUS_OPTIONS, 
+            default=["Departed (Multan)", "Arrived at Destination Hub", "Out for Delivery"]
+        )
+        
+        # Initialize filter search term from button click, if any
+        if 'filter_client_live' not in st.session_state:
+            st.session_state.filter_client_live = ""
+            
+        filter_client = col_f2.text_input(
+            "Search by Client Name", 
+            placeholder="e.g., ABC Farms",
+            value=st.session_state.filter_client_live,
+            key="client_search_input"
+        )
+        # Reset filter state after use
+        st.session_state.filter_client_live = filter_client 
+
         filter_product = col_f3.selectbox("Filter by Product", options=["All"] + PRODUCT_LIST, index=0)
 
         # Apply Filters
@@ -307,8 +394,7 @@ with tab_live:
 
 
         st.markdown("---")
-        st.markdown("### Editable Shipment Table (Edit Any Row)")
-        st.caption("Editing the Departure Date or Received Date will **automatically update the Status**.")
+        st.caption("Editing the Departure or Received Date will **automatically update the Status**.")
         
         # Display the data editor (allows editing/updating)
         edited_df = st.data_editor(
@@ -316,18 +402,18 @@ with tab_live:
             use_container_width=True,
             column_config={
                 "Status": st.column_config.SelectboxColumn(
-                    "Status",
+                    "Status (Tracking Step)",
                     options=STATUS_OPTIONS,
                     required=True,
                 ),
-                # Date columns for automation trigger
+                "Current Location": st.column_config.TextColumn("Current Location", help="Updated automatically based on Status"),
                 "Departure Date (Multan)": st.column_config.DateColumn("Departure Date (Multan)"),
                 "Received Date": st.column_config.DateColumn("Received Date"),
                 "Payment Status (Bilty)": st.column_config.SelectboxColumn(
                     "Payment Status (Bilty)",
                     options=["Paid", "Not Paid"],
                 ),
-                "ID": st.column_config.TextColumn(disabled=True), # Prevent editing the ID
+                "ID": st.column_config.TextColumn(disabled=True),
             },
             hide_index=True,
             key="live_data_editor"
@@ -345,8 +431,7 @@ with tab_live:
                 st.session_state.shipments.loc[st.session_state.shipments['ID'] == row['ID']] = row
             
             if save_data():
-                st.toast("Table changes and automated status updates saved successfully!", icon="✅")
-                # Rerun to refresh the display with new metrics/status
+                st.toast("Table changes and automated tracking updates saved successfully!", icon="✅")
                 st.rerun()
 
 with tab_reports:
@@ -361,7 +446,7 @@ with tab_reports:
         with st.container(border=True):
             col_r1, col_r2, col_r3 = st.columns(3)
             
-            report_status = col_r1.multiselect("Status(es) for Report", options=STATUS_OPTIONS, default=STATUS_OPTIONS)
+            report_status = col_r1.multiselect("Status(es) for Report", options=STATUS_OPTIONS, default=["Delivered"])
             report_client = col_r2.text_input("Filter by Client Name (Optional)", placeholder="Client name")
             report_location = col_r3.multiselect("Filter by Destination City", options=PAKISTAN_CITIES)
             
@@ -401,30 +486,39 @@ with tab_manage:
         st.info("No records available to delete.")
     else:
         st.markdown("### 🗑️ Delete Record by ID")
-        st.markdown("To delete a record, find its **Shipment ID** in the **Live Tracker** tab, select it below, and confirm deletion.")
+        st.markdown("To delete a record, search for the **Shipment ID** below, verify the details, and confirm deletion.")
         
-        # Get list of existing IDs
         shipment_ids = st.session_state.shipments['ID'].tolist()
+        df_display = st.session_state.shipments[['ID', 'Client Name', 'Destination Location', 'Status']].copy()
 
         with st.container(border=True):
             st.markdown("**⚠️ Warning: Deletion is Permanent**")
             
-            col_del_1, col_del_2 = st.columns([0.7, 0.3])
-
-            with col_del_1:
-                id_to_delete = st.selectbox(
-                    "Select Shipment ID to Permanently Delete",
-                    options=shipment_ids,
-                    index=None,
-                    placeholder="Select an ID to delete...",
-                    key="id_to_delete_select"
-                )
+            # Allow searching for the ID by selecting it
+            id_to_delete = st.selectbox(
+                "Search and Select Shipment ID to Permanently Delete",
+                options=shipment_ids,
+                index=None,
+                placeholder="Select an ID to delete...",
+                key="id_to_delete_select_manage"
+            )
             
-            with col_del_2:
-                # Add a vertical space to align the button
-                st.markdown("<br>", unsafe_allow_html=True) 
-                delete_button = st.button("🚨 Confirm Delete", type="primary", disabled=(id_to_delete is None), use_container_width=True)
+            # Show details of the selected record
+            if id_to_delete is not None:
+                selected_row = df_display[df_display['ID'] == int(id_to_delete)].iloc[0]
+                
+                st.warning(f"""
+                **Confirm Deletion of:**
+                - **ID:** {selected_row['ID']}
+                - **Client:** {selected_row['Client Name']}
+                - **Location:** {selected_row['Destination Location']}
+                - **Status:** {selected_row['Status']}
+                """)
+                
+                delete_button = st.button("🚨 Confirm Permanent Delete", type="primary", use_container_width=True)
+            else:
+                delete_button = st.button("🚨 Confirm Permanent Delete", type="primary", disabled=True, use_container_width=True)
 
             if delete_button and id_to_delete is not None:
                 if delete_shipment(id_to_delete):
-                    st.rerun() # Rerun to refresh the UI after deletion
+                    st.rerun()
