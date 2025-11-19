@@ -1,310 +1,309 @@
 import streamlit as st
-from fpdf import FPDF
+import pandas as pd
 from datetime import datetime
-import io
+import os 
 
-# --- Constants based on your notes ---
-COMPANY_NAME = "Nutriix"
-COMPANY_ADDRESS = "Lower Ground Office #24, Real City, Main Sargodha Road, Faisalabad"
-CEO_NAME = "Mansoor Javeed"
-CEO_TITLE = "Chief Executive Officer"
+# --- Configuration and Initialization ---
 
-# --- PDF Class with Header and Footer ---
-class PDF(FPDF):
-    def header(self):
-        """Creates the letterhead for each page."""
-        self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, COMPANY_NAME, 0, 1, 'C')
-        self.set_font('Arial', '', 10)
-        self.cell(0, 5, COMPANY_ADDRESS, 0, 1, 'C')
-        # Add a line break
-        self.ln(15)
+# Define the file path for persistent data storage
+DATA_FILE = 'shipments_data.csv'
 
-    def footer(self):
-        """Creates the signature block at the bottom of the page."""
-        self.set_y(-60) # Position 6 cm from bottom
-        self.set_font('Arial', '', 12)
-        
-        # Check if signature image object exists
-        if hasattr(self, 'signature_img_obj') and self.signature_img_obj:
-            try:
-                # Use the in-memory image object
-                # We save the current x/y to position text correctly
-                x = self.get_x()
-                y = self.get_y()
-                # We must specify the type ('PNG') when using a file-like object
-                self.image(self.signature_img_obj, x=x, y=y, w=40, type='PNG')
-                # Move below the image for the text
-                self.set_y(y + 25) 
-            except Exception as e:
-                st.warning(f"Could not load signature image. Error: {e}")
-                self.cell(0, 10, "(Signature Placeholder)", 0, 1, 'L')
-                self.set_y(self.get_y() + 25) # Move down anyway
-        else:
-            self.cell(0, 10, "(Signature Placeholder - Please upload)", 0, 1, 'L')
-            self.ln(5)
-
-        # Signature line
-        self.line(self.get_x(), self.get_y(), self.get_x() + 70, self.get_y())
-        self.ln(5)
-        # CEO Name and Title
-        self.cell(0, 5, CEO_NAME, 0, 1, 'L')
-        self.cell(0, 5, f"{CEO_TITLE}, {COMPANY_NAME}", 0, 1, 'L')
-
-# --- Helper function to create the base PDF ---
-def create_base_pdf(signature_img):
-    """Initializes the PDF object and adds the signature image to it."""
-    pdf = PDF()
-    pdf.set_auto_page_break(auto=True, margin=25)
-    pdf.add_page()
-    pdf.set_left_margin(20)
-    pdf.set_right_margin(20)
-    pdf.set_font('Arial', '', 12)
-    
-    # Pass the in-memory image object to the class instance
-    pdf.signature_img_obj = signature_img
-    return pdf
-
-# --- Functions to generate specific PDFs ---
-
-def generate_authority_letter(recipient, address, subject, body, sig_img):
-    """Generates the Authority Letter PDF."""
-    pdf = create_base_pdf(sig_img)
-    date_str = datetime.now().strftime("%B %d, %Y")
-
-    # Letter Date
-    pdf.cell(0, 10, f"Date: {date_str}", 0, 1, 'R')
-    pdf.ln(5)
-    
-    # Recipient Info
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 7, recipient, 0, 1, 'L')
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(0, 7, address, 0, 1, 'L')
-    pdf.ln(10)
-
-    # Subject
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Subject: {subject}", 0, 1, 'L')
-    pdf.ln(5)
-    
-    # Body
-    pdf.set_font('Arial', '', 12)
-    pdf.multi_cell(0, 5, body)
-    
-    return pdf.output() # Returns bytes
-
-def generate_tax_exemption(client, invoice, ntn, body, sig_img):
-    """Generates the Tax Exemption PDF."""
-    pdf = create_base_pdf(sig_img)
-    date_str = datetime.now().strftime("%B %d, %Y")
-
-    # Title
-    pdf.set_font('Arial', 'B', 14)
-    pdf.cell(0, 10, "Tax Exemption Certificate", 0, 1, 'C')
-    pdf.ln(10)
-
-    # Date
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(0, 10, f"Date: {date_str}", 0, 1, 'R')
-    pdf.ln(5)
-    
-    # Details
-    pdf.cell(0, 7, f"Client Name: {client}", 0, 1, 'L')
-    pdf.cell(0, 7, f"Invoice #: {invoice}", 0, 1, 'L')
-    pdf.cell(0, 7, f"NTN: {ntn}", 0, 1, 'L')
-    pdf.ln(10)
-    
-    # Body
-    pdf.multi_cell(0, 5, body)
-    return pdf.output() # Returns bytes
-
-def generate_generic_letter(subject, body, sig_img):
-    """Generates a 'To Whom It May Concern' letter."""
-    pdf = create_base_pdf(sig_img)
-    date_str = datetime.now().strftime("%B %d, %Y")
-
-    # Date
-    pdf.set_font('Arial', '', 12)
-    pdf.cell(0, 10, f"Date: {date_str}", 0, 1, 'R')
-    pdf.ln(5)
-    
-    # Recipient
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 7, "To Whom It May Concern", 0, 1, 'L')
-    pdf.ln(10)
-
-    # Subject
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Subject: {subject}", 0, 1, 'L')
-    pdf.ln(5)
-    
-    # Body
-    pdf.set_font('Arial', '', 12)
-    pdf.multi_cell(0, 5, body)
-    return pdf.output() # Returns bytes
-
-# --- Streamlit App ---
-
-st.set_page_config(layout="centered")
-st.title("📄 PDF Template Generator")
-st.header(f"Company: {COMPANY_NAME}")
-
-# --- Sidebar for settings and template selection ---
-st.sidebar.title("Settings")
-
-# 1. Signature Uploader
-st.sidebar.header("CEO Signature")
-signature_image = st.sidebar.file_uploader(
-    "Upload CEO Signature (PNG format preferred)", 
-    type=["png"]
+# Set page title and layout
+st.set_page_config(
+    page_title="Nutrion Logistics Tracker", # Updated company name
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
-if signature_image:
-    st.sidebar.image(signature_image, width=150)
-else:
-    st.sidebar.warning("Please upload a signature to generate a PDF.")
 
-# 2. Template Selection
-st.sidebar.header("Choose Template")
-template_options = [
-    "Select a template...",
-    "Authority Letter",
-    "Tax Exemption Certificate",
-    "To Whom It May Concern" # Added this one for you
+# List of all products as specified by the user
+PRODUCT_LIST = [
+    "Strophase G", "Strophase P", "Strozyme NSP", "SP200", "SP300",
+    "SP300 Advance", "Monica", "Linco Magic", "Enra Magic", "InduceAcid Plus",
+    "InduceAcid Buty", "Coxibac", "Strozyme XYL", "Super Ener Emusifier",
+    "Antioxdant", "Toxin Binder Weilituo", "Toxin Clean", "GutPro 60 (Tributyrin)",
+    "InduceAcid Liquid", "Syngrow"
 ]
-template_choice = st.sidebar.selectbox("Select a document:", template_options)
 
-# --- Main Page - Input Fields based on selection ---
+# Define the expected columns for a clean DataFrame structure
+COLUMNS = [
+    "ID",
+    "Departure Date (Multan)",
+    "Client Name",
+    "Product Name",
+    "Quantity (Units)",
+    "Payment Status (Bilty)",
+    "Destination Location",
+    "Received Date",
+    "Status",
+    "Receiver Contact"
+]
 
-if template_choice == 'Select a template...':
-    st.info("Please choose a template from the sidebar to begin.")
+# --- Main Functions ---
 
-# --- Template 1: Authority Letter ---
-elif template_choice == 'Authority Letter':
-    st.subheader("Authority Letter")
+def save_data():
+    """Saves the current shipment records DataFrame to a CSV file."""
+    try:
+        st.session_state.shipments.to_csv(DATA_FILE, index=False)
+        return True
+    except Exception as e:
+        st.error(f"Failed to save data to file: {e}")
+        return False
+
+def add_shipment(data):
+    """Adds a new shipment record to the session state DataFrame and saves to file."""
+    max_id = st.session_state.shipments['ID'].max() if not st.session_state.shipments.empty else 0
+    new_id = max_id + 1
     
-    with st.form("auth_form"):
-        recipient_name = st.text_input("Recipient Name (e.g., 'The Branch Manager, HBL')")
-        recipient_address = st.text_input("Recipient Address (e.g., 'Main Branch, Faisalabad')")
-        subject = st.text_input("Subject:", "Authority Letter")
-        authorized_person = st.text_input("Authorized Person's Name:")
-        authorized_cnic = st.text_input("Authorized Person's CNIC:")
-        
-        default_body = (
-            f"This is to certify that Mr./Ms. {authorized_person or '[Person Name]'} holding CNIC No. {authorized_cnic or '[CNIC Number]'} "
-            f"is an employee of {COMPANY_NAME} and is hereby authorized to act on our behalf to "
-            "[Specify reason, e.g., 'collect bank statements', 'submit documents', etc.].\n\n"
-            "Any and all acts carried out by him/her on this behalf shall be binding on the company.\n\n"
-            "This authority is valid until [Insert Date or 'further notice']."
-        )
-        body_text = st.text_area("Body:", value=default_body, height=250)
-        
-        submit_button = st.form_submit_button(label="Generate PDF")
+    new_row = pd.DataFrame([{
+        "ID": new_id,
+        "Departure Date (Multan)": data['dep_date'].strftime('%Y-%m-%d'),
+        "Client Name": data['client_name'],
+        "Product Name": data['product_name'],
+        "Quantity (Units)": data['quantity'],
+        "Payment Status (Bilty)": data['bilty_status'],
+        "Destination Location": data['location'],
+        "Received Date": data['rec_date'].strftime('%Y-%m-%d') if data['rec_date'] else None,
+        "Status": data['status'],
+        "Receiver Contact": data['receiver_number']
+    }])
 
-    if submit_button:
-        if not signature_image:
-            st.error("Please upload the CEO's signature in the sidebar.")
-        elif not recipient_name or not authorized_person:
-            st.error("Please fill in at least the Recipient and Authorized Person fields.")
-        else:
-            # Create a new BytesIO object from the uploaded file's bytes
-            sig_file_like = io.BytesIO(signature_image.getvalue())
-            
-            pdf_bytes = generate_authority_letter(
-                recipient_name,
-                recipient_address,
-                subject,
-                body_text,
-                sig_file_like # Pass the new BytesIO object
-            )
-            st.download_button(
-                label="Download Authority Letter PDF",
-                data=pdf_bytes,
-                file_name=f"Authority_Letter_{authorized_person.replace(' ', '_')}.pdf",
-                mime="application/pdf"
-            )
-            st.success("PDF Generated!")
-
-# --- Template 2: Tax Exemption ---
-elif template_choice == 'Tax Exemption Certificate':
-    st.subheader("Tax Exemption Certificate")
-
-    with st.form("tax_form"):
-        client_name = st.text_input("Client Name:")
-        invoice_no = st.text_input("Invoice #:")
-        ntn = st.text_input("Company NTN:", value="[Your NTN Here]")
-        
-        default_body = (
-            f"This is to certify that {COMPANY_NAME}, holding National Tax Number (NTN) {ntn or '[Your NTN Here]'}, "
-            f"has issued Invoice #{invoice_no or '[Invoice #]'} to {client_name or '[Client Name]'}.\n\n"
-            "We declare that [State reason for exemption, e.g., 'our company is exempt from sales tax under schedule X of the Sales Tax Act, 1990', "
-            "or 'the services provided are not subject to FED', etc.].\n\n"
-            "Therefore, no tax has been charged or collected on the aforementioned invoice."
-        )
-        body_text = st.text_area("Certificate Body:", value=default_body, height=200)
-        
-        submit_button = st.form_submit_button(label="Generate PDF")
+    st.session_state.shipments = pd.concat([st.session_state.shipments, new_row], ignore_index=True)
     
-    if submit_button:
-        if not signature_image:
-            st.error("Please upload the CEO's signature in the sidebar.")
-        elif not client_name or not invoice_no:
-            st.error("Please fill in at least the Client Name and Invoice # fields.")
-        else:
-            # Create a new BytesIO object from the uploaded file's bytes
-            sig_file_like = io.BytesIO(signature_image.getvalue())
+    # Save the updated data to the CSV file for persistence
+    if save_data():
+        st.success(f"Shipment #{new_id} added and saved successfully for Client: {data['client_name']}")
 
-            pdf_bytes = generate_tax_exemption(
-                client_name,
-                invoice_no,
-                ntn,
-                body_text,
-                sig_file_like # Pass the new BytesIO object
-            )
-            st.download_button(
-                label="Download Tax Exemption PDF",
-                data=pdf_bytes,
-                file_name=f"Tax_Exemption_{client_name.replace(' ', '_')}.pdf",
-                mime="application/pdf"
-            )
-            st.success("PDF Generated!")
+def delete_shipment(shipment_id):
+    """Deletes a shipment record by ID and saves to file."""
+    if st.session_state.shipments.empty:
+        st.warning("No records to delete.")
+        return False
 
-# --- Template 3: To Whom It May Concern ---
-elif template_choice == 'To Whom It May Concern':
-    st.subheader("To Whom It May Concern")
-
-    with st.form("generic_form"):
-        subject = st.text_input("Subject:", "Letter of Recommendation")
+    if shipment_id in st.session_state.shipments['ID'].values:
+        # Filter out the row with the given ID
+        st.session_state.shipments = st.session_state.shipments[
+            st.session_state.shipments['ID'] != shipment_id
+        ].copy() # Use .copy() to avoid SettingWithCopyWarning
         
-        default_body = (
-            "This letter is to certify that [Name of Person] was employed at "
-            f"{COMPANY_NAME} from [Start Date] to [End Date] as a [Job Title].\n\n"
-            "During their tenure, [He/She/They] was/were responsible for [briefly describe duties].\n\n"
-            "[Add performance details or recommendations here.]\n\n"
-            "We wish [him/her/them] all the best in [his/her/their] future endeavors."
+        # Reset index after deletion (optional, but good practice)
+        st.session_state.shipments.reset_index(drop=True, inplace=True)
+        
+        if save_data():
+            st.success(f"Shipment #{shipment_id} deleted and saved successfully.")
+            return True
+    else:
+        st.error(f"Shipment ID #{shipment_id} not found.")
+    return False
+
+# Initialize session state for storing shipment data (and load from file)
+if 'shipments' not in st.session_state:
+    if os.path.exists(DATA_FILE):
+        try:
+            df = pd.read_csv(DATA_FILE)
+            st.session_state.shipments = df
+            st.session_state.shipments['ID'] = st.session_state.shipments['ID'].astype(int)
+        except Exception as e:
+            st.error(f"Error loading existing data from CSV: {e}. Starting with an empty table.")
+            st.session_state.shipments = pd.DataFrame(columns=COLUMNS)
+    else:
+        st.session_state.shipments = pd.DataFrame(columns=COLUMNS)
+
+
+# --- Data Entry Form (Sidebar) ---
+
+with st.sidebar:
+    # Company Logo and Info
+    # NOTE: Since we cannot load local files like 'logo.png', we use a placeholder image URL.
+    # Replace the URL below with your actual logo path or hosted URL.
+    LOGO_URL = "https://placehold.co/150x50/3c82f6/FFFFFF?text=Nutrion+Logo"
+    st.image(LOGO_URL, caption="Your Company Logo Here")
+    st.markdown("---")
+    st.caption("### Nutrion Company Details")
+    st.markdown(
+        """
+        **Office:** # 34, Lower Ground, Pearl City Towers, Sargodha Road, Faisalabad
+        
+        **Email:** info@nutrion.pk
+        """
+    )
+    st.markdown("---")
+    
+    st.header("🚛 New Shipment Entry")
+    st.markdown("---")
+
+    with st.form("shipment_form", clear_on_submit=True):
+        dep_date = st.date_input(
+            "Departure Date (from Multan)",
+            value="today",
+            max_value=datetime.today(),
+            help="The date the shipment left Multan."
         )
-        body_text = st.text_area("Body:", value=default_body, height=250)
+
+        client_name = st.text_input("Client Name", placeholder="Enter full client name", key="client_name_input")
+
+        product_name = st.selectbox(
+            "Product Name",
+            options=PRODUCT_LIST,
+            key="product_name_select"
+        )
+
+        quantity = st.number_input(
+            "Quantity (Units)",
+            min_value=1,
+            step=1,
+            key="quantity_input",
+            help="Total number of units or bags."
+        )
+
+        bilty_status = st.radio(
+            "Payment Status (Bilty)",
+            options=["Paid", "Not Paid"],
+            horizontal=True,
+            key="bilty_status_radio"
+        )
+
+        location = st.text_input("Destination Location", placeholder="City/Region", key="location_input")
+
+        rec_date = st.date_input(
+            "Received Date",
+            value=None,
+            help="The date the shipment was received (leave blank if not yet delivered).",
+        )
+
+        status = st.selectbox(
+            "Shipment Status",
+            options=["In Transit", "Delivered", "Delayed", "Cancelled"],
+            key="status_select"
+        )
+
+        receiver_number = st.text_input("Receiver Contact Number", placeholder="e.g., 03XX-XXXXXXX", key="receiver_number_input")
+
+        st.markdown("---")
+        submit_button = st.form_submit_button("💾 Save Shipment Record")
+
+        if submit_button:
+            if not client_name or not location:
+                st.error("Please fill in Client Name and Destination Location.")
+            else:
+                shipment_data = {
+                    'dep_date': dep_date,
+                    'client_name': client_name,
+                    'product_name': product_name,
+                    'quantity': quantity,
+                    'bilty_status': bilty_status,
+                    'location': location,
+                    'rec_date': rec_date,
+                    'status': status,
+                    'receiver_number': receiver_number
+                }
+                add_shipment(shipment_data)
+
+
+# --- Dashboard View (Main Content) ---
+
+st.title("Nutrion Logistics Management Dashboard") # Updated company name
+st.subheader("Current Shipment Records")
+
+# Display key metrics using columns
+col1, col2, col3 = st.columns(3)
+total_shipments = len(st.session_state.shipments)
+in_transit = st.session_state.shipments[st.session_state.shipments['Status'] == 'In Transit'].shape[0]
+delivered = st.session_state.shipments[st.session_state.shipments['Status'] == 'Delivered'].shape[0]
+
+col1.metric("Total Shipments", total_shipments)
+col2.metric("In Transit", in_transit)
+col3.metric("Delivered", delivered)
+
+st.markdown("---")
+
+# --- Record Deletion Section ---
+if not st.session_state.shipments.empty:
+    st.header("Remove Shipment Record")
+    
+    # Get list of existing IDs
+    shipment_ids = st.session_state.shipments['ID'].tolist()
+
+    with st.container(border=True):
+        st.markdown("**⚠️ Permanent Deletion**")
         
-        submit_button = st.form_submit_button(label="Generate PDF")
+        col_del_1, col_del_2 = st.columns([0.7, 0.3])
 
-    if submit_button:
-        if not signature_image:
-            st.error("Please upload the CEO's signature in the sidebar.")
-        elif not subject or not body_text:
-            st.error("Please fill in all fields.")
+        with col_del_1:
+            id_to_delete = st.selectbox(
+                "Select Shipment ID to Delete",
+                options=shipment_ids,
+                index=None,
+                placeholder="Select an ID...",
+                key="id_to_delete_select"
+            )
+        
+        with col_del_2:
+            st.markdown("<br>", unsafe_allow_html=True) 
+            delete_button = st.button("🗑️ Confirm Delete", type="primary", disabled=(id_to_delete is None), use_container_width=True)
+
+        if delete_button and id_to_delete is not None:
+            # Delete record and rerun to refresh the table and metrics
+            if delete_shipment(id_to_delete):
+                st.rerun()
+
+    st.markdown("---")
+
+# Display the main data table
+if not st.session_state.shipments.empty:
+    st.markdown("### All Shipments Detail")
+
+    # Styling for visual emphasis on status
+    def style_status(val):
+        """Applies color coding based on the shipment status."""
+        if val == 'Delivered':
+            color = 'background-color: #d4edda; color: #155724'  # Green
+        elif val == 'In Transit':
+            color = 'background-color: #fff3cd; color: #856404'  # Yellow/Orange
+        elif val == 'Delayed':
+            color = 'background-color: #f8d7da; color: #721c24'  # Red
         else:
-            # Create a new BytesIO object from the uploaded file's bytes
-            sig_file_like = io.BytesIO(signature_image.getvalue())
+            color = ''
+        return color
 
-            pdf_bytes = generate_generic_letter(
-                subject,
-                body_text,
-                sig_file_like # Pass the new BytesIO object
-            )
-            st.download_button(
-                label="Download PDF",
-                data=pdf_bytes,
-                file_name=f"{subject.replace(' ', '_')}.pdf",
-                mime="application/pdf"
-            )
-            st.success("PDF Generated!")
+    # Display the data editor (allows editing)
+    edited_df = st.data_editor(
+        st.session_state.shipments,
+        use_container_width=True,
+        column_config={
+            "Status": st.column_config.SelectboxColumn(
+                "Status",
+                options=["In Transit", "Delivered", "Delayed", "Cancelled"],
+                required=True,
+            ),
+            "Received Date": st.column_config.DateColumn("Received Date"),
+            "Payment Status (Bilty)": st.column_config.SelectboxColumn(
+                "Payment Status (Bilty)",
+                options=["Paid", "Not Paid"],
+            ),
+            "ID": st.column_config.TextColumn(disabled=True), # Prevent editing the ID
+        },
+        hide_index=True,
+        key="data_editor"
+    )
+
+    # Check if the edited DataFrame is different from the stored one and save it
+    if not st.session_state.shipments.equals(edited_df):
+        st.session_state.shipments = edited_df
+        if save_data():
+            st.toast("Table changes saved successfully!", icon="✅")
+
+
+    st.caption("Note: Changes made directly in the table above (Status, Dates, Payment) are automatically saved.")
+
+    # Download button
+    csv_data = st.session_state.shipments.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Data as CSV",
+        data=csv_data,
+        file_name='logistics_shipments_export.csv',
+        mime='text/csv',
+    )
+
+
+else:
+    st.info("No shipment records found. Use the sidebar to add a new entry!")
