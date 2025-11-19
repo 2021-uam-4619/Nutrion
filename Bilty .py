@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime, date
 import os
 import json
+import uuid
+from typing import Dict, List, Optional
 
 # Page configuration
 st.set_page_config(
@@ -12,7 +14,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
+# Custom CSS for professional styling
 st.markdown("""
 <style>
     .main-header {
@@ -20,30 +22,69 @@ st.markdown("""
         color: #1f77b4;
         text-align: center;
         margin-bottom: 2rem;
+        font-weight: bold;
     }
     .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 4px solid #1f77b4;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .urgent-card {
-        background-color: #fff7e6;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 4px solid #ff4b4b;
+        background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .success-card {
-        background-color: #e6f7e6;
+        background: linear-gradient(135deg, #00b894 0%, #00a085 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .warning-card {
+        background: linear-gradient(135deg, #fdcb6e 0%, #e17055 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .info-card {
+        background: linear-gradient(135deg, #74b9ff 0%, #0984e3 100%);
+        color: white;
+        padding: 1.5rem;
+        border-radius: 15px;
+        text-align: center;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    .shipment-card {
+        background: white;
         padding: 1rem;
         border-radius: 10px;
-        border-left: 4px solid #00cc66;
+        border-left: 5px solid #1f77b4;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
     }
+    .status-pending { background-color: #fff3cd; border-left-color: #ffc107; }
+    .status-process { background-color: #ffeaa7; border-left-color: #fdcb6e; }
+    .status-transit { background-color: #d1ecf1; border-left-color: #17a2b8; }
+    .status-delivered { background-color: #d4edda; border-left-color: #28a745; }
+    .status-cancelled { background-color: #f8d7da; border-left-color: #dc3545; }
 </style>
 """, unsafe_allow_html=True)
 
-# Data configuration
-DATA_FILE = 'logistics_data.json'
+# Data Configuration
+DATA_FILE = 'nutrion_logistics_data.json'
+BACKUP_FILE = 'nutrion_logistics_backup.json'
+
+# Product List
 PRODUCT_LIST = [
     "Strophase G", "Strophase P", "Strozyme NSP", "SP200", "SP300",
     "SP300 Advance", "Monica", "Linco Magic", "Enra Magic", "InduceAcid Plus",
@@ -52,6 +93,7 @@ PRODUCT_LIST = [
     "InduceAcid Liquid", "Syngrow"
 ]
 
+# Pakistani Cities
 PAKISTANI_CITIES = [
     "Karachi", "Lahore", "Faisalabad", "Rawalpindi", "Multan", "Gujranwala",
     "Peshawar", "Quetta", "Islamabad", "Sargodha", "Sialkot", "Bahawalpur",
@@ -63,79 +105,111 @@ PAKISTANI_CITIES = [
     "Kandhkot", "Larkana", "Jacobabad", "Shikarpur", "Hyderabad", "Bhimber", "Mirpur"
 ]
 
+# Status Options with automatic progression
 STATUS_OPTIONS = ["Pending", "Under Process", "Dispatched", "In Transit", "Delivered", "Cancelled"]
 
 class LogisticsManager:
     def __init__(self):
         self.data_file = DATA_FILE
+        self.backup_file = BACKUP_FILE
+        self.initialize_session_state()
         self.load_data()
+    
+    def initialize_session_state(self):
+        """Initialize session state variables"""
+        if 'initialized' not in st.session_state:
+            st.session_state.initialized = True
+            st.session_state.edit_id = None
+            st.session_state.filter_status = []
+            st.session_state.filter_product = "All"
+            st.session_state.filter_city = "All"
+            st.session_state.search_term = ""
     
     def load_data(self):
         """Load data from JSON file or initialize empty DataFrame"""
-        if os.path.exists(self.data_file):
-            try:
+        try:
+            if os.path.exists(self.data_file):
                 with open(self.data_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                st.session_state.shipments = pd.DataFrame(data)
-            except Exception as e:
-                st.error(f"Error loading data: {e}")
+                
+                # Convert to DataFrame
+                df = pd.DataFrame(data)
+                
+                # Ensure proper data types
+                df['id'] = df['id'].astype(str)
+                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
+                df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+                df['updated_at'] = pd.to_datetime(df['updated_at'], errors='coerce')
+                
+                st.session_state.shipments = df
+            else:
                 st.session_state.shipments = pd.DataFrame(columns=[
                     'id', 'departure_date', 'client_name', 'product_name', 'quantity',
                     'bilty_status', 'destination', 'received_date', 'status', 'receiver_number',
-                    'created_at', 'updated_at'
+                    'created_at', 'updated_at', 'notes'
                 ])
-        else:
+                self.save_data()
+                
+        except Exception as e:
+            st.error(f"❌ Error loading data: {str(e)}")
             st.session_state.shipments = pd.DataFrame(columns=[
                 'id', 'departure_date', 'client_name', 'product_name', 'quantity',
                 'bilty_status', 'destination', 'received_date', 'status', 'receiver_number',
-                'created_at', 'updated_at'
+                'created_at', 'updated_at', 'notes'
             ])
     
     def save_data(self):
-        """Save data to JSON file"""
+        """Save data to JSON file with backup"""
         try:
-            # Convert DataFrame to dictionary
             if not st.session_state.shipments.empty:
+                # Create backup
+                if os.path.exists(self.data_file):
+                    import shutil
+                    shutil.copy2(self.data_file, self.backup_file)
+                
+                # Convert DataFrame to dictionary
                 data = st.session_state.shipments.to_dict('records')
+                
+                # Save to file
                 with open(self.data_file, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=4, default=str)
+                    
             return True
         except Exception as e:
-            st.error(f"Error saving data: {e}")
+            st.error(f"❌ Error saving data: {str(e)}")
             return False
     
     def generate_id(self):
         """Generate unique ID for new shipment"""
-        if st.session_state.shipments.empty:
-            return 1
-        return st.session_state.shipments['id'].max() + 1
+        return str(uuid.uuid4())[:8].upper()
     
-    def add_shipment(self, shipment_data):
+    def add_shipment(self, shipment_data: Dict) -> bool:
         """Add new shipment to the system"""
         try:
             new_id = self.generate_id()
-            current_time = datetime.now().isoformat()
+            current_time = datetime.now()
             
-            # Auto-set status based on dates
-            status = shipment_data['status']
-            if shipment_data['received_date']:
-                status = "Delivered"
-            elif shipment_data['departure_date']:
-                status = "Dispatched"
+            # Auto-determine status based on dates
+            status = self.auto_determine_status(
+                shipment_data['departure_date'],
+                shipment_data['received_date'],
+                shipment_data.get('status', 'Pending')
+            )
             
             new_shipment = {
                 'id': new_id,
                 'departure_date': shipment_data['departure_date'].isoformat() if shipment_data['departure_date'] else None,
-                'client_name': shipment_data['client_name'],
+                'client_name': shipment_data['client_name'].strip(),
                 'product_name': shipment_data['product_name'],
                 'quantity': shipment_data['quantity'],
                 'bilty_status': shipment_data['bilty_status'],
                 'destination': shipment_data['destination'],
                 'received_date': shipment_data['received_date'].isoformat() if shipment_data['received_date'] else None,
                 'status': status,
-                'receiver_number': shipment_data['receiver_number'],
-                'created_at': current_time,
-                'updated_at': current_time
+                'receiver_number': shipment_data['receiver_number'].strip(),
+                'notes': shipment_data.get('notes', ''),
+                'created_at': current_time.isoformat(),
+                'updated_at': current_time.isoformat()
             }
             
             # Add to DataFrame
@@ -143,35 +217,61 @@ class LogisticsManager:
             st.session_state.shipments = pd.concat([st.session_state.shipments, new_df], ignore_index=True)
             
             if self.save_data():
-                st.success(f"✅ Shipment #{new_id} added successfully!")
+                st.success(f"✅ Shipment **#{new_id}** added successfully! Status: **{status}**")
                 return True
             return False
             
         except Exception as e:
-            st.error(f"Error adding shipment: {e}")
+            st.error(f"❌ Error adding shipment: {str(e)}")
             return False
     
-    def update_shipment(self, shipment_id, updates):
+    def auto_determine_status(self, departure_date, received_date, manual_status):
+        """Automatically determine status based on dates"""
+        if received_date:
+            return "Delivered"
+        elif departure_date:
+            return "Dispatched"
+        else:
+            return manual_status
+    
+    def update_shipment(self, shipment_id: str, updates: Dict) -> bool:
         """Update existing shipment"""
         try:
             mask = st.session_state.shipments['id'] == shipment_id
             if mask.any():
+                # Handle date conversions
                 for key, value in updates.items():
                     if key in ['departure_date', 'received_date'] and value:
-                        value = value.isoformat()
+                        updates[key] = value.isoformat()
+                
+                # Auto-update status if dates are changed
+                if 'departure_date' in updates or 'received_date' in updates:
+                    current_data = st.session_state.shipments.loc[mask].iloc[0]
+                    dep_date = updates.get('departure_date') or current_data['departure_date']
+                    rec_date = updates.get('received_date') or current_data['received_date']
+                    
+                    if rec_date:
+                        updates['status'] = "Delivered"
+                    elif dep_date:
+                        updates['status'] = "Dispatched"
+                
+                updates['updated_at'] = datetime.now().isoformat()
+                
+                # Apply updates
+                for key, value in updates.items():
                     st.session_state.shipments.loc[mask, key] = value
                 
-                st.session_state.shipments.loc[mask, 'updated_at'] = datetime.now().isoformat()
-                
                 if self.save_data():
-                    st.success(f"✅ Shipment #{shipment_id} updated successfully!")
+                    st.success(f"✅ Shipment **#{shipment_id}** updated successfully!")
                     return True
+            else:
+                st.error(f"❌ Shipment **#{shipment_id}** not found!")
             return False
         except Exception as e:
-            st.error(f"Error updating shipment: {e}")
+            st.error(f"❌ Error updating shipment: {str(e)}")
             return False
     
-    def delete_shipment(self, shipment_id):
+    def delete_shipment(self, shipment_id: str) -> bool:
         """Delete shipment by ID"""
         try:
             initial_count = len(st.session_state.shipments)
@@ -179,141 +279,279 @@ class LogisticsManager:
             
             if len(st.session_state.shipments) < initial_count:
                 if self.save_data():
-                    st.success(f"✅ Shipment #{shipment_id} deleted successfully!")
+                    st.success(f"✅ Shipment **#{shipment_id}** deleted successfully!")
                     return True
             else:
-                st.error(f"❌ Shipment #{shipment_id} not found!")
+                st.error(f"❌ Shipment **#{shipment_id}** not found!")
             return False
         except Exception as e:
-            st.error(f"Error deleting shipment: {e}")
+            st.error(f"❌ Error deleting shipment: {str(e)}")
             return False
+    
+    def get_shipment_by_id(self, shipment_id: str) -> Optional[Dict]:
+        """Get shipment details by ID"""
+        try:
+            shipment = st.session_state.shipments[st.session_state.shipments['id'] == shipment_id]
+            if not shipment.empty:
+                return shipment.iloc[0].to_dict()
+            return None
+        except:
+            return None
+    
+    def export_to_excel(self) -> bytes:
+        """Export data to Excel format"""
+        try:
+            output = st.session_state.shipments.copy()
+            # Convert date strings to readable format
+            output['departure_date'] = pd.to_datetime(output['departure_date']).dt.strftime('%Y-%m-%d')
+            output['received_date'] = pd.to_datetime(output['received_date']).dt.strftime('%Y-%m-%d')
+            output['created_at'] = pd.to_datetime(output['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+            output['updated_at'] = pd.to_datetime(output['updated_at']).dt.strftime('%Y-%m-%d %H:%M')
+            
+            return output.to_csv(index=False).encode('utf-8')
+        except Exception as e:
+            st.error(f"❌ Error exporting data: {str(e)}")
+            return None
 
-def render_sidebar(logistics_mgr):
+def render_sidebar(logistics_mgr: LogisticsManager):
     """Render the sidebar with data entry form"""
     with st.sidebar:
+        # Header
         st.markdown("""
-        <div style='text-align: center; padding: 1rem; background: #1f77b4; color: white; border-radius: 10px;'>
-            <h2>🏭 NUTRION</h2>
-            <p><strong>Logistics Management System</strong></p>
+        <div style='text-align: center; padding: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 15px; margin-bottom: 2rem;'>
+            <h2 style='margin: 0;'>🏭 NUTRION</h2>
+            <p style='margin: 0; font-size: 0.9rem;'><strong>Logistics Management System</strong></p>
         </div>
         """, unsafe_allow_html=True)
         
-        st.markdown("---")
-        st.subheader("➕ New Shipment Entry")
+        # Navigation
+        st.subheader("📋 Navigation")
+        nav_option = st.radio(
+            "Go to:",
+            ["Add New Shipment", "View/Edit Shipments", "Reports & Analytics"],
+            label_visibility="collapsed"
+        )
         
-        with st.form("new_shipment_form", clear_on_submit=True):
-            # Client Information
-            client_name = st.text_input(
-                "Client Name *",
-                placeholder="Enter client/organization name",
-                help="Full name of the client or company"
-            )
-            
-            # Product Information
-            col1, col2 = st.columns(2)
-            with col1:
-                product_name = st.selectbox(
-                    "Product Name *",
-                    options=PRODUCT_LIST,
-                    help="Select product from the list"
-                )
-            with col2:
-                quantity = st.number_input(
-                    "Quantity *",
-                    min_value=1,
-                    value=1,
-                    help="Number of units"
-                )
-            
-            # Location Information
-            destination = st.selectbox(
-                "Destination City *",
-                options=PAKISTANI_CITIES,
-                help="Select destination city"
-            )
-            
-            # Contact Information
-            receiver_number = st.text_input(
-                "Receiver Contact Number *",
-                placeholder="03XX-XXXXXXX",
-                help="Receiver's phone number"
-            )
-            
-            # Dates Section
-            st.subheader("📅 Dates Information")
-            col3, col4 = st.columns(2)
-            with col3:
-                departure_date = st.date_input(
-                    "Departure Date (Multan)",
-                    value=None,
-                    max_value=date.today(),
-                    help="Date when shipment left Multan"
-                )
-            with col4:
-                received_date = st.date_input(
-                    "Received Date",
-                    value=None,
-                    max_value=date.today(),
-                    help="Date when shipment was delivered"
-                )
-            
-            # Payment and Status
-            col5, col6 = st.columns(2)
-            with col5:
-                bilty_status = st.radio(
-                    "Bilty Status *",
-                    options=["Paid", "Not Paid"],
-                    horizontal=True
-                )
-            with col6:
-                status = st.selectbox(
-                    "Current Status *",
-                    options=STATUS_OPTIONS,
-                    index=0
-                )
-            
-            st.markdown("---")
-            submit_button = st.form_submit_button(
-                "💾 Save Shipment Record",
-                type="primary",
-                use_container_width=True
-            )
-            
-            if submit_button:
-                if not client_name or not receiver_number:
-                    st.error("❌ Please fill all required fields (Client Name and Receiver Number)")
-                else:
-                    shipment_data = {
-                        'departure_date': departure_date,
-                        'client_name': client_name,
-                        'product_name': product_name,
-                        'quantity': quantity,
-                        'bilty_status': bilty_status,
-                        'destination': destination,
-                        'received_date': received_date,
-                        'status': status,
-                        'receiver_number': receiver_number
-                    }
-                    logistics_mgr.add_shipment(shipment_data)
+        if nav_option == "Add New Shipment":
+            render_shipment_form(logistics_mgr)
+        elif nav_option == "View/Edit Shipments":
+            render_edit_section(logistics_mgr)
+        else:
+            render_reports_section(logistics_mgr)
 
-def render_dashboard():
-    """Render the main dashboard with metrics and data"""
-    st.markdown('<div class="main-header">🚚 Nutrion Logistics Dashboard</div>', unsafe_allow_html=True)
+def render_shipment_form(logistics_mgr: LogisticsManager):
+    """Render the new shipment form"""
+    st.subheader("➕ New Shipment Entry")
     
-    # Calculate metrics
+    with st.form("new_shipment_form", clear_on_submit=True):
+        # Client Information
+        client_name = st.text_input(
+            "🏢 Client Name *",
+            placeholder="Enter client/organization name",
+            help="Full name of the client or company"
+        )
+        
+        # Product Information
+        col1, col2 = st.columns(2)
+        with col1:
+            product_name = st.selectbox(
+                "📦 Product Name *",
+                options=PRODUCT_LIST,
+                help="Select product from the list"
+            )
+        with col2:
+            quantity = st.number_input(
+                "🔢 Quantity *",
+                min_value=1,
+                value=1,
+                step=1,
+                help="Number of units"
+            )
+        
+        # Location Information
+        destination = st.selectbox(
+            "📍 Destination City *",
+            options=PAKISTANI_CITIES,
+            help="Select destination city"
+        )
+        
+        # Contact Information
+        receiver_number = st.text_input(
+            "📞 Receiver Contact Number *",
+            placeholder="03XX-XXXXXXX",
+            help="Receiver's phone number"
+        )
+        
+        # Dates Section
+        st.subheader("📅 Dates Information")
+        col3, col4 = st.columns(2)
+        with col3:
+            departure_date = st.date_input(
+                "🚚 Departure Date (Multan)",
+                value=None,
+                max_value=date.today(),
+                help="Date when shipment left Multan"
+            )
+        with col4:
+            received_date = st.date_input(
+                "📬 Received Date",
+                value=None,
+                max_value=date.today(),
+                help="Date when shipment was delivered"
+            )
+        
+        # Payment and Status
+        col5, col6 = st.columns(2)
+        with col5:
+            bilty_status = st.radio(
+                "💰 Bilty Status *",
+                options=["Paid", "Not Paid"],
+                horizontal=True
+            )
+        with col6:
+            status = st.selectbox(
+                "📊 Current Status *",
+                options=STATUS_OPTIONS,
+                index=0,
+                disabled=True,  # Auto-determined
+                help="Status is automatically determined based on dates"
+            )
+        
+        # Additional Notes
+        notes = st.text_area(
+            "📝 Additional Notes",
+            placeholder="Any additional information about this shipment...",
+            height=80
+        )
+        
+        st.markdown("---")
+        submit_button = st.form_submit_button(
+            "💾 Save Shipment Record",
+            type="primary",
+            use_container_width=True
+        )
+        
+        if submit_button:
+            if not client_name or not receiver_number:
+                st.error("❌ Please fill all required fields (Client Name and Receiver Number)")
+            else:
+                shipment_data = {
+                    'departure_date': departure_date,
+                    'client_name': client_name,
+                    'product_name': product_name,
+                    'quantity': quantity,
+                    'bilty_status': bilty_status,
+                    'destination': destination,
+                    'received_date': received_date,
+                    'status': status,
+                    'receiver_number': receiver_number,
+                    'notes': notes
+                }
+                if logistics_mgr.add_shipment(shipment_data):
+                    st.rerun()
+
+def render_edit_section(logistics_mgr: LogisticsManager):
+    """Render the edit shipments section"""
+    st.subheader("✏️ Edit Existing Shipments")
+    
+    if st.session_state.shipments.empty:
+        st.info("No shipments available for editing.")
+        return
+    
+    # Quick search
+    search_term = st.text_input("🔍 Search by Client Name or ID", placeholder="Enter client name or shipment ID...")
+    
+    # Filter shipments
+    filtered_shipments = st.session_state.shipments.copy()
+    if search_term:
+        mask = (filtered_shipments['client_name'].str.contains(search_term, case=False, na=False)) | \
+               (filtered_shipments['id'].str.contains(search_term, case=False, na=False))
+        filtered_shipments = filtered_shipments[mask]
+    
+    if filtered_shipments.empty:
+        st.warning("No shipments match your search criteria.")
+        return
+    
+    # Select shipment to edit
+    shipment_options = filtered_shipments.apply(
+        lambda x: f"ID: {x['id']} - {x['client_name']} ({x['status']})", axis=1
+    ).tolist()
+    
+    selected_shipment = st.selectbox("Select Shipment to Edit", options=shipment_options)
+    
+    if selected_shipment:
+        shipment_id = selected_shipment.split("ID: ")[1].split(" -")[0]
+        shipment_data = logistics_mgr.get_shipment_by_id(shipment_id)
+        
+        if shipment_data:
+            with st.form("edit_shipment_form"):
+                st.subheader(f"Editing Shipment #{shipment_id}")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    new_client = st.text_input("Client Name", value=shipment_data['client_name'])
+                    new_product = st.selectbox("Product", options=PRODUCT_LIST, 
+                                            index=PRODUCT_LIST.index(shipment_data['product_name']) if shipment_data['product_name'] in PRODUCT_LIST else 0)
+                    new_quantity = st.number_input("Quantity", value=int(shipment_data['quantity']), min_value=1)
+                    new_destination = st.selectbox("Destination", options=PAKISTANI_CITIES,
+                                                index=PAKISTANI_CITIES.index(shipment_data['destination']) if shipment_data['destination'] in PAKISTANI_CITIES else 0)
+                
+                with col2:
+                    new_receiver = st.text_input("Receiver Number", value=shipment_data['receiver_number'])
+                    new_bilty = st.radio("Bilty Status", options=["Paid", "Not Paid"],
+                                      index=0 if shipment_data['bilty_status'] == "Paid" else 1,
+                                      horizontal=True)
+                    new_status = st.selectbox("Status", options=STATUS_OPTIONS,
+                                           index=STATUS_OPTIONS.index(shipment_data['status']))
+                    new_notes = st.text_area("Notes", value=shipment_data.get('notes', ''))
+                
+                # Date inputs
+                col3, col4 = st.columns(2)
+                with col3:
+                    current_dep = pd.to_datetime(shipment_data['departure_date']) if shipment_data['departure_date'] else None
+                    new_departure = st.date_input("Departure Date", value=current_dep)
+                with col4:
+                    current_rec = pd.to_datetime(shipment_data['received_date']) if shipment_data['received_date'] else None
+                    new_received = st.date_input("Received Date", value=current_rec)
+                
+                update_button = st.form_submit_button("🔄 Update Shipment", use_container_width=True)
+                
+                if update_button:
+                    updates = {
+                        'client_name': new_client,
+                        'product_name': new_product,
+                        'quantity': new_quantity,
+                        'destination': new_destination,
+                        'receiver_number': new_receiver,
+                        'bilty_status': new_bilty,
+                        'status': new_status,
+                        'notes': new_notes,
+                        'departure_date': new_departure,
+                        'received_date': new_received
+                    }
+                    if logistics_mgr.update_shipment(shipment_id, updates):
+                        st.rerun()
+
+def render_reports_section(logistics_mgr: LogisticsManager):
+    """Render the reports and analytics section"""
+    st.subheader("📈 Reports & Analytics")
+    
+    if st.session_state.shipments.empty:
+        st.info("No data available for reports.")
+        return
+    
+    # Quick Statistics
+    col1, col2, col3, col4 = st.columns(4)
+    
     total_shipments = len(st.session_state.shipments)
     under_process = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Under Process'])
-    in_transit = len(st.session_state.shipments[st.session_state.shipments['status'] == 'In Transit'])
     delivered = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Delivered'])
-    pending = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Pending'])
-    
-    # Display metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
+    revenue = len(st.session_state.shipments[st.session_state.shipments['bilty_status'] == 'Paid'])
     
     with col1:
         st.markdown(f"""
         <div class="metric-card">
-            <h3>Total</h3>
+            <h3>Total Shipments</h3>
             <h2>{total_shipments}</h2>
         </div>
         """, unsafe_allow_html=True)
@@ -328,59 +566,133 @@ def render_dashboard():
     
     with col3:
         st.markdown(f"""
-        <div class="metric-card">
-            <h3>In Transit</h3>
-            <h2>{in_transit}</h2>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
         <div class="success-card">
             <h3>Delivered</h3>
             <h2>{delivered}</h2>
         </div>
         """, unsafe_allow_html=True)
     
-    with col5:
+    with col4:
         st.markdown(f"""
-        <div class="metric-card">
-            <h3>Pending</h3>
-            <h2>{pending}</h2>
+        <div class="info-card">
+            <h3>Paid Shipments</h3>
+            <h2>{revenue}</h2>
         </div>
         """, unsafe_allow_html=True)
     
-    st.markdown("---")
+    # Export Data
+    st.subheader("📊 Data Export")
+    col5, col6 = st.columns(2)
     
-    # Under Process Orders - Priority Section
-    if under_process > 0:
-        st.subheader("⏳ Under Process Orders - Urgent Attention Required")
-        under_process_df = st.session_state.shipments[
-            st.session_state.shipments['status'] == 'Under Process'
-        ]
+    with col5:
+        if st.button("📥 Export to Excel", use_container_width=True):
+            csv_data = logistics_mgr.export_to_excel()
+            if csv_data:
+                st.download_button(
+                    label="⬇️ Download CSV File",
+                    data=csv_data,
+                    file_name=f"nutrion_shipments_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+    
+    with col6:
+        if st.button("🔄 Refresh Data", use_container_width=True):
+            logistics_mgr.load_data()
+            st.success("Data refreshed successfully!")
+            st.rerun()
+
+def render_dashboard(logistics_mgr: LogisticsManager):
+    """Render the main dashboard"""
+    st.markdown('<div class="main-header">🚚 Nutrion Logistics Dashboard</div>', unsafe_allow_html=True)
+    
+    # Key Metrics
+    if not st.session_state.shipments.empty:
+        total_shipments = len(st.session_state.shipments)
+        under_process = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Under Process'])
+        in_transit = len(st.session_state.shipments[st.session_state.shipments['status'].isin(['Dispatched', 'In Transit'])])
+        delivered = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Delivered'])
+        pending = len(st.session_state.shipments[st.session_state.shipments['status'] == 'Pending'])
         
-        # Display as cards
-        cols = st.columns(min(4, len(under_process_df)))
-        for idx, (_, row) in enumerate(under_process_df.iterrows()):
-            with cols[idx % len(cols)]:
-                with st.container(border=True):
-                    st.markdown(f"**ID:** `{int(row['id'])}`")
-                    st.markdown(f"**Client:** {row['client_name']}")
-                    st.markdown(f"**Product:** {row['product_name']}")
-                    st.markdown(f"**Destination:** {row['destination']}")
-                    st.markdown(f"**Quantity:** {row['quantity']}")
+        col1, col2, col3, col4, col5 = st.columns(5)
+        
+        with col1:
+            st.markdown(f"""
+            <div class="metric-card">
+                <h3>Total</h3>
+                <h2>{total_shipments}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col2:
+            st.markdown(f"""
+            <div class="urgent-card">
+                <h3>Under Process</h3>
+                <h2>{under_process}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col3:
+            st.markdown(f"""
+            <div class="warning-card">
+                <h3>In Transit</h3>
+                <h2>{in_transit}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col4:
+            st.markdown(f"""
+            <div class="success-card">
+                <h3>Delivered</h3>
+                <h2>{delivered}</h2>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with col5:
+            st.markdown(f"""
+            <div class="info-card">
+                <h3>Pending</h3>
+                <h2>{pending}</h2>
+            </div>
+            """, unsafe_allow_html=True)
         
         st.markdown("---")
+        
+        # Under Process Orders - Priority Section
+        if under_process > 0:
+            st.subheader("⏳ Under Process Orders - Urgent Attention Required")
+            under_process_df = st.session_state.shipments[
+                st.session_state.shipments['status'] == 'Under Process'
+            ]
+            
+            # Display as cards in columns
+            cols = st.columns(min(3, len(under_process_df)))
+            for idx, (_, row) in enumerate(under_process_df.iterrows()):
+                with cols[idx % len(cols)]:
+                    status_class = f"status-{row['status'].lower().replace(' ', '-')}"
+                    st.markdown(f"""
+                    <div class="shipment-card {status_class}">
+                        <h4>📦 Shipment #{row['id']}</h4>
+                        <p><strong>👤 Client:</strong> {row['client_name']}</p>
+                        <p><strong>📦 Product:</strong> {row['product_name']}</p>
+                        <p><strong>📍 Destination:</strong> {row['destination']}</p>
+                        <p><strong>🔢 Quantity:</strong> {row['quantity']}</p>
+                        <p><strong>💰 Payment:</strong> {row['bilty_status']}</p>
+                        <p><strong>📞 Contact:</strong> {row['receiver_number']}</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
     
-    # Main Data Display and Management
-    st.subheader("📊 All Shipments")
+    # Main Data Table
+    st.subheader("📋 All Shipments")
     
     if st.session_state.shipments.empty:
         st.info("📋 No shipment records found. Add your first shipment using the sidebar form!")
         return
     
     # Filters
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     with col1:
         status_filter = st.multiselect(
             "Filter by Status",
@@ -397,6 +709,11 @@ def render_dashboard():
             "Filter by City",
             options=["All"] + PAKISTANI_CITIES
         )
+    with col4:
+        payment_filter = st.selectbox(
+            "Filter by Payment",
+            options=["All", "Paid", "Not Paid"]
+        )
     
     # Apply filters
     filtered_df = st.session_state.shipments.copy()
@@ -406,76 +723,42 @@ def render_dashboard():
         filtered_df = filtered_df[filtered_df['product_name'] == product_filter]
     if city_filter != "All":
         filtered_df = filtered_df[filtered_df['destination'] == city_filter]
+    if payment_filter != "All":
+        filtered_df = filtered_df[filtered_df['bilty_status'] == payment_filter]
     
-    # Display data
-    st.dataframe(
-        filtered_df,
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            'id': 'ID',
-            'departure_date': 'Departure Date',
-            'client_name': 'Client Name',
-            'product_name': 'Product',
-            'quantity': 'Qty',
-            'bilty_status': 'Bilty Status',
-            'destination': 'Destination',
-            'received_date': 'Received Date',
-            'status': 'Status',
-            'receiver_number': 'Receiver Number'
-        }
-    )
-    
-    # Quick Actions
-    st.subheader("⚡ Quick Actions")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        with st.expander("🔄 Update Status"):
-            if not filtered_df.empty:
-                shipment_id = st.selectbox(
-                    "Select Shipment ID",
-                    options=filtered_df['id'].tolist(),
-                    format_func=lambda x: f"ID: {int(x)}"
-                )
-                new_status = st.selectbox("New Status", options=STATUS_OPTIONS)
-                if st.button("Update Status", use_container_width=True):
-                    logistics_mgr.update_shipment(shipment_id, {'status': new_status})
-                    st.rerun()
-    
-    with col2:
-        with st.expander("📅 Update Dates"):
-            if not filtered_df.empty:
-                shipment_id_date = st.selectbox(
-                    "Select Shipment",
-                    options=filtered_df['id'].tolist(),
-                    key="date_update",
-                    format_func=lambda x: f"ID: {int(x)}"
-                )
-                new_departure = st.date_input("New Departure Date", key="dep_date")
-                new_received = st.date_input("New Received Date", key="rec_date")
-                if st.button("Update Dates", use_container_width=True):
-                    updates = {}
-                    if new_departure:
-                        updates['departure_date'] = new_departure
-                    if new_received:
-                        updates['received_date'] = new_received
-                    if updates:
-                        logistics_mgr.update_shipment(shipment_id_date, updates)
-                        st.rerun()
-    
-    with col3:
-        with st.expander("🗑️ Delete Shipment"):
-            if not filtered_df.empty:
-                shipment_id_del = st.selectbox(
-                    "Select to Delete",
-                    options=filtered_df['id'].tolist(),
-                    key="delete_select",
-                    format_func=lambda x: f"ID: {int(x)}"
-                )
-                if st.button("🚨 Delete Shipment", type="secondary", use_container_width=True):
-                    logistics_mgr.delete_shipment(shipment_id_del)
-                    st.rerun()
+    # Display data with better formatting
+    if not filtered_df.empty:
+        display_df = filtered_df[[
+            'id', 'client_name', 'product_name', 'quantity', 'destination',
+            'status', 'bilty_status', 'departure_date', 'received_date', 'receiver_number'
+        ]].copy()
+        
+        # Format dates
+        display_df['departure_date'] = pd.to_datetime(display_df['departure_date']).dt.strftime('%Y-%m-%d')
+        display_df['received_date'] = pd.to_datetime(display_df['received_date']).dt.strftime('%Y-%m-%d')
+        
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'id': st.column_config.TextColumn('ID'),
+                'client_name': st.column_config.TextColumn('Client'),
+                'product_name': st.column_config.TextColumn('Product'),
+                'quantity': st.column_config.NumberColumn('Qty'),
+                'destination': st.column_config.TextColumn('Destination'),
+                'status': st.column_config.TextColumn('Status'),
+                'bilty_status': st.column_config.TextColumn('Payment'),
+                'departure_date': st.column_config.TextColumn('Departure'),
+                'received_date': st.column_config.TextColumn('Received'),
+                'receiver_number': st.column_config.TextColumn('Contact')
+            }
+        )
+        
+        # Show record count
+        st.caption(f"📊 Showing {len(filtered_df)} of {len(st.session_state.shipments)} shipments")
+    else:
+        st.warning("No shipments match the current filters.")
 
 def main():
     """Main application function"""
@@ -487,7 +770,7 @@ def main():
     render_sidebar(logistics_mgr)
     
     # Render main content
-    render_dashboard()
+    render_dashboard(logistics_mgr)
 
 if __name__ == "__main__":
     main()
