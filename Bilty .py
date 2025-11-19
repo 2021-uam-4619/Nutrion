@@ -115,7 +115,7 @@ with st.sidebar:
     # Company Logo and Info
     # NOTE: Since we cannot load local files like 'logo.png', we use a placeholder image URL.
     # Replace the URL below with your actual logo path or hosted URL.
-    LOGO_URL = "https://placehold.co/150x50/3c82f6/FFFFFF?text=Nutrion+Logo"
+    LOGO_URL = "logo.png"
     st.image(LOGO_URL, caption="Your Company Logo Here")
     st.markdown("---")
     st.caption("### Nutrion Company Details")
