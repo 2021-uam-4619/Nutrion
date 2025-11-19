@@ -63,8 +63,34 @@ COLUMNS = [
     "Receiver Contact"
 ]
 
+# Define the required dtypes for persistent data integrity
+REQUIRED_DTYPES = {
+    "ID": 'Int64', # Nullable integer for IDs
+    "Quantity (Units)": 'Int64', # Nullable integer for quantity
+    "Departure Date (Multan)": 'object', # Dates stored as string/None
+    "Received Date": 'object',
+}
+
 
 # --- Core Data Functions ---
+
+def enforce_dtypes(df):
+    """Ensures critical columns maintain their required dtypes before displaying/editing."""
+    df_copy = df.copy()
+    for col, dtype in REQUIRED_DTYPES.items():
+        if col in df_copy.columns:
+            try:
+                # Convert to numeric first, coercing errors (non-numeric data to NaN)
+                if dtype == 'Int64':
+                    df_copy[col] = pd.to_numeric(df_copy[col], errors='coerce').astype('Int64')
+                else:
+                    df_copy[col] = df_copy[col].astype(dtype)
+            except Exception as e:
+                # Fallback to object type if specific casting fails
+                print(f"Warning: Could not enforce dtype {dtype} on column {col}. Falling back to object. Error: {e}")
+                df_copy[col] = df_copy[col].astype('object')
+    return df_copy
+
 
 def save_data():
     """Saves the current shipment records DataFrame to a CSV file."""
@@ -114,6 +140,9 @@ def add_shipment(data):
     }])
 
     st.session_state.shipments = pd.concat([st.session_state.shipments, new_row], ignore_index=True)
+    
+    # Enforce dtypes after concatenation
+    st.session_state.shipments = enforce_dtypes(st.session_state.shipments)
     
     if save_data():
         st.success(f"Shipment #{new_id} added and saved successfully. Status: **{initial_status}**")
@@ -191,8 +220,8 @@ if 'shipments' not in st.session_state:
     if os.path.exists(DATA_FILE):
         try:
             df = pd.read_csv(DATA_FILE)
-            st.session_state.shipments = df
-            st.session_state.shipments['ID'] = st.session_state.shipments['ID'].astype('Int64') 
+            # 1. Enforce dtypes immediately after loading to fix any CSV-induced type drift
+            st.session_state.shipments = enforce_dtypes(df) 
             
             # Add missing 'Current Location' column if loading an old file
             if 'Current Location' not in st.session_state.shipments.columns:
@@ -392,6 +421,8 @@ with tab_live:
         if filter_product != "All":
             df_filtered = df_filtered[df_filtered['Product Name'] == filter_product]
 
+        # 2. ENFORCE DTYPES: Apply the fix right before passing to st.data_editor
+        df_filtered = enforce_dtypes(df_filtered)
 
         st.markdown("---")
         st.caption("Editing the Departure or Received Date will **automatically update the Status**.")
@@ -460,6 +491,9 @@ with tab_reports:
 
             if report_location:
                 df_report = df_report[df_report['Destination Location'].isin(report_location)]
+        
+        # Enforce dtypes for reporting consistency
+        df_report = enforce_dtypes(df_report)
 
         st.markdown(f"### Report Preview: {len(df_report)} Records Selected")
         st.dataframe(df_report, use_container_width=True, hide_index=True)
@@ -488,8 +522,10 @@ with tab_manage:
         st.markdown("### 🗑️ Delete Record by ID")
         st.markdown("To delete a record, search for the **Shipment ID** below, verify the details, and confirm deletion.")
         
-        shipment_ids = st.session_state.shipments['ID'].tolist()
-        df_display = st.session_state.shipments[['ID', 'Client Name', 'Destination Location', 'Status']].copy()
+        # Ensure IDs are correct type for selection box
+        df_safe_display = enforce_dtypes(st.session_state.shipments.copy())
+        shipment_ids = df_safe_display['ID'].dropna().astype(int).tolist()
+        df_display = df_safe_display[['ID', 'Client Name', 'Destination Location', 'Status']].copy()
 
         with st.container(border=True):
             st.markdown("**⚠️ Warning: Deletion is Permanent**")
