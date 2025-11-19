@@ -209,8 +209,9 @@ def apply_status_automation(df):
     df_copy.loc[pre_transit_mask, 'Current Location'] = "Multan Warehouse"
 
     # 5. Convert dates back to string format for consistency
-    df_copy['Departure Date (Multan)'] = df_copy['Departure Date (Multan)'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Departure Date (Multan)']))
-    df_copy['Received Date'] = df_copy['Received Date'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Received Date']))
+    # CRITICAL FIX: Use 'None' instead of default NaN for missing values to be compatible with st.column_config.DateColumn
+    df_copy['Departure Date (Multan)'] = df_copy['Departure Date (Multan)'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Departure Date (Multan)']), None)
+    df_copy['Received Date'] = df_copy['Received Date'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Received Date']), None)
     
     return df_copy
 
