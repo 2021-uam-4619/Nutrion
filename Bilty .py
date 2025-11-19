@@ -132,7 +132,8 @@ class AdvancedLogisticsManager:
             'edit_id': None,
             'quick_action': None,
             'last_added_id': None,
-            'current_tab': "Dashboard"
+            'current_tab': "Dashboard",
+            'show_location_adder': False
         }
         
         for key, value in default_states.items():
@@ -185,10 +186,11 @@ class AdvancedLogisticsManager:
                 df = pd.DataFrame(data)
                 
                 # Data type conversions
-                df['id'] = df['id'].astype(str)
-                df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
-                df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
-                df['updated_at'] = pd.to_datetime(df['updated_at'], errors='coerce')
+                if not df.empty:
+                    df['id'] = df['id'].astype(str)
+                    df['quantity'] = pd.to_numeric(df['quantity'], errors='coerce').fillna(0).astype(int)
+                    df['created_at'] = pd.to_datetime(df['created_at'], errors='coerce')
+                    df['updated_at'] = pd.to_datetime(df['updated_at'], errors='coerce')
                 
                 st.session_state.shipments = df
             else:
@@ -334,11 +336,96 @@ class AdvancedLogisticsManager:
         except Exception as e:
             st.error(f"❌ Error updating status: {str(e)}")
             return False
+
+    def update_shipment(self, shipment_id: str, updates: Dict) -> bool:
+        """Update existing shipment"""
+        try:
+            mask = st.session_state.shipments['id'] == shipment_id
+            if mask.any():
+                current_time = datetime.now().isoformat()
+                
+                # Handle date conversions
+                for key, value in updates.items():
+                    if key in ['departure_date', 'received_date'] and value:
+                        updates[key] = value.isoformat()
+                
+                # Auto-update status if dates are changed
+                if 'departure_date' in updates or 'received_date' in updates:
+                    current_data = st.session_state.shipments.loc[mask].iloc[0]
+                    dep_date = updates.get('departure_date') or current_data['departure_date']
+                    rec_date = updates.get('received_date') or current_data['received_date']
+                    
+                    # Convert string dates to date objects for comparison
+                    if dep_date and isinstance(dep_date, str):
+                        dep_date = datetime.fromisoformat(dep_date).date()
+                    if rec_date and isinstance(rec_date, str):
+                        rec_date = datetime.fromisoformat(rec_date).date()
+                    
+                    if rec_date:
+                        updates['status'] = "Delivered"
+                    elif dep_date:
+                        updates['status'] = "Dispatched"
+                
+                updates['updated_at'] = current_time
+                updates['priority'] = self.calculate_priority(
+                    updates.get('status', st.session_state.shipments.loc[mask, 'status'].iloc[0]),
+                    updates.get('quantity', st.session_state.shipments.loc[mask, 'quantity'].iloc[0]),
+                    updates.get('destination', st.session_state.shipments.loc[mask, 'destination'].iloc[0])
+                )
+                
+                # Apply updates
+                for key, value in updates.items():
+                    st.session_state.shipments.loc[mask, key] = value
+                
+                if self.save_shipments():
+                    return True
+            return False
+        except Exception as e:
+            st.error(f"❌ Error updating shipment: {str(e)}")
+            return False
+
+    def delete_shipment(self, shipment_id: str) -> bool:
+        """Delete shipment by ID"""
+        try:
+            initial_count = len(st.session_state.shipments)
+            st.session_state.shipments = st.session_state.shipments[st.session_state.shipments['id'] != shipment_id]
+            
+            if len(st.session_state.shipments) < initial_count:
+                if self.save_shipments():
+                    st.success(f"✅ Shipment **#{shipment_id}** deleted successfully!")
+                    return True
+            else:
+                st.error(f"❌ Shipment **#{shipment_id}** not found!")
+            return False
+        except Exception as e:
+            st.error(f"❌ Error deleting shipment: {str(e)}")
+            return False
+
+    def get_shipment_by_id(self, shipment_id: str) -> Optional[Dict]:
+        """Get shipment details by ID"""
+        try:
+            shipment = st.session_state.shipments[st.session_state.shipments['id'] == shipment_id]
+            if not shipment.empty:
+                return shipment.iloc[0].to_dict()
+            return None
+        except:
+            return None
     
     def get_shipment_stats(self):
         """Get comprehensive shipment statistics"""
         if st.session_state.shipments.empty:
-            return {}
+            return {
+                'total': 0,
+                'under_process': 0,
+                'in_transit': 0,
+                'delivered': 0,
+                'pending': 0,
+                'cancelled': 0,
+                'paid': 0,
+                'unpaid': 0,
+                'total_quantity': 0,
+                'avg_processing_time': 0
+            }
         
         df = st.session_state.shipments.copy()
         
@@ -364,8 +451,15 @@ class AdvancedLogisticsManager:
             if delivered.empty:
                 return 0
             
-            delivered['departure_date'] = pd.to_datetime(delivered['departure_date'])
-            delivered['received_date'] = pd.to_datetime(delivered['received_date'])
+            # Convert string dates to datetime
+            delivered['departure_date'] = pd.to_datetime(delivered['departure_date'], errors='coerce')
+            delivered['received_date'] = pd.to_datetime(delivered['received_date'], errors='coerce')
+            
+            # Filter out rows with invalid dates
+            delivered = delivered.dropna(subset=['departure_date', 'received_date'])
+            
+            if delivered.empty:
+                return 0
             
             processing_times = (delivered['received_date'] - delivered['departure_date']).dt.days
             return processing_times.mean()
@@ -397,8 +491,7 @@ def render_modern_sidebar(logistics_mgr: AdvancedLogisticsManager):
             "🚀 Quick Add": "Quick Add", 
             "📦 Manage Shipments": "Manage",
             "📍 Locations": "Locations",
-            "📈 Analytics": "Analytics",
-            "⚙️ Settings": "Settings"
+            "📈 Analytics": "Analytics"
         }
         
         for label, key in nav_options.items():
@@ -423,10 +516,6 @@ def render_quick_actions(logistics_mgr: AdvancedLogisticsManager):
     
     if st.button("📥 Export Report", use_container_width=True):
         export_data(logistics_mgr)
-    
-    if st.button("🧹 Clear Filters", use_container_width=True):
-        st.session_state.quick_action = "clear_filters"
-        st.rerun()
 
 def render_dashboard(logistics_mgr: AdvancedLogisticsManager):
     """Render modern dashboard with analytics"""
@@ -494,7 +583,8 @@ def render_dashboard(logistics_mgr: AdvancedLogisticsManager):
 
 def render_status_chart(logistics_mgr: AdvancedLogisticsManager):
     """Render status distribution chart"""
-    if logistics_mgr.get_shipment_stats()['total'] > 0:
+    stats = logistics_mgr.get_shipment_stats()
+    if stats['total'] > 0:
         df = st.session_state.shipments.copy()
         status_counts = df['status'].value_counts()
         
@@ -512,7 +602,8 @@ def render_status_chart(logistics_mgr: AdvancedLogisticsManager):
 
 def render_priority_shipments(logistics_mgr: AdvancedLogisticsManager):
     """Render high priority shipments"""
-    if not st.session_state.shipments.empty:
+    stats = logistics_mgr.get_shipment_stats()
+    if stats['total'] > 0:
         high_priority = st.session_state.shipments[
             st.session_state.shipments['priority'] == 3
         ].head(5)
@@ -537,10 +628,13 @@ def render_priority_shipments(logistics_mgr: AdvancedLogisticsManager):
                 """, unsafe_allow_html=True)
         else:
             st.info("🎉 No high priority shipments!")
+    else:
+        st.info("No shipments to display")
 
 def render_recent_shipments(logistics_mgr: AdvancedLogisticsManager):
     """Render recent shipments table"""
-    if not st.session_state.shipments.empty:
+    stats = logistics_mgr.get_shipment_stats()
+    if stats['total'] > 0:
         recent_df = st.session_state.shipments.sort_values('created_at', ascending=False).head(10)
         
         # Create a styled dataframe
@@ -634,6 +728,159 @@ def render_quick_add(logistics_mgr: AdvancedLogisticsManager):
                 if logistics_mgr.add_shipment(shipment_data):
                     st.balloons()
 
+def render_management_interface(logistics_mgr: AdvancedLogisticsManager):
+    """Render comprehensive management interface"""
+    st.markdown('<div class="main-header">📦 Manage Shipments</div>', unsafe_allow_html=True)
+    
+    stats = logistics_mgr.get_shipment_stats()
+    if stats['total'] == 0:
+        st.info("No shipments to manage. Add your first shipment!")
+        return
+    
+    # Search and Filters
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        search_term = st.text_input("🔍 Search", placeholder="Client, ID, or Product...")
+    
+    with col2:
+        status_filter = st.multiselect(
+            "Filter Status",
+            options=list(STATUS_CONFIG.keys()),
+            default=list(STATUS_CONFIG.keys())
+        )
+    
+    with col3:
+        product_filter = st.selectbox(
+            "Filter Product",
+            options=["All"] + PRODUCT_LIST
+        )
+    
+    with col4:
+        location_filter = st.selectbox(
+            "Filter Location",
+            options=["All"] + st.session_state.locations
+        )
+    
+    # Apply filters
+    filtered_df = st.session_state.shipments.copy()
+    
+    if search_term:
+        mask = (filtered_df['client_name'].str.contains(search_term, case=False, na=False)) | \
+               (filtered_df['id'].str.contains(search_term, case=False, na=False)) | \
+               (filtered_df['product_name'].str.contains(search_term, case=False, na=False))
+        filtered_df = filtered_df[mask]
+    
+    if status_filter:
+        filtered_df = filtered_df[filtered_df['status'].isin(status_filter)]
+    
+    if product_filter != "All":
+        filtered_df = filtered_df[filtered_df['product_name'] == product_filter]
+    
+    if location_filter != "All":
+        filtered_df = filtered_df[filtered_df['destination'] == location_filter]
+    
+    st.subheader(f"📋 Shipments ({len(filtered_df)} found)")
+    
+    if not filtered_df.empty:
+        # Display editable table
+        edited_df = st.data_editor(
+            filtered_df[['id', 'client_name', 'product_name', 'quantity', 'destination', 'status', 'bilty_status']],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                'id': st.column_config.TextColumn("ID", disabled=True),
+                'client_name': st.column_config.TextColumn("Client"),
+                'product_name': st.column_config.SelectboxColumn("Product", options=PRODUCT_LIST),
+                'quantity': st.column_config.NumberColumn("Quantity", min_value=1),
+                'destination': st.column_config.SelectboxColumn("Destination", options=st.session_state.locations),
+                'status': st.column_config.SelectboxColumn("Status", options=list(STATUS_CONFIG.keys())),
+                'bilty_status': st.column_config.SelectboxColumn("Payment", options=["Paid", "Not Paid"])
+            },
+            key="management_editor"
+        )
+        
+        # Save changes
+        if not edited_df.equals(filtered_df[['id', 'client_name', 'product_name', 'quantity', 'destination', 'status', 'bilty_status']]):
+            for _, row in edited_df.iterrows():
+                original_row = filtered_df[filtered_df['id'] == row['id']].iloc[0]
+                updates = {}
+                
+                for col in ['client_name', 'product_name', 'quantity', 'destination', 'status', 'bilty_status']:
+                    if row[col] != original_row[col]:
+                        updates[col] = row[col]
+                
+                if updates:
+                    logistics_mgr.update_shipment(row['id'], updates)
+            
+            st.success("✅ Changes saved successfully!")
+            st.rerun()
+        
+        # Bulk Actions
+        st.subheader("⚡ Bulk Actions")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🔄 Mark Selected as Delivered", use_container_width=True):
+                for shipment_id in filtered_df['id'].head(5):  # Limit to first 5
+                    logistics_mgr.quick_update_status(shipment_id, "Delivered")
+                st.success("Bulk update completed!")
+                st.rerun()
+        
+        with col2:
+            if st.button("🚚 Mark Selected as Dispatched", use_container_width=True):
+                for shipment_id in filtered_df['id'].head(5):
+                    logistics_mgr.quick_update_status(shipment_id, "Dispatched")
+                st.success("Bulk update completed!")
+                st.rerun()
+        
+        with col3:
+            if st.button("📥 Export Filtered Data", use_container_width=True):
+                export_filtered_data(filtered_df)
+        
+        # Individual Shipment Management
+        st.subheader("🔧 Individual Shipment Management")
+        selected_shipment = st.selectbox(
+            "Select Shipment for Detailed Management",
+            options=filtered_df['id'].tolist(),
+            format_func=lambda x: f"ID: {x} - {filtered_df[filtered_df['id'] == x]['client_name'].iloc[0]}"
+        )
+        
+        if selected_shipment:
+            shipment_data = logistics_mgr.get_shipment_by_id(selected_shipment)
+            if shipment_data:
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    with st.expander("📋 Shipment Details", expanded=True):
+                        st.write(f"**Client:** {shipment_data['client_name']}")
+                        st.write(f"**Product:** {shipment_data['product_name']}")
+                        st.write(f"**Quantity:** {shipment_data['quantity']}")
+                        st.write(f"**Destination:** {shipment_data['destination']}")
+                        st.write(f"**Status:** {shipment_data['status']}")
+                        st.write(f"**Payment:** {shipment_data['bilty_status']}")
+                        st.write(f"**Contact:** {shipment_data['receiver_number']}")
+                        
+                        if shipment_data.get('notes'):
+                            st.write(f"**Notes:** {shipment_data['notes']}")
+                
+                with col2:
+                    with st.expander("🔄 Quick Updates", expanded=True):
+                        new_status = st.selectbox("Update Status", list(STATUS_CONFIG.keys()), 
+                                               index=list(STATUS_CONFIG.keys()).index(shipment_data['status']))
+                        
+                        if st.button("Update Status", use_container_width=True):
+                            if logistics_mgr.quick_update_status(selected_shipment, new_status):
+                                st.rerun()
+                        
+                        st.markdown("---")
+                        
+                        if st.button("🗑️ Delete This Shipment", type="secondary", use_container_width=True):
+                            if logistics_mgr.delete_shipment(selected_shipment):
+                                st.rerun()
+    else:
+        st.warning("No shipments match your filters")
+
 def render_locations_management(logistics_mgr: AdvancedLogisticsManager):
     """Render locations management interface"""
     st.markdown('<div class="main-header">📍 Locations Management</div>', unsafe_allow_html=True)
@@ -676,7 +923,8 @@ def render_analytics(logistics_mgr: AdvancedLogisticsManager):
     """Render advanced analytics"""
     st.markdown('<div class="main-header">📈 Advanced Analytics</div>', unsafe_allow_html=True)
     
-    if logistics_mgr.get_shipment_stats()['total'] == 0:
+    stats = logistics_mgr.get_shipment_stats()
+    if stats['total'] == 0:
         st.info("No data available for analytics")
         return
     
@@ -694,11 +942,11 @@ def render_analytics(logistics_mgr: AdvancedLogisticsManager):
         st.metric("Avg Processing Days", f"{avg_processing:.1f}")
     
     with col3:
-        delivery_rate = (len(df[df['status'] == 'Delivered']) / len(df)) * 100
+        delivery_rate = (stats['delivered'] / stats['total']) * 100
         st.metric("Delivery Success Rate", f"{delivery_rate:.1f}%")
     
     with col4:
-        paid_percentage = (len(df[df['bilty_status'] == 'Paid']) / len(df)) * 100
+        paid_percentage = (stats['paid'] / stats['total']) * 100
         st.metric("Payment Collection", f"{paid_percentage:.1f}%")
     
     st.markdown("---")
@@ -744,6 +992,18 @@ def export_data(logistics_mgr: AdvancedLogisticsManager):
             use_container_width=True
         )
 
+def export_filtered_data(filtered_df):
+    """Export filtered data"""
+    if not filtered_df.empty:
+        csv_data = filtered_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Filtered Data (CSV)",
+            data=csv_data,
+            file_name=f"nutrion_filtered_export_{datetime.now().strftime('%Y%m%d_%H%M')}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
 def main():
     """Main application function"""
     
@@ -760,15 +1020,12 @@ def main():
         render_dashboard(logistics_mgr)
     elif current_tab == "Quick Add":
         render_quick_add(logistics_mgr)
+    elif current_tab == "Manage":
+        render_management_interface(logistics_mgr)
     elif current_tab == "Locations":
         render_locations_management(logistics_mgr)
     elif current_tab == "Analytics":
         render_analytics(logistics_mgr)
-    elif current_tab == "Manage":
-        # You can implement the full management interface here
-        st.info("Management interface - Implement similar to previous versions")
-    elif current_tab == "Settings":
-        st.info("Settings interface - Implement configuration options here")
 
 if __name__ == "__main__":
     main()
