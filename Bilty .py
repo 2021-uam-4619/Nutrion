@@ -10,7 +10,7 @@ DATA_FILE = 'shipments_data.csv'
 
 # Set page title and layout
 st.set_page_config(
-    page_title="Nutrion Logistics Tracker | Professional Edition", # Updated title
+    page_title="Nutrion Logistics Tracker | Professional Edition",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -60,7 +60,6 @@ STATUS_OPTIONS = ["New Order", "Under Process", "In Transit", "Delivered", "Canc
 def save_data():
     """Saves the current shipment records DataFrame to a CSV file."""
     try:
-        # Convert date columns back to string/object before saving
         df_to_save = st.session_state.shipments.copy()
         
         # Ensure ID column is int before saving to prevent float storage
@@ -75,11 +74,17 @@ def save_data():
 
 def add_shipment(data):
     """Adds a new shipment record to the session state DataFrame and saves to file."""
+    # Handle empty DataFrame case to find max ID safely
     max_id = st.session_state.shipments['ID'].max() if not st.session_state.shipments.empty else 0
     new_id = max_id + 1
     
-    # Determine initial status: If departure date is set on creation, it's already 'In Transit'
-    initial_status = "In Transit" if data['dep_date'] else "New Order"
+    # Automated status logic for initial entry
+    if data['rec_date']:
+        initial_status = "Delivered"
+    elif data['dep_date']:
+        initial_status = "In Transit"
+    else:
+        initial_status = data['status'] # Use manual override (New Order/Under Process/etc.)
 
     new_row = pd.DataFrame([{
         "ID": new_id,
@@ -96,9 +101,8 @@ def add_shipment(data):
 
     st.session_state.shipments = pd.concat([st.session_state.shipments, new_row], ignore_index=True)
     
-    # Save the updated data to the CSV file for persistence
     if save_data():
-        st.success(f"Shipment #{new_id} added and saved successfully for Client: {data['client_name']}. Status: {initial_status}")
+        st.success(f"Shipment #{new_id} added and saved successfully. Status: **{initial_status}**")
 
 def delete_shipment(shipment_id):
     """Deletes a shipment record by ID and saves to file."""
@@ -106,20 +110,50 @@ def delete_shipment(shipment_id):
         st.warning("No records to delete.")
         return False
 
-    if shipment_id in st.session_state.shipments['ID'].values:
-        # Filter out the row with the given ID
+    # Convert ID to the appropriate integer type for comparison
+    shipment_id_int = int(shipment_id)
+
+    if shipment_id_int in st.session_state.shipments['ID'].values:
         st.session_state.shipments = st.session_state.shipments[
-            st.session_state.shipments['ID'] != shipment_id
+            st.session_state.shipments['ID'] != shipment_id_int
         ].copy() 
         
         st.session_state.shipments.reset_index(drop=True, inplace=True)
         
         if save_data():
-            st.success(f"Shipment ID #{shipment_id} deleted and saved successfully.")
+            st.success(f"Shipment ID #{shipment_id_int} permanently deleted.")
             return True
     else:
-        st.error(f"Shipment ID #{shipment_id} not found.")
+        st.error(f"Shipment ID #{shipment_id_int} not found.")
     return False
+
+def apply_status_automation(df):
+    """
+    Applies the automatic status change logic to the DataFrame based on date fields.
+    This function is called right before saving edits.
+    """
+    df_copy = df.copy()
+    
+    # 1. Convert relevant date columns to datetime objects for comparison
+    df_copy['Departure Date (Multan)'] = pd.to_datetime(df_copy['Departure Date (Multan)'], errors='coerce')
+    df_copy['Received Date'] = pd.to_datetime(df_copy['Received Date'], errors='coerce')
+
+    # 2. Automation: Received Date set -> Status is 'Delivered' (Highest priority)
+    # Only apply if status is not already Delivered or Cancelled
+    rec_mask = (pd.notna(df_copy['Received Date'])) & (~df_copy['Status'].isin(['Delivered', 'Cancelled']))
+    df_copy.loc[rec_mask, 'Status'] = 'Delivered'
+
+    # 3. Automation: Departure Date set -> Status is 'In Transit'
+    # Only apply if status is not already Delivered, In Transit, or Cancelled
+    dep_mask = (pd.notna(df_copy['Departure Date (Multan)'])) & (~df_copy['Status'].isin(['In Transit', 'Delivered', 'Cancelled']))
+    df_copy.loc[dep_mask, 'Status'] = 'In Transit'
+    
+    # 4. Convert dates back to string format for consistency
+    df_copy['Departure Date (Multan)'] = df_copy['Departure Date (Multan)'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Departure Date (Multan)']))
+    df_copy['Received Date'] = df_copy['Received Date'].dt.strftime('%Y-%m-%d').where(pd.notna(df_copy['Received Date']))
+    
+    return df_copy
+
 
 # Initialize session state for storing shipment data (and load from file)
 if 'shipments' not in st.session_state:
@@ -127,7 +161,6 @@ if 'shipments' not in st.session_state:
         try:
             df = pd.read_csv(DATA_FILE)
             st.session_state.shipments = df
-            # Ensure ID column is Int64 (allows NaN for better compatibility with data_editor in some cases)
             st.session_state.shipments['ID'] = st.session_state.shipments['ID'].astype('Int64') 
         except Exception as e:
             st.warning(f"Error loading existing data from CSV: {e}. Starting with an empty table.")
@@ -136,11 +169,11 @@ if 'shipments' not in st.session_state:
         st.session_state.shipments = pd.DataFrame(columns=COLUMNS)
 
 
-# --- Data Entry Form (Sidebar) ---
+# --- Sidebar: Data Entry (Simplified) ---
 
 with st.sidebar:
-    # Company Logo and Info (Professional Header)
-    LOGO_URL = "logo.png"
+    # Company Logo and Info
+    LOGO_URL = "https://placehold.co/150x50/1d4ed8/FFFFFF?text=NUTRION+LOGO"
     st.image(LOGO_URL, caption="Nutrion Logo Placeholder")
     
     st.markdown("---")
@@ -154,33 +187,21 @@ with st.sidebar:
     )
     st.markdown("---")
     
-    st.header("🚛 New Shipment Entry")
+    st.header("➕ New Shipment Entry")
     st.markdown("---")
 
     with st.form("shipment_form", clear_on_submit=True):
-        dep_date = st.date_input(
-            "Departure Date (from Multan)",
-            value=None,
-            max_value=datetime.today(),
-            help="The date the shipment left Multan. Setting this will automatically update status to 'In Transit'."
-        )
-
         client_name = st.text_input("Client Name", placeholder="Enter full client name", key="client_name_input")
-
-        product_name = st.selectbox(
-            "Product Name",
-            options=PRODUCT_LIST,
-            key="product_name_select"
+        product_name = st.selectbox("Product Name", options=PRODUCT_LIST, key="product_name_select")
+        quantity = st.number_input("Quantity (Units)", min_value=1, step=1, key="quantity_input")
+        
+        location = st.selectbox(
+            "Destination City",
+            options=PAKISTAN_CITIES,
+            placeholder="Select city...",
+            key="location_select"
         )
-
-        quantity = st.number_input(
-            "Quantity (Units)",
-            min_value=1,
-            step=1,
-            key="quantity_input",
-            help="Total number of units or bags."
-        )
-
+        
         bilty_status = st.radio(
             "Payment Status (Bilty)",
             options=["Paid", "Not Paid"],
@@ -188,36 +209,36 @@ with st.sidebar:
             key="bilty_status_radio"
         )
         
-        # Comprehensive Cities Dropdown
-        location = st.selectbox(
-            "Destination Location",
-            options=PAKISTAN_CITIES,
-            placeholder="Select or type city name...",
-            key="location_select"
-        )
+        st.subheader("Dates & Status")
 
+        dep_date = st.date_input(
+            "Departure Date (from Multan)",
+            value=None,
+            max_value=datetime.today(),
+            help="Sets status to 'In Transit'."
+        )
+        
         rec_date = st.date_input(
             "Received Date",
             value=None,
-            help="The date the shipment was received. Setting this will automatically update status to 'Delivered'.",
+            help="Sets status to 'Delivered'."
         )
 
-        # Status is automatically set on submission, but available for manual override if necessary
-        status = st.selectbox(
-            "Manual Status Override (Optional)",
-            options=STATUS_OPTIONS,
+        status_manual = st.selectbox(
+            "Initial Status (If not Departed)",
+            options=["New Order", "Under Process", "Cancelled"],
             index=STATUS_OPTIONS.index("New Order"),
             key="status_select_manual"
         )
-
+        
         receiver_number = st.text_input("Receiver Contact Number", placeholder="e.g., 03XX-XXXXXXX", key="receiver_number_input")
 
         st.markdown("---")
         submit_button = st.form_submit_button("💾 Save New Shipment Record", type="primary")
 
         if submit_button:
-            if not client_name or not location:
-                st.error("Please fill in Client Name and Destination Location.")
+            if not client_name or not location or quantity < 1:
+                st.error("Please fill in Client Name, Destination City, and Quantity.")
             else:
                 shipment_data = {
                     'dep_date': dep_date,
@@ -227,7 +248,7 @@ with st.sidebar:
                     'bilty_status': bilty_status,
                     'location': location,
                     'rec_date': rec_date,
-                    'status': status, # Will be overridden by dep_date logic in add_shipment
+                    'status': status_manual,
                     'receiver_number': receiver_number
                 }
                 add_shipment(shipment_data)
@@ -246,7 +267,7 @@ delivered = st.session_state.shipments[st.session_state.shipments['Status'] == '
 paid = st.session_state.shipments[st.session_state.shipments['Payment Status (Bilty)'] == 'Paid'].shape[0]
 
 
-col1.metric("Total Records", total_shipments)
+col1.metric("Total Shipments", total_shipments)
 col2.metric("New Orders", new_orders)
 col3.metric("In Transit", in_transit)
 col4.metric("Delivered", delivered, delta=f"{delivered/total_shipments*100 if total_shipments > 0 else 0:.1f}% success", delta_color="normal")
@@ -254,135 +275,156 @@ col5.metric("Bilty Paid", paid)
 
 st.markdown("---")
 
+# --- Tabbed Interface ---
+tab_live, tab_reports, tab_manage = st.tabs(["📊 Live Tracker & Update", "📋 Reports & Export", "🗑️ Record Management"])
 
-# --- Filtering and Search Section ---
-st.header("Filter Shipments")
-with st.container(border=True):
-    col_f1, col_f2, col_f3 = st.columns(3)
+
+with tab_live:
     
-    filter_status = col_f1.multiselect("Filter by Status", options=STATUS_OPTIONS, default=STATUS_OPTIONS)
-    filter_client = col_f2.text_input("Search by Client Name", placeholder="e.g., ABC Farms")
-    filter_product = col_f3.selectbox("Filter by Product", options=["All"] + PRODUCT_LIST, index=0)
-
-# Apply Filters
-df_filtered = st.session_state.shipments.copy()
-
-if filter_status:
-    df_filtered = df_filtered[df_filtered['Status'].isin(filter_status)]
+    st.subheader("Filter and Update Shipments")
     
-if filter_client:
-    df_filtered = df_filtered[df_filtered['Client Name'].str.contains(filter_client, case=False, na=False)]
-
-if filter_product != "All":
-    df_filtered = df_filtered[df_filtered['Product Name'] == filter_product]
-
-
-# --- Main Data Table (Editable) ---
-if not df_filtered.empty:
-    st.markdown("### Filtered Shipments Detail (Editable)")
-
-    # Display the data editor (allows editing)
-    edited_df = st.data_editor(
-        df_filtered,
-        use_container_width=True,
-        column_config={
-            # Status is now automated based on date fields but still editable
-            "Status": st.column_config.SelectboxColumn(
-                "Status",
-                options=STATUS_OPTIONS,
-                required=True,
-            ),
-            # Date columns for automation trigger
-            "Departure Date (Multan)": st.column_config.DateColumn("Departure Date (Multan)"),
-            "Received Date": st.column_config.DateColumn("Received Date"),
-            "Payment Status (Bilty)": st.column_config.SelectboxColumn(
-                "Payment Status (Bilty)",
-                options=["Paid", "Not Paid"],
-            ),
-            "ID": st.column_config.TextColumn(disabled=True), # Prevent editing the ID
-        },
-        hide_index=True,
-        key="data_editor"
-    )
-
-    # Check if the edited DataFrame is different from the stored one and apply automation/save
-    if not df_filtered.equals(edited_df):
+    if st.session_state.shipments.empty:
+        st.info("No shipment records found. Use the sidebar to add a new entry!")
+    else:
+        # --- Filtering Section (Moved into the tab) ---
+        col_f1, col_f2, col_f3 = st.columns(3)
         
-        # --- AUTOMATION LOGIC ---
-        
-        # 1. Convert relevant date columns to datetime objects for comparison
-        # Important: Errors='coerce' converts invalid/non-date strings (like None or NaN) to NaT
-        edited_df['Departure Date (Multan)'] = pd.to_datetime(edited_df['Departure Date (Multan)'], errors='coerce')
-        edited_df['Received Date'] = pd.to_datetime(edited_df['Received Date'], errors='coerce')
+        filter_status = col_f1.multiselect("Filter by Status", options=STATUS_OPTIONS, default=["In Transit", "Under Process"])
+        filter_client = col_f2.text_input("Search by Client Name", placeholder="e.g., ABC Farms")
+        filter_product = col_f3.selectbox("Filter by Product", options=["All"] + PRODUCT_LIST, index=0)
 
-        # 2. Automation: Departure Date set -> Status is 'In Transit'
-        # Only apply if status is not already Delivered or Cancelled
-        dep_mask = (pd.notna(edited_df['Departure Date (Multan)'])) & (~edited_df['Status'].isin(['In Transit', 'Delivered', 'Cancelled']))
-        edited_df.loc[dep_mask, 'Status'] = 'In Transit'
+        # Apply Filters
+        df_filtered = st.session_state.shipments.copy()
 
-        # 3. Automation: Received Date set -> Status is 'Delivered'
-        # Only apply if status is not already Delivered or Cancelled
-        rec_mask = (pd.notna(edited_df['Received Date'])) & (~edited_df['Status'].isin(['Delivered', 'Cancelled']))
-        edited_df.loc[rec_mask, 'Status'] = 'Delivered'
-        
-        # 4. Convert dates back to string format for display consistency and CSV saving
-        edited_df['Departure Date (Multan)'] = edited_df['Departure Date (Multan)'].dt.strftime('%Y-%m-%d').where(pd.notna(edited_df['Departure Date (Multan)']))
-        edited_df['Received Date'] = edited_df['Received Date'].dt.strftime('%Y-%m-%d').where(pd.notna(edited_df['Received Date']))
+        if filter_status:
+            df_filtered = df_filtered[df_filtered['Status'].isin(filter_status)]
+            
+        if filter_client:
+            df_filtered = df_filtered[df_filtered['Client Name'].str.contains(filter_client, case=False, na=False)]
 
+        if filter_product != "All":
+            df_filtered = df_filtered[df_filtered['Product Name'] == filter_product]
+
+
+        st.markdown("---")
+        st.markdown("### Editable Shipment Table (Edit Any Row)")
+        st.caption("Editing the Departure Date or Received Date will **automatically update the Status**.")
         
-        # 5. Merge the updated/automated rows back into the main shipment data
-        # Get IDs of all currently filtered/edited rows
-        edited_ids = edited_df['ID'].tolist()
-        
-        # Update main state by replacing rows that were in the filtered view
-        # A bit complex due to filtering, so we'll just update the rows by ID
-        for index, row in edited_df.iterrows():
-            st.session_state.shipments.loc[st.session_state.shipments['ID'] == row['ID']] = row
-        
-        
-        if save_data():
-            st.toast("Table changes and status updates saved successfully!", icon="✅")
+        # Display the data editor (allows editing/updating)
+        edited_df = st.data_editor(
+            df_filtered,
+            use_container_width=True,
+            column_config={
+                "Status": st.column_config.SelectboxColumn(
+                    "Status",
+                    options=STATUS_OPTIONS,
+                    required=True,
+                ),
+                # Date columns for automation trigger
+                "Departure Date (Multan)": st.column_config.DateColumn("Departure Date (Multan)"),
+                "Received Date": st.column_config.DateColumn("Received Date"),
+                "Payment Status (Bilty)": st.column_config.SelectboxColumn(
+                    "Payment Status (Bilty)",
+                    options=["Paid", "Not Paid"],
+                ),
+                "ID": st.column_config.TextColumn(disabled=True), # Prevent editing the ID
+            },
+            hide_index=True,
+            key="live_data_editor"
+        )
+
+        # Check if the edited DataFrame is different from the stored one and apply automation/save
+        if not df_filtered.equals(edited_df):
+            
+            # Apply the automation logic to the edited data
+            automated_edited_df = apply_status_automation(edited_df)
+            
+            # Merge the updated/automated rows back into the main shipment data
+            for index, row in automated_edited_df.iterrows():
+                # Locate the corresponding row in the main state by ID and update it
+                st.session_state.shipments.loc[st.session_state.shipments['ID'] == row['ID']] = row
+            
+            if save_data():
+                st.toast("Table changes and automated status updates saved successfully!", icon="✅")
+                # Rerun to refresh the display with new metrics/status
+                st.rerun()
+
+with tab_reports:
+    st.header("Generate Custom Reports")
     
-
-    st.caption("Note: Changes made directly in the table (Dates, Payment, etc.) automatically trigger status updates and are saved.")
-
-    # Download button
-    csv_data = st.session_state.shipments.to_csv(index=False).encode('utf-8')
-    st.download_button(
-        label="Download Full Data as CSV",
-        data=csv_data,
-        file_name='nutrion_logistics_shipments_export.csv',
-        mime='text/csv',
-    )
-
-
-# --- Record Deletion Section ---
-    st.markdown("---")
-    st.header("Remove Shipment Record")
-    
-    shipment_ids = st.session_state.shipments['ID'].tolist()
-
-    with st.container(border=True):
-        st.markdown("**⚠️ Permanent Deletion**")
+    if st.session_state.shipments.empty:
+        st.info("No data available to generate reports.")
+    else:
+        st.markdown("Use the filters below to select the specific data you want in your report.")
         
-        col_del_1, col_del_2 = st.columns([0.7, 0.3])
+        # Filtering for Report Generation
+        with st.container(border=True):
+            col_r1, col_r2, col_r3 = st.columns(3)
+            
+            report_status = col_r1.multiselect("Status(es) for Report", options=STATUS_OPTIONS, default=STATUS_OPTIONS)
+            report_client = col_r2.text_input("Filter by Client Name (Optional)", placeholder="Client name")
+            report_location = col_r3.multiselect("Filter by Destination City", options=PAKISTAN_CITIES)
+            
+            df_report = st.session_state.shipments.copy()
 
-        with col_del_1:
-            id_to_delete = st.selectbox(
-                "Select Shipment ID to Delete",
-                options=shipment_ids,
-                index=None,
-                placeholder="Select an ID...",
-                key="id_to_delete_select"
+            if report_status:
+                df_report = df_report[df_report['Status'].isin(report_status)]
+            
+            if report_client:
+                df_report = df_report[df_report['Client Name'].str.contains(report_client, case=False, na=False)]
+
+            if report_location:
+                df_report = df_report[df_report['Destination Location'].isin(report_location)]
+
+        st.markdown(f"### Report Preview: {len(df_report)} Records Selected")
+        st.dataframe(df_report, use_container_width=True, hide_index=True)
+        
+        if not df_report.empty:
+            # Download button for the filtered report
+            csv_data = df_report.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label=f"⬇️ Download Report ({len(df_report)} records)",
+                data=csv_data,
+                file_name=f'nutrion_report_{datetime.now().strftime("%Y%m%d_%H%M")}.csv',
+                mime='text/csv',
+                type="primary"
             )
+        else:
+            st.warning("No records match the current report filters.")
+
+
+with tab_manage:
+    st.header("Record Management & Deletion")
+    st.markdown("---")
+    
+    if st.session_state.shipments.empty:
+        st.info("No records available to delete.")
+    else:
+        st.markdown("### 🗑️ Delete Record by ID")
+        st.markdown("To delete a record, find its **Shipment ID** in the **Live Tracker** tab, select it below, and confirm deletion.")
         
-        with col_del_2:
-            st.markdown("<br>", unsafe_allow_html=True) 
-            delete_button = st.button("🗑️ Confirm Delete", type="primary", disabled=(id_to_delete is None), use_container_width=True)
+        # Get list of existing IDs
+        shipment_ids = st.session_state.shipments['ID'].tolist()
 
-        if delete_button and id_to_delete is not None:
-            if delete_shipment(id_to_delete):
-                st.rerun() # Rerun to refresh the UI after deletion
+        with st.container(border=True):
+            st.markdown("**⚠️ Warning: Deletion is Permanent**")
+            
+            col_del_1, col_del_2 = st.columns([0.7, 0.3])
 
-else:
-    st.info("No shipment records match the current filters. Use the sidebar to add a new entry!")
+            with col_del_1:
+                id_to_delete = st.selectbox(
+                    "Select Shipment ID to Permanently Delete",
+                    options=shipment_ids,
+                    index=None,
+                    placeholder="Select an ID to delete...",
+                    key="id_to_delete_select"
+                )
+            
+            with col_del_2:
+                # Add a vertical space to align the button
+                st.markdown("<br>", unsafe_allow_html=True) 
+                delete_button = st.button("🚨 Confirm Delete", type="primary", disabled=(id_to_delete is None), use_container_width=True)
+
+            if delete_button and id_to_delete is not None:
+                if delete_shipment(id_to_delete):
+                    st.rerun() # Rerun to refresh the UI after deletion
