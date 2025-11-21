@@ -407,7 +407,7 @@ class LogisticsSystem:
         col1, col2 = st.columns(2)
         with col1:
             staff_phone = st.text_input("Enter staff phone number to notify:", 
-                                      value="+923173037409",
+                                      value="+923207429422",
                                       key="staff_notify_phone")
         with col2:
             if st.button("📤 Send Order Notification", key="send_order_notif"):
@@ -876,7 +876,7 @@ def show_bilty_form(system):
                 if receiver_city == "Other":
                     receiver_city = st.text_input("Enter City Name")
                 approx_delivery = st.text_input("Approx Delivery Date & Time*", placeholder="e.g., 25 Dec 2024, 2:00 PM")
-                staff_phone = st.text_input("Staff Phone Number*", placeholder="923001234567", value="+923173037409")
+                staff_phone = st.text_input("Staff Phone Number*", placeholder="923001234567", value="+9232074294229")
                 staff_name = st.text_input("Staff Name", placeholder="Optional: Enter staff name")
             
             submitted = st.form_submit_button("📄 Generate Bilty", use_container_width=True)
