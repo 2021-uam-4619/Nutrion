@@ -249,7 +249,7 @@ class LogisticsSystem:
 *Please prepare the goods and generate bilty.*"""
 
         # Send to staff
-        staff_numbers = ["+923173037409"]  # Add more staff numbers as needed
+        staff_numbers = ["+923207429422"]  # Add more staff numbers as needed
         for number in staff_numbers:
             self.whatsapp.send_message(number, staff_message)
     
@@ -306,7 +306,7 @@ class LogisticsSystem:
 📍 *Next Step:* Send to Receiver"""
 
         # Send to staff
-        staff_numbers = ["+923173037409"]
+        staff_numbers = ["+923207429422"]
         for number in staff_numbers:
             self.whatsapp.send_message(number, staff_message)
         
