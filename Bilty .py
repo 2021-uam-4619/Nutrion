@@ -84,6 +84,24 @@ st.markdown("""
         max-width: 200px;
         max-height: 80px;
     }
+    .download-btn {
+        background-color: #28a745;
+        color: white;
+        padding: 0.75rem 1.5rem;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-size: 1rem;
+        margin: 0.5rem;
+        display: inline-block;
+        text-decoration: none;
+    }
+    .download-btn:hover {
+        background-color: #218838;
+    }
+    .phone-input {
+        margin: 0.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -94,6 +112,9 @@ class WhatsAppAPI:
     
     def send_message(self, to, message):
         """Send WhatsApp message"""
+        # Clean phone number
+        to = self.clean_phone_number(to)
+        
         url = f"{self.base_url}messages/chat"
         payload = {
             'token': self.token,
@@ -103,91 +124,224 @@ class WhatsAppAPI:
         try:
             response = requests.post(url, data=payload)
             return response.status_code == 200
-        except:
+        except Exception as e:
+            st.error(f"Failed to send WhatsApp message: {str(e)}")
             return False
     
     def send_document(self, to, document_path, filename):
         """Send PDF document via WhatsApp"""
+        # Clean phone number
+        to = self.clean_phone_number(to)
+        
         url = f"{self.base_url}messages/document"
-        files = {
-            'document': (filename, open(document_path, 'rb'))
-        }
-        payload = {
-            'token': self.token,
-            'to': to,
-            'filename': filename
-        }
         try:
+            files = {
+                'document': (filename, open(document_path, 'rb'))
+            }
+            payload = {
+                'token': self.token,
+                'to': to,
+                'filename': filename
+            }
             response = requests.post(url, data=payload, files=files)
             return response.status_code == 200
-        except:
+        except Exception as e:
+            st.error(f"Failed to send document: {str(e)}")
             return False
     
     def send_image(self, to, image_path, caption=""):
         """Send image via WhatsApp"""
+        # Clean phone number
+        to = self.clean_phone_number(to)
+        
         url = f"{self.base_url}messages/image"
-        files = {
-            'image': open(image_path, 'rb')
-        }
-        payload = {
-            'token': self.token,
-            'to': to,
-            'caption': caption
-        }
         try:
+            files = {
+                'image': open(image_path, 'rb')
+            }
+            payload = {
+                'token': self.token,
+                'to': to,
+                'caption': caption
+            }
             response = requests.post(url, data=payload, files=files)
             return response.status_code == 200
-        except:
+        except Exception as e:
+            st.error(f"Failed to send image: {str(e)}")
             return False
+    
+    def clean_phone_number(self, phone):
+        """Clean and format phone number"""
+        # Remove any non-digit characters
+        phone = ''.join(filter(str.isdigit, phone))
+        
+        # If starts with 0, replace with 92
+        if phone.startswith('0'):
+            phone = '92' + phone[1:]
+        
+        # If doesn't start with country code, add 92
+        if not phone.startswith('92'):
+            phone = '92' + phone
+        
+        # Add + prefix for WhatsApp
+        return f"+{phone}"
 
 class PDFGenerator:
     def create_bilty_pdf(self, bilty_data):
+        """Create professional bilty PDF"""
         pdf = FPDF()
         pdf.add_page()
         
-        # Title
-        pdf.set_font('Arial', 'B', 16)
-        pdf.cell(0, 10, 'Nutrion Logistics - Bilty Document', 0, 1, 'C')
+        # Title with border
+        pdf.set_fill_color(46, 139, 87)  # Green color
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font('Arial', 'B', 18)
+        pdf.cell(0, 15, 'Nutrion Logistics - Bilty Document', 1, 1, 'C', True)
         pdf.ln(10)
         
-        # Tracking ID
+        # Reset text color
+        pdf.set_text_color(0, 0, 0)
+        
+        # Bilty ID
         pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, f'Bilty ID: {bilty_data["bilty_id"]}', 0, 1)
+        pdf.cell(0, 10, f'BILTY ID: {bilty_data["bilty_id"]}', 0, 1, 'C')
         pdf.ln(5)
         
-        # Sender Details
+        # Section 1: From Details
+        pdf.set_fill_color(240, 240, 240)
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'From:', 0, 1)
+        pdf.cell(0, 10, 'FROM (SENDER)', 1, 1, 'L', True)
         pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Nutrion Logistics', 0, 1)
-        pdf.cell(0, 6, f'Product: {bilty_data["product_name"]}', 0, 1)
-        pdf.cell(0, 6, f'Quantity: {bilty_data["quantity"]}', 0, 1)
+        pdf.cell(0, 8, f'Company: Nutrion Logistics', 0, 1)
+        pdf.cell(0, 8, f'Product: {bilty_data["product_name"]}', 0, 1)
+        pdf.cell(0, 8, f'Quantity: {bilty_data["quantity"]}', 0, 1)
         pdf.ln(5)
         
-        # Receiver Details
+        # Section 2: To Details
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'To:', 0, 1)
+        pdf.cell(0, 10, 'TO (RECEIVER)', 1, 1, 'L', True)
         pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Receiver: {bilty_data["receiver_name"]}', 0, 1)
-        pdf.cell(0, 6, f'Phone: {bilty_data["receiver_phone"]}', 0, 1)
-        pdf.cell(0, 6, f'Location: {bilty_data["receiver_location"]}', 0, 1)
-        pdf.cell(0, 6, f'Approx Delivery: {bilty_data["approx_delivery"]}', 0, 1)
+        pdf.cell(0, 8, f'Name: {bilty_data["receiver_name"]}', 0, 1)
+        pdf.cell(0, 8, f'Phone: {bilty_data["receiver_phone"]}', 0, 1)
+        pdf.cell(0, 8, f'Location: {bilty_data["receiver_location"]}', 0, 1)
+        pdf.cell(0, 8, f'City: {bilty_data["receiver_city"]}', 0, 1)
         pdf.ln(5)
         
-        # Staff Contact
+        # Section 3: Delivery Information
         pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Staff Contact:', 0, 1)
+        pdf.cell(0, 10, 'DELIVERY INFORMATION', 1, 1, 'L', True)
         pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Staff Phone: {bilty_data["staff_phone"]}', 0, 1)
+        pdf.cell(0, 8, f'Approximate Delivery: {bilty_data["approx_delivery"]}', 0, 1)
+        pdf.cell(0, 8, f'Bilty Created: {bilty_data["created_at"].strftime("%d-%m-%Y %H:%M")}', 0, 1)
+        pdf.ln(5)
+        
+        # Section 4: Contact Information
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(0, 10, 'CONTACT INFORMATION', 1, 1, 'L', True)
+        pdf.set_font('Arial', '', 11)
+        pdf.cell(0, 8, f'Staff Contact: {bilty_data["staff_phone"]}', 0, 1)
+        pdf.cell(0, 8, f'For Queries: Contact the above number', 0, 1)
         pdf.ln(10)
+        
+        # Terms and Conditions
+        pdf.set_font('Arial', 'I', 10)
+        pdf.multi_cell(0, 6, 'Terms & Conditions: This bilty is generated by Nutrion Logistics System. Please verify all details before acceptance. For any discrepancies, contact our staff immediately.')
+        pdf.ln(5)
         
         # Footer
-        pdf.set_font('Arial', 'I', 10)
-        pdf.cell(0, 10, 'Generated by Nutrion Logistics System', 0, 1, 'C')
+        pdf.set_font('Arial', 'I', 9)
+        pdf.cell(0, 10, 'Generated by Nutrion Logistics System - Trusted Logistics Partner', 0, 1, 'C')
         
-        filename = f"bilty_{bilty_data['bilty_id']}.pdf"
-        pdf.output(filename)
-        return filename
+        # Save to bytes
+        pdf_bytes = pdf.output(dest='S').encode('latin1')
+        return pdf_bytes
+    
+    def create_detailed_bilty_pdf(self, bilty_data, order_data):
+        """Create a more detailed bilty PDF"""
+        pdf = FPDF()
+        pdf.add_page()
+        
+        # Header with logo space
+        pdf.set_fill_color(46, 139, 87)  # Nutrion Green
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_font('Arial', 'B', 20)
+        pdf.cell(0, 20, 'NUTRION LOGISTICS', 1, 1, 'C', True)
+        pdf.set_font('Arial', 'B', 16)
+        pdf.cell(0, 12, 'OFFICIAL BILTY DOCUMENT', 1, 1, 'C', True)
+        pdf.ln(5)
+        
+        # Reset text color
+        pdf.set_text_color(0, 0, 0)
+        
+        # Document Details
+        col_width = 95
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(col_width, 10, f'Bilty ID: {bilty_data["bilty_id"]}', 0, 0)
+        pdf.cell(col_width, 10, f'Order ID: {bilty_data["order_id"]}', 0, 1)
+        pdf.cell(col_width, 10, f'Date: {bilty_data["created_at"].strftime("%d-%m-%Y")}', 0, 0)
+        pdf.cell(col_width, 10, f'Time: {bilty_data["created_at"].strftime("%H:%M")}', 0, 1)
+        pdf.ln(10)
+        
+        # Sender Section
+        self._add_section(pdf, "SENDER DETAILS", [
+            "Company: Nutrion Logistics",
+            f"Product: {order_data['product_name']}",
+            f"Quantity: {order_data['quantity']}",
+            "Status: Ready for Dispatch"
+        ])
+        
+        # Receiver Section
+        self._add_section(pdf, "RECEIVER DETAILS", [
+            f"Name: {bilty_data['receiver_name']}",
+            f"Phone: {bilty_data['receiver_phone']}",
+            f"Address: {bilty_data['receiver_location']}",
+            f"City: {bilty_data['receiver_city']}"
+        ])
+        
+        # Delivery Information
+        self._add_section(pdf, "DELIVERY INFORMATION", [
+            f"Expected Delivery: {bilty_data['approx_delivery']}",
+            f"Contact Person: {bilty_data['receiver_name']}",
+            f"Contact Number: {bilty_data['receiver_phone']}",
+            "Delivery Instructions: Contact before delivery"
+        ])
+        
+        # Staff Contact
+        self._add_section(pdf, "STAFF CONTACT", [
+            f"Responsible Staff: {bilty_data.get('staff_name', 'Nutrion Staff')}",
+            f"Contact Number: {bilty_data['staff_phone']}",
+            "Department: Logistics & Dispatch",
+            "Email: info@nutrion.com"
+        ])
+        
+        # Signature Area
+        pdf.ln(10)
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(0, 10, 'AUTHORIZED SIGNATURES', 0, 1)
+        pdf.ln(8)
+        
+        # Sender Signature
+        pdf.cell(85, 6, 'Sender Signature:', 0, 0)
+        pdf.cell(85, 6, 'Receiver Signature:', 0, 1)
+        pdf.cell(85, 20, '', 'B', 0)
+        pdf.cell(85, 20, '', 'B', 1)
+        
+        pdf.ln(10)
+        pdf.set_font('Arial', 'I', 9)
+        pdf.multi_cell(0, 5, 'This is a computer generated bilty. No physical signature is required. Please verify all details and contact staff for any corrections.')
+        
+        pdf_bytes = pdf.output(dest='S').encode('latin1')
+        return pdf_bytes
+    
+    def _add_section(self, pdf, title, items):
+        """Helper method to add consistent sections"""
+        pdf.set_fill_color(240, 240, 240)
+        pdf.set_font('Arial', 'B', 12)
+        pdf.cell(0, 10, title, 1, 1, 'L', True)
+        pdf.set_font('Arial', '', 11)
+        for item in items:
+            pdf.cell(0, 7, item, 0, 1)
+        pdf.ln(3)
 
 class LogisticsSystem:
     def __init__(self):
@@ -248,10 +402,23 @@ class LogisticsSystem:
 
 *Please prepare the goods and generate bilty.*"""
 
-        # Send to staff
-        staff_numbers = ["+923207429422"]  # Add more staff numbers as needed
-        for number in staff_numbers:
-            self.whatsapp.send_message(number, staff_message)
+        # Ask user which staff to send to
+        st.info("📤 Ready to send order notification to staff")
+        col1, col2 = st.columns(2)
+        with col1:
+            staff_phone = st.text_input("Enter staff phone number to notify:", 
+                                      value="+923173037409",
+                                      key="staff_notify_phone")
+        with col2:
+            if st.button("📤 Send Order Notification", key="send_order_notif"):
+                if staff_phone:
+                    success = self.whatsapp.send_message(staff_phone, staff_message)
+                    if success:
+                        st.success(f"✅ Order notification sent to {staff_phone}")
+                    else:
+                        st.error("❌ Failed to send notification")
+                else:
+                    st.warning("⚠️ Please enter a phone number")
     
     def create_bilty(self, order_id, bilty_data):
         """Step 2: Create bilty process"""
@@ -277,13 +444,10 @@ class LogisticsSystem:
             'description': 'Bilty document generated and ready for dispatch'
         })
         
-        # Send bilty to staff
-        self.send_bilty_notification(bilty_data)
-        
         return bilty_id
     
-    def send_bilty_notification(self, bilty_data):
-        """Send bilty details to staff"""
+    def send_bilty_to_staff(self, bilty_data, staff_phone):
+        """Send bilty to specific staff member"""
         staff_message = f"""📄 *BILTY GENERATED - Nutrion Logistics*
 
 🆔 *Bilty ID:* {bilty_data['bilty_id']}
@@ -298,6 +462,7 @@ class LogisticsSystem:
 📛 *Name:* {bilty_data['receiver_name']}
 📞 *Phone:* {bilty_data['receiver_phone']}
 📍 *Location:* {bilty_data['receiver_location']}
+🏙️ *City:* {bilty_data['receiver_city']}
 📅 *Approx Delivery:* {bilty_data['approx_delivery']}
 
 📞 *Staff Contact:* {bilty_data['staff_phone']}
@@ -305,23 +470,10 @@ class LogisticsSystem:
 🔄 *Status:* Bilty Process
 📍 *Next Step:* Send to Receiver"""
 
-        # Send to staff
-        staff_numbers = ["+923207429422"]
-        for number in staff_numbers:
-            self.whatsapp.send_message(number, staff_message)
-        
-        # Generate and send PDF
-        pdf_file = self.pdf_gen.create_bilty_pdf(bilty_data)
-        for number in staff_numbers:
-            self.whatsapp.send_document(number, pdf_file, f"Bilty_{bilty_data['bilty_id']}.pdf")
-        
-        # Clean up
-        try:
-            os.remove(pdf_file)
-        except:
-            pass
+        success = self.whatsapp.send_message(staff_phone, staff_message)
+        return success
     
-    def send_to_receiver(self, order_id, attached_files=None):
+    def send_to_receiver(self, order_id, receiver_phone, attached_files=None):
         """Step 3: Send details to receiver"""
         order = next((o for o in st.session_state.orders if o['order_id'] == order_id), None)
         bilty = st.session_state.bilty_data.get(order_id)
@@ -362,7 +514,7 @@ class LogisticsSystem:
 Thank you for choosing Nutrion Logistics!"""
         
         # Send to receiver
-        success = self.whatsapp.send_message(bilty['receiver_phone'], receiver_message)
+        success = self.whatsapp.send_message(receiver_phone, receiver_message)
         
         # Send attached files if any
         if attached_files and success:
@@ -373,9 +525,9 @@ Thank you for choosing Nutrion Logistics!"""
                 
                 # Send based on file type
                 if file.name.lower().endswith(('.pdf')):
-                    self.whatsapp.send_document(bilty['receiver_phone'], file.name, file.name)
+                    self.whatsapp.send_document(receiver_phone, file.name, file.name)
                 elif file.name.lower().endswith(('.jpg', '.jpeg', '.png')):
-                    self.whatsapp.send_image(bilty['receiver_phone'], file.name, "Attached document")
+                    self.whatsapp.send_image(receiver_phone, file.name, "Attached document")
                 
                 # Clean up
                 try:
@@ -398,13 +550,11 @@ Thank you for choosing Nutrion Logistics!"""
                 'description': f'Delivery status updated to: {status}'
             })
             
-            # Send status update notification
-            self.send_status_update_notification(order, status)
             return True
         return False
     
-    def send_status_update_notification(self, order, status):
-        """Send status update notification"""
+    def send_status_update_notification(self, order, status, receiver_phone):
+        """Send status update notification to specific receiver"""
         bilty = st.session_state.bilty_data.get(order['order_id'])
         if bilty:
             message = f"""🔄 *STATUS UPDATE - Nutrion Logistics*
@@ -422,7 +572,8 @@ http://localhost:8501/?tracking={order['order_id']}
 Thank you for choosing Nutrion Logistics!"""
             
             # Send to receiver
-            self.whatsapp.send_message(bilty['receiver_phone'], message)
+            return self.whatsapp.send_message(receiver_phone, message)
+        return False
     
     def update_order(self, order_id, updated_data):
         """Update order details"""
@@ -522,6 +673,12 @@ def show_limited_tracking_view(order_id, system):
     if new_order_id:
         st.experimental_set_query_params(tracking=new_order_id)
         st.experimental_rerun()
+
+def create_download_link(pdf_bytes, filename):
+    """Create a download link for PDF"""
+    b64 = base64.b64encode(pdf_bytes).decode()
+    href = f'<a href="data:application/octet-stream;base64,{b64}" download="{filename}" class="download-btn">📥 Download {filename}</a>'
+    return href
 
 def main():
     # Check if limited access view is requested via query parameter
@@ -657,7 +814,6 @@ def show_order_form(system):
                 
                 **Order ID:** {order_id}
                 **Status:** Under Process
-                **WhatsApp:** Notifications sent to staff
                 
                 **Next Step:** Proceed to Bilty Process
                 """)
@@ -705,31 +861,38 @@ def show_bilty_form(system):
             col1, col2 = st.columns(2)
             
             with col1:
-                st.markdown("#### From:")
-                st.write("**Nutrion Logistics**")
+                st.markdown("#### 📤 From:")
+                st.write("**Company:** Nutrion Logistics")
                 st.write(f"**Product:** {selected_order['product_name']}")
                 st.write(f"**Quantity:** {selected_order['quantity']}")
             
             with col2:
-                st.markdown("#### To:")
+                st.markdown("#### 📥 To:")
                 receiver_name = st.text_input("Receiver Name*", placeholder="Enter receiver full name")
                 receiver_phone = st.text_input("Receiver Phone*", placeholder="923001234567")
                 receiver_location = st.text_input("Location*", placeholder="Complete delivery address")
+                receiver_city = st.selectbox("City*", 
+                    ["Karachi", "Lahore", "Islamabad", "Rawalpindi", "Faisalabad", "Multan", "Hyderabad", "Peshawar", "Quetta", "Other"])
+                if receiver_city == "Other":
+                    receiver_city = st.text_input("Enter City Name")
                 approx_delivery = st.text_input("Approx Delivery Date & Time*", placeholder="e.g., 25 Dec 2024, 2:00 PM")
                 staff_phone = st.text_input("Staff Phone Number*", placeholder="923001234567", value="+923173037409")
+                staff_name = st.text_input("Staff Name", placeholder="Optional: Enter staff name")
             
             submitted = st.form_submit_button("📄 Generate Bilty", use_container_width=True)
             
             if submitted:
-                if all([receiver_name, receiver_phone, receiver_location, approx_delivery, staff_phone]):
+                if all([receiver_name, receiver_phone, receiver_location, receiver_city, approx_delivery, staff_phone]):
                     bilty_data = {
                         'product_name': selected_order['product_name'],
                         'quantity': selected_order['quantity'],
                         'receiver_name': receiver_name,
                         'receiver_phone': receiver_phone,
                         'receiver_location': receiver_location,
+                        'receiver_city': receiver_city,
                         'approx_delivery': approx_delivery,
-                        'staff_phone': staff_phone
+                        'staff_phone': staff_phone,
+                        'staff_name': staff_name
                     }
                     
                     bilty_id = system.create_bilty(order_id, bilty_data)
@@ -740,10 +903,43 @@ def show_bilty_form(system):
                     **Bilty ID:** {bilty_id}
                     **Order ID:** {order_id}
                     **Status:** Bilty Process
-                    **WhatsApp:** Bilty details sent to staff
                     
                     **Next Step:** Send details to receiver
                     """)
+                    
+                    # Generate and show PDF download options
+                    with st.expander("📄 Download Bilty Documents", expanded=True):
+                        st.markdown("### 📥 Download Bilty PDFs")
+                        
+                        # Simple Bilty PDF
+                        simple_pdf_bytes = system.pdf_gen.create_bilty_pdf(bilty_data)
+                        st.markdown(create_download_link(simple_pdf_bytes, f"Bilty_{bilty_id}_Simple.pdf"), unsafe_allow_html=True)
+                        
+                        # Detailed Bilty PDF
+                        detailed_pdf_bytes = system.pdf_gen.create_detailed_bilty_pdf(bilty_data, selected_order)
+                        st.markdown(create_download_link(detailed_pdf_bytes, f"Bilty_{bilty_id}_Detailed.pdf"), unsafe_allow_html=True)
+                        
+                        st.info("💡 Download both versions. Simple for quick reference, Detailed for complete documentation.")
+                    
+                    # Option to send bilty to staff
+                    st.markdown("---")
+                    st.markdown("### 📤 Send Bilty to Staff")
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        staff_phone_to_send = st.text_input("Enter staff phone number to send bilty:", 
+                                                          value=staff_phone,
+                                                          key="bilty_staff_phone")
+                    with col2:
+                        if st.button("📤 Send Bilty via WhatsApp", key="send_bilty_whatsapp"):
+                            if staff_phone_to_send:
+                                success = system.send_bilty_to_staff(bilty_data, staff_phone_to_send)
+                                if success:
+                                    st.success(f"✅ Bilty sent to {staff_phone_to_send}")
+                                else:
+                                    st.error("❌ Failed to send bilty")
+                            else:
+                                st.warning("⚠️ Please enter a phone number")
+                    
                 else:
                     st.error("❌ Please fill all required fields (*)")
 
@@ -786,6 +982,12 @@ def show_receiver_form(system):
         with st.form("receiver_form"):
             st.markdown("### 📤 Send to Receiver")
             
+            # Phone number input
+            st.markdown("#### 📞 Receiver Phone Number")
+            receiver_phone = st.text_input("Enter receiver phone number:", 
+                                         value=bilty_data['receiver_phone'],
+                                         key="receiver_phone_input")
+            
             # File upload
             st.markdown("#### 📎 Attach Files (Optional)")
             st.write("You can attach PDF, JPG, PNG files to send to receiver")
@@ -824,21 +1026,24 @@ Thank you for choosing Nutrion Logistics!"""
             submitted = st.form_submit_button("📤 Send to Receiver", use_container_width=True)
             
             if submitted:
-                success = system.send_to_receiver(order_id, attached_files)
-                
-                if success:
-                    st.success(f"""
-                    ✅ **Message Sent to Receiver Successfully!**
+                if receiver_phone:
+                    success = system.send_to_receiver(order_id, receiver_phone, attached_files)
                     
-                    **Receiver:** {bilty_data['receiver_name']}
-                    **Phone:** {bilty_data['receiver_phone']}
-                    **Status:** Receiver Process
-                    **Tracking Link:** Sent to receiver
-                    
-                    **Next Step:** Update delivery status
-                    """)
+                    if success:
+                        st.success(f"""
+                        ✅ **Message Sent to Receiver Successfully!**
+                        
+                        **Receiver:** {bilty_data['receiver_name']}
+                        **Phone:** {receiver_phone}
+                        **Status:** Receiver Process
+                        **Tracking Link:** Sent to receiver
+                        
+                        **Next Step:** Update delivery status
+                        """)
+                    else:
+                        st.error("❌ Failed to send message to receiver. Please check the phone number.")
                 else:
-                    st.error("❌ Failed to send message to receiver. Please check the phone number.")
+                    st.error("❌ Please enter receiver phone number")
 
 def show_status_update(system):
     """Step 4: Update Delivery Status"""
@@ -879,6 +1084,13 @@ def show_status_update(system):
                 "Not Delivered Yet"
             ])
             
+            # Option to send notification
+            st.markdown("### 📤 Send Status Update Notification")
+            send_notification = st.checkbox("Send WhatsApp notification to receiver", value=True)
+            notification_phone = st.text_input("Receiver phone for notification:", 
+                                             value=bilty_data['receiver_phone'],
+                                             key="status_notification_phone")
+            
             submitted = st.form_submit_button("🔄 Update Status", use_container_width=True)
             
             if submitted:
@@ -890,8 +1102,17 @@ def show_status_update(system):
                     
                     **Order ID:** {order_id}
                     **New Status:** {new_status}
-                    **Notification:** Sent to receiver
                     """)
+                    
+                    # Send notification if requested
+                    if send_notification and notification_phone:
+                        notification_success = system.send_status_update_notification(
+                            selected_order, new_status, notification_phone
+                        )
+                        if notification_success:
+                            st.success(f"✅ Status notification sent to {notification_phone}")
+                        else:
+                            st.error("❌ Failed to send status notification")
                 else:
                     st.error("❌ Failed to update status")
 
