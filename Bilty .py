@@ -38,14 +38,6 @@ st.markdown("""
         margin: 0.5rem 0;
         border-left: 4px solid #2E8B57;
     }
-    .btn-primary {
-        background-color: #2E8B57;
-        color: white;
-        padding: 0.5rem 1rem;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-    }
     .status-delivered { border-left-color: #28a745; }
     .status-transit { border-left-color: #ffc107; }
     .status-pending { border-left-color: #dc3545; }
@@ -62,6 +54,12 @@ st.markdown("""
         background: white;
         border-radius: 10px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .limited-access {
+        background: #f8f9fa;
+        padding: 2rem;
+        border-radius: 10px;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -84,80 +82,13 @@ class WhatsAppAPI:
             return response.status_code == 200
         except:
             return False
-    
-    def send_document(self, to, document_path, filename):
-        """Send PDF document via WhatsApp"""
-        url = f"{self.base_url}messages/document"
-        files = {
-            'document': (filename, open(document_path, 'rb'))
-        }
-        payload = {
-            'token': self.token,
-            'to': to,
-            'filename': filename
-        }
-        try:
-            response = requests.post(url, data=payload, files=files)
-            return response.status_code == 200
-        except:
-            return False
-
-class PDFGenerator:
-    def create_booking_pdf(self, booking_data):
-        pdf = FPDF()
-        pdf.add_page()
-        
-        # Title
-        pdf.set_font('Arial', 'B', 16)
-        pdf.cell(0, 10, 'Nutrion Logistics - Booking Confirmation', 0, 1, 'C')
-        pdf.ln(10)
-        
-        # Tracking ID
-        pdf.set_font('Arial', 'B', 14)
-        pdf.cell(0, 10, f'Tracking ID: {booking_data["tracking_id"]}', 0, 1)
-        pdf.ln(5)
-        
-        # Sender Details
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Sender Details:', 0, 1)
-        pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Name: {booking_data["sender_name"]}', 0, 1)
-        pdf.cell(0, 6, f'Phone: {booking_data["sender_phone"]}', 0, 1)
-        if booking_data.get("sender_phone2"):
-            pdf.cell(0, 6, f'Alternate Phone: {booking_data["sender_phone2"]}', 0, 1)
-        pdf.ln(5)
-        
-        # Receiver Details
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Receiver Details:', 0, 1)
-        pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Name: {booking_data["receiver_name"]}', 0, 1)
-        pdf.cell(0, 6, f'Phone: {booking_data["receiver_phone"]}', 0, 1)
-        pdf.cell(0, 6, f'Location: {booking_data["receiver_location"]}', 0, 1)
-        pdf.cell(0, 6, f'City: {booking_data["receiver_city"]}', 0, 1)
-        pdf.ln(5)
-        
-        # Service Details
-        pdf.set_font('Arial', 'B', 12)
-        pdf.cell(0, 10, 'Service Details:', 0, 1)
-        pdf.set_font('Arial', '', 11)
-        pdf.cell(0, 6, f'Booking Date: {booking_data["booking_date"].strftime("%Y-%m-%d %H:%M")}', 0, 1)
-        pdf.cell(0, 6, f'Delivery Type: {booking_data["delivery_type"]}', 0, 1)
-        pdf.cell(0, 6, f'Pickup Service: {booking_data["pickup_required"]}', 0, 1)
-        pdf.ln(10)
-        
-        # Footer
-        pdf.set_font('Arial', 'I', 10)
-        pdf.cell(0, 10, 'Thank you for choosing Nutrion Logistics!', 0, 1, 'C')
-        
-        filename = f"booking_{booking_data['tracking_id']}.pdf"
-        pdf.output(filename)
-        return filename
 
 class LogisticsSystem:
     def __init__(self):
         self.whatsapp = WhatsAppAPI()
-        self.pdf_gen = PDFGenerator()
+        self.staff_numbers = ["923173037409"]  # Sajjad + other staff numbers
+        self.office_city = "Faisalabad"
+        self.warehouse_city = "Multan"
         self.load_data()
     
     def load_data(self):
@@ -170,12 +101,82 @@ class LogisticsSystem:
     def generate_tracking_id(self):
         return f"NT{random.randint(100000, 999999)}"
     
+    def send_order_to_staff(self, booking_data):
+        """Send order details to staff via WhatsApp"""
+        message = f"""📦 *NEW ORDER - Nutrion Logistics*
+
+🆔 *Tracking ID:* {booking_data['tracking_id']}
+📅 *Order Date:* {booking_data['booking_date'].strftime('%d-%m-%Y %I:%M %p')}
+
+📋 *Product Details:*
+🏷️ *Product:* {booking_data['product_name']}
+📊 *Quantity:* {booking_data['quantity']}
+🏢 *From:* {self.office_city} Office
+📭 *To:* {booking_data['receiver_city']}
+
+👤 *Customer Details:*
+📛 *Name:* {booking_data['sender_name']}
+📞 *Phone:* {booking_data['sender_phone']}
+
+🏠 *Delivery Address:*
+{booking_data['receiver_location']}
+
+📝 *Special Instructions:*
+{booking_data.get('special_instructions', 'None')}
+
+🚚 *Please prepare the bilty and confirm pickup.*"""
+
+        # Send to all staff numbers
+        for staff_number in self.staff_numbers:
+            self.whatsapp.send_message(staff_number, message)
+    
+    def send_bilty_to_customer(self, booking_data, bilty_number):
+        """Send bilty confirmation to customer"""
+        message = f"""✅ *ORDER CONFIRMED - Nutrion Logistics*
+
+🆔 *Tracking ID:* {booking_data['tracking_id']}
+📦 *Bilty Number:* {bilty_number}
+📅 *Order Date:* {booking_data['booking_date'].strftime('%d-%m-%Y %I:%M %p')}
+
+📋 *Product:* {booking_data['product_name']}
+📊 *Quantity:* {booking_data['quantity']}
+
+🏢 *From:* {self.office_city}
+📭 *To:* {booking_data['receiver_city']}
+
+📞 *Contact for updates:* {booking_data['sender_phone']}
+
+🔗 *Track Your Order:*
+http://localhost:8501/?tracking={booking_data['tracking_id']}
+
+*Thank you for choosing Nutrion Logistics!*"""
+
+        # Send to customer
+        self.whatsapp.send_message(booking_data['sender_phone'], message)
+    
+    def send_status_update(self, tracking_id, status, description):
+        """Send status update to customer"""
+        booking = self.get_booking_by_tracking(tracking_id)
+        if booking:
+            message = f"""🔄 *ORDER UPDATE - Nutrion Logistics*
+
+🆔 *Tracking ID:* {tracking_id}
+🔄 *Status:* {status}
+📝 *Update:* {description}
+📅 *Time:* {datetime.now().strftime('%d-%m-%Y %I:%M %p')}
+
+🔗 *Track Your Order:*
+http://localhost:8501/?tracking={tracking_id}"""
+
+            self.whatsapp.send_message(booking['sender_phone'], message)
+    
     def add_booking(self, booking_data):
         tracking_id = self.generate_tracking_id()
         booking_data['tracking_id'] = tracking_id
         booking_data['booking_date'] = datetime.now()
-        booking_data['status'] = 'Booking Confirmed'
-        booking_data['current_location'] = 'Origin Branch'
+        booking_data['status'] = 'Order Received'
+        booking_data['current_location'] = f'{self.office_city} Office'
+        booking_data['bilty_number'] = None
         
         # Add to bookings
         st.session_state.bookings.append(booking_data)
@@ -183,72 +184,36 @@ class LogisticsSystem:
         # Initialize tracking
         st.session_state.tracking_data[tracking_id] = [{
             'timestamp': datetime.now(),
-            'status': 'Booking Confirmed',
-            'location': 'Origin Branch',
-            'description': 'Parcel booking received and confirmed'
+            'status': 'Order Received',
+            'location': f'{self.office_city} Office',
+            'description': 'Order received at Faisalabad office'
         }]
         
-        # Send WhatsApp notifications
-        self.send_booking_notifications(booking_data)
+        # Send order to staff
+        self.send_order_to_staff(booking_data)
         
         return tracking_id
     
-    def send_booking_notifications(self, booking_data):
-        """Send WhatsApp messages and PDF to customer"""
-        message = f"""🚚 *Nutrion Logistics - Booking Confirmed!*
-
-📦 *Tracking ID:* {booking_data['tracking_id']}
-📅 *Booking Date:* {booking_data['booking_date'].strftime('%d %b %Y %I:%M %p')}
-
-👤 *Sender:* {booking_data['sender_name']}
-📞 *Contact:* {booking_data['sender_phone']}
-
-👤 *Receiver:* {booking_data['receiver_name']}
-📍 *Destination:* {booking_data['receiver_city']}
-
-🔄 *Service:* {booking_data['delivery_type']}
-📮 *Pickup:* {booking_data['pickup_required']}
-
-Track your parcel: https://nutrion-bilty.streamlit.app/
-
-Thank you for choosing Nutrion Logistics!"""
-
-        # Send to sender
-        if booking_data['sender_phone']:
-            self.whatsapp.send_message(booking_data['sender_phone'], message)
-        
-        # Send to alternate sender number
-        if booking_data.get('sender_phone2'):
-            self.whatsapp.send_message(booking_data['sender_phone2'], message)
-        
-        # Send to receiver
-        if booking_data['receiver_phone']:
-            self.whatsapp.send_message(booking_data['receiver_phone'], message)
-        
-        # Generate and send PDF
-        pdf_file = self.pdf_gen.create_booking_pdf(booking_data)
-        if booking_data['sender_phone']:
-            self.whatsapp.send_document(booking_data['sender_phone'], pdf_file, f"Booking_{booking_data['tracking_id']}.pdf")
-        
-        # Clean up PDF file
-        try:
-            os.remove(pdf_file)
-        except:
-            pass
-    
-    def update_booking(self, tracking_id, updated_data):
-        """Update booking details"""
-        for i, booking in enumerate(st.session_state.bookings):
+    def update_bilty_number(self, tracking_id, bilty_number):
+        """Update bilty number and send confirmation"""
+        for booking in st.session_state.bookings:
             if booking['tracking_id'] == tracking_id:
-                st.session_state.bookings[i].update(updated_data)
-                return True
-        return False
-    
-    def delete_booking(self, tracking_id):
-        """Delete booking"""
-        st.session_state.bookings = [b for b in st.session_state.bookings if b['tracking_id'] != tracking_id]
-        if tracking_id in st.session_state.tracking_data:
-            del st.session_state.tracking_data[tracking_id]
+                booking['bilty_number'] = bilty_number
+                booking['status'] = 'Bilty Created'
+                break
+        
+        # Add to tracking
+        st.session_state.tracking_data[tracking_id].append({
+            'timestamp': datetime.now(),
+            'status': 'Bilty Created',
+            'location': f'{self.office_city} Office',
+            'description': f'Bilty number {bilty_number} generated'
+        })
+        
+        # Send bilty to customer
+        booking = self.get_booking_by_tracking(tracking_id)
+        if booking:
+            self.send_bilty_to_customer(booking, bilty_number)
     
     def update_status(self, tracking_id, status, location, description):
         """Update parcel status"""
@@ -266,12 +231,91 @@ Thank you for choosing Nutrion Logistics!"""
                     booking['status'] = status
                     booking['current_location'] = location
                     break
-
-def main():
-    st.markdown('<div class="main-header">🚚 Nutrion Logistics System</div>', unsafe_allow_html=True)
+            
+            # Send update to customer
+            self.send_status_update(tracking_id, status, description)
     
-    # Initialize system
+    def get_booking_by_tracking(self, tracking_id):
+        """Get booking by tracking ID"""
+        for booking in st.session_state.bookings:
+            if booking['tracking_id'] == tracking_id:
+                return booking
+        return None
+
+def show_limited_tracking(tracking_id):
+    """Show limited tracking page for customers"""
     system = LogisticsSystem()
+    
+    st.markdown('<div class="main-header">🔍 Nutrion - Track Your Order</div>', unsafe_allow_html=True)
+    
+    booking = system.get_booking_by_tracking(tracking_id)
+    
+    if not booking:
+        st.error("❌ Order not found. Please check your tracking ID.")
+        return
+    
+    # Show basic order info
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("📦 Order Information")
+        st.write(f"**Tracking ID:** {tracking_id}")
+        st.write(f"**Product:** {booking['product_name']}")
+        st.write(f"**Quantity:** {booking['quantity']}")
+        st.write(f"**Order Date:** {booking['booking_date'].strftime('%d-%m-%Y')}")
+    
+    with col2:
+        st.subheader("👤 Customer Details")
+        st.write(f"**Name:** {booking['sender_name']}")
+        st.write(f"**Phone:** {booking['sender_phone']}")
+        st.write(f"**Destination:** {booking['receiver_city']}")
+    
+    # Show current status
+    current_status = st.session_state.tracking_data[tracking_id][-1]
+    status_color = "status-delivered" if "Delivered" in current_status['status'] else "status-transit" if "Transit" in current_status['status'] else "status-pending"
+    
+    st.markdown(f"""
+    <div class="card {status_color}">
+        <h3>📊 Current Status</h3>
+        <p><strong>🔄 Status:</strong> {current_status['status']}</p>
+        <p><strong>📍 Location:</strong> {current_status['location']}</p>
+        <p><strong>📝 Description:</strong> {current_status['description']}</p>
+        <p><strong>🕒 Last Update:</strong> {current_status['timestamp'].strftime('%d %b %Y %I:%M %p')}</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Show tracking timeline
+    st.subheader("📋 Order Timeline")
+    timeline = sorted(st.session_state.tracking_data[tracking_id], key=lambda x: x['timestamp'])
+    
+    for update in reversed(timeline):
+        icon = get_status_icon(update['status'])
+        st.markdown(f"""
+        <div class="card">
+            <div style="display: flex; justify-content: space-between; align-items: start;">
+                <div>
+                    <strong>{icon} {update['status']}</strong>
+                    <br>
+                    <small>📍 {update['location']}</small>
+                    <br>
+                    <small>📝 {update['description']}</small>
+                </div>
+                <div style="text-align: right;">
+                    <small>{update['timestamp'].strftime('%d %b %Y')}</small>
+                    <br>
+                    <small>{update['timestamp'].strftime('%I:%M %p')}</small>
+                </div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Contact information
+    st.info("📞 **Contact Support:** +92 317 3037409")
+
+def main_system():
+    """Main admin system"""
+    system = LogisticsSystem()
+    
+    st.markdown('<div class="main-header">🚚 Nutrion Logistics System</div>', unsafe_allow_html=True)
     
     # Quick Stats
     total_bookings = len(st.session_state.bookings)
@@ -281,7 +325,7 @@ def main():
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        st.metric("Total Bookings", total_bookings)
+        st.metric("Total Orders", total_bookings)
     with col2:
         st.metric("Delivered", delivered)
     with col3:
@@ -291,204 +335,117 @@ def main():
     
     # Sidebar Navigation
     st.sidebar.title("📋 Navigation")
-    menu = st.sidebar.radio("", ["🏠 Dashboard", "📦 New Booking", "🔍 Track Parcel", "📊 Manage Bookings", "🔄 Update Status"])
+    menu = st.sidebar.radio("", ["🏠 Dashboard", "📦 New Order", "📋 Manage Orders", "🔄 Update Status", "👥 Staff Management"])
     
     if menu == "🏠 Dashboard":
         show_dashboard(system)
-    elif menu == "📦 New Booking":
-        show_booking_form(system)
-    elif menu == "🔍 Track Parcel":
-        show_tracking(system)
-    elif menu == "📊 Manage Bookings":
+    elif menu == "📦 New Order":
+        show_order_form(system)
+    elif menu == "📋 Manage Orders":
         show_management(system)
     elif menu == "🔄 Update Status":
         show_status_update(system)
+    elif menu == "👥 Staff Management":
+        show_staff_management(system)
 
 def show_dashboard(system):
     st.subheader("📊 Quick Overview")
     
     if not st.session_state.bookings:
-        st.info("No bookings yet. Create your first booking to get started!")
+        st.info("No orders yet. Create your first order to get started!")
         return
     
-    # Recent bookings
-    st.subheader("Recent Bookings")
-    recent_bookings = sorted(st.session_state.bookings, key=lambda x: x['booking_date'], reverse=True)[:5]
+    # Recent orders
+    st.subheader("Recent Orders")
+    recent_orders = sorted(st.session_state.bookings, key=lambda x: x['booking_date'], reverse=True)[:5]
     
-    for booking in recent_bookings:
+    for order in recent_orders:
         with st.container():
             col1, col2, col3, col4 = st.columns([2,2,1,1])
             with col1:
-                st.write(f"**{booking['tracking_id']}**")
-                st.write(f"👤 {booking['sender_name']} → {booking['receiver_name']}")
+                st.write(f"**{order['tracking_id']}**")
+                st.write(f"🏷️ {order['product_name']} - {order['quantity']}")
             with col2:
-                st.write(f"📍 {booking['receiver_city']}")
-                st.write(f"📞 {booking['sender_phone']}")
+                st.write(f"👤 {order['sender_name']}")
+                st.write(f"📍 {order['receiver_city']}")
             with col3:
-                status_color = "status-delivered" if "Delivered" in booking['status'] else "status-transit" if "Transit" in booking['status'] else "status-pending"
-                st.markdown(f'<div class="card {status_color}">{booking["status"]}</div>', unsafe_allow_html=True)
+                status_color = "status-delivered" if "Delivered" in order['status'] else "status-transit" if "Transit" in order['status'] else "status-pending"
+                st.markdown(f'<div class="card {status_color}">{order["status"]}</div>', unsafe_allow_html=True)
             with col4:
-                if st.button("📋", key=f"view_{booking['tracking_id']}"):
-                    st.session_state.current_tracking = booking['tracking_id']
-    
-    # Quick actions
-    st.subheader("Quick Actions")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        if st.button("📦 Create New Booking", use_container_width=True):
-            st.session_state.current_page = "New Booking"
-            st.experimental_rerun()
-    
-    with col2:
-        if st.button("🔍 Track Parcel", use_container_width=True):
-            st.session_state.current_page = "Track Parcel"
-            st.experimental_rerun()
-    
-    with col3:
-        if st.button("📊 View All Bookings", use_container_width=True):
-            st.session_state.current_page = "Manage Bookings"
-            st.experimental_rerun()
+                if st.button("📋", key=f"view_{order['tracking_id']}"):
+                    st.session_state.current_tracking = order['tracking_id']
 
-def show_booking_form(system):
-    st.subheader("📦 Create New Booking")
+def show_order_form(system):
+    st.subheader("📦 Create New Order")
     
-    with st.form("booking_form", clear_on_submit=True):
+    with st.form("order_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("### 👤 Sender Details")
-            sender_name = st.text_input("Full Name*", placeholder="Enter sender name")
+            st.markdown("### 👤 Customer Details")
+            sender_name = st.text_input("Full Name*", placeholder="Enter customer name")
             sender_phone = st.text_input("Phone Number*", placeholder="923001234567")
-            sender_phone2 = st.text_input("Alternate Phone", placeholder="Optional alternate number")
-            sender_address = st.text_area("Complete Address", placeholder="Full address with city")
+            
+            st.markdown("### 🏷️ Product Details")
+            product_name = st.text_input("Product Name*", placeholder="Enter product name")
+            quantity = st.text_input("Quantity*", placeholder="e.g., 50 kg, 2 bags, 100-120 kg")
         
         with col2:
-            st.markdown("### 👤 Receiver Details")
+            st.markdown("### 📍 Delivery Details")
             receiver_name = st.text_input("Receiver Name*", placeholder="Enter receiver name")
-            receiver_phone = st.text_input("Receiver Phone*", placeholder="923001234567")
-            receiver_location = st.text_input("Delivery Address*", placeholder="Complete delivery address")
+            receiver_phone = st.text_input("Receiver Phone", placeholder="Optional")
+            receiver_location = st.text_area("Delivery Address*", placeholder="Complete delivery address with landmarks")
             receiver_city = st.selectbox("Destination City*", 
                 ["Karachi", "Lahore", "Islamabad", "Rawalpindi", "Faisalabad", "Multan", "Hyderabad", "Peshawar", "Quetta"])
         
-        st.markdown("### 🚚 Service Details")
-        col3, col4 = st.columns(2)
-        with col3:
-            pickup_required = st.radio("Pickup Service", ["Customer will drop at branch", "Schedule pickup"])
-            delivery_type = st.selectbox("Delivery Speed", ["Standard (3-5 days)", "Express (1-2 days)", "Same Day"])
-        with col4:
-            parcel_weight = st.number_input("Parcel Weight (kg)*", min_value=0.1, max_value=100.0, value=1.0)
-            special_instructions = st.text_area("Special Instructions", placeholder="Any special handling requirements")
+        special_instructions = st.text_area("Special Instructions", placeholder="Any special handling requirements")
         
-        submitted = st.form_submit_button("🚀 Confirm Booking", use_container_width=True)
+        submitted = st.form_submit_button("🚀 Create Order & Send to Staff", use_container_width=True)
         
         if submitted:
-            if all([sender_name, sender_phone, receiver_name, receiver_phone, receiver_location]):
-                booking_data = {
+            if all([sender_name, sender_phone, product_name, quantity, receiver_name, receiver_location]):
+                order_data = {
                     'sender_name': sender_name,
                     'sender_phone': sender_phone,
-                    'sender_phone2': sender_phone2,
-                    'sender_address': sender_address,
+                    'product_name': product_name,
+                    'quantity': quantity,
                     'receiver_name': receiver_name,
                     'receiver_phone': receiver_phone,
                     'receiver_location': receiver_location,
                     'receiver_city': receiver_city,
-                    'pickup_required': pickup_required,
-                    'delivery_type': delivery_type,
-                    'parcel_weight': parcel_weight,
                     'special_instructions': special_instructions
                 }
                 
-                tracking_id = system.add_booking(booking_data)
+                tracking_id = system.add_booking(order_data)
                 
                 st.success(f"""
-                ✅ **Booking Confirmed Successfully!**
+                ✅ **Order Created Successfully!**
                 
                 **Tracking ID:** {tracking_id}
-                **Status:** WhatsApp notifications sent to all provided numbers
-                **Next Step:** You will receive booking confirmation on WhatsApp
+                **Status:** Order details sent to staff via WhatsApp
+                **Next Step:** Staff will prepare bilty and confirm
                 """)
                 
                 # Show quick summary
-                with st.expander("📋 Booking Summary", expanded=True):
+                with st.expander("📋 Order Summary", expanded=True):
                     col1, col2 = st.columns(2)
                     with col1:
-                        st.write("**Sender:**", sender_name)
+                        st.write("**Customer:**", sender_name)
                         st.write("**Phone:**", sender_phone)
-                        st.write("**From:**", sender_address or "Branch Drop-off")
+                        st.write("**Product:**", product_name)
                     with col2:
-                        st.write("**Receiver:**", receiver_name)
-                        st.write("**To:**", receiver_city)
-                        st.write("**Service:**", delivery_type)
+                        st.write("**Quantity:**", quantity)
+                        st.write("**Destination:**", receiver_city)
+                        st.write("**Staff Notified:**", "✅ Yes")
                 
             else:
                 st.error("❌ Please fill all required fields (*)")
 
-def show_tracking(system):
-    st.subheader("🔍 Track Your Parcel")
-    
-    col1, col2 = st.columns([1, 2])
-    
-    with col1:
-        tracking_id = st.text_input("Enter Tracking ID", placeholder="NT123456")
-        
-        if tracking_id:
-            if tracking_id in st.session_state.tracking_data:
-                booking = next((b for b in st.session_state.bookings if b['tracking_id'] == tracking_id), None)
-                
-                if booking:
-                    st.success("✅ Parcel Found!")
-                    
-                    # Current status
-                    current_status = st.session_state.tracking_data[tracking_id][-1]
-                    st.markdown(f"""
-                    <div class="card status-transit">
-                        <h4>📊 Current Status</h4>
-                        <p><strong>🔄 Status:</strong> {current_status['status']}</p>
-                        <p><strong>📍 Location:</strong> {current_status['location']}</p>
-                        <p><strong>🕒 Last Update:</strong> {current_status['timestamp'].strftime('%d %b %Y %I:%M %p')}</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Parcel details
-                    st.markdown("### 📦 Parcel Details")
-                    st.write(f"**Sender:** {booking['sender_name']}")
-                    st.write(f"**Receiver:** {booking['receiver_name']}")
-                    st.write(f"**Destination:** {booking['receiver_city']}")
-                    st.write(f"**Weight:** {booking.get('parcel_weight', 'N/A')} kg")
-    
-    with col2:
-        if tracking_id and tracking_id in st.session_state.tracking_data:
-            st.markdown("### 📋 Delivery Timeline")
-            
-            timeline = sorted(st.session_state.tracking_data[tracking_id], key=lambda x: x['timestamp'])
-            
-            for update in reversed(timeline):
-                icon = get_status_icon(update['status'])
-                st.markdown(f"""
-                <div class="card">
-                    <div style="display: flex; justify-content: space-between; align-items: start;">
-                        <div>
-                            <strong>{icon} {update['status']}</strong>
-                            <br>
-                            <small>📍 {update['location']}</small>
-                            <br>
-                            <small>📝 {update['description']}</small>
-                        </div>
-                        <div style="text-align: right;">
-                            <small>{update['timestamp'].strftime('%d %b %Y')}</small>
-                            <br>
-                            <small>{update['timestamp'].strftime('%I:%M %p')}</small>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
 def show_management(system):
-    st.subheader("📊 Manage Bookings")
+    st.subheader("📋 Manage Orders")
     
     if not st.session_state.bookings:
-        st.info("No bookings available")
+        st.info("No orders available")
         return
     
     # Search and filter
@@ -496,153 +453,127 @@ def show_management(system):
     with col1:
         search_term = st.text_input("🔍 Search by Tracking ID, Name, or Phone")
     with col2:
-        status_filter = st.selectbox("Filter by Status", ["All", "Booking Confirmed", "In Transit", "Delivered"])
+        status_filter = st.selectbox("Filter by Status", ["All", "Order Received", "Bilty Created", "In Transit", "Delivered"])
     
-    # Filter bookings
-    filtered_bookings = st.session_state.bookings
+    # Filter orders
+    filtered_orders = st.session_state.bookings
     if search_term:
-        filtered_bookings = [b for b in filtered_bookings if 
-                           search_term.lower() in b['tracking_id'].lower() or
-                           search_term.lower() in b['sender_name'].lower() or
-                           search_term.lower() in b['sender_phone']]
+        filtered_orders = [b for b in filtered_orders if 
+                         search_term.lower() in b['tracking_id'].lower() or
+                         search_term.lower() in b['sender_name'].lower() or
+                         search_term.lower() in b['sender_phone']]
     
     if status_filter != "All":
-        filtered_bookings = [b for b in filtered_bookings if status_filter in b['status']]
+        filtered_orders = [b for b in filtered_orders if status_filter in b['status']]
     
-    # Display bookings
-    for booking in filtered_bookings:
-        with st.expander(f"📦 {booking['tracking_id']} - {booking['sender_name']} → {booking['receiver_name']}", expanded=False):
+    # Display orders
+    for order in filtered_orders:
+        with st.expander(f"📦 {order['tracking_id']} - {order['product_name']} → {order['receiver_city']}", expanded=False):
             col1, col2, col3 = st.columns([2, 2, 1])
             
             with col1:
-                st.write("**Sender:**", booking['sender_name'])
-                st.write("**Phone:**", booking['sender_phone'])
-                st.write("**Address:**", booking.get('sender_address', 'N/A'))
+                st.write("**Customer:**", order['sender_name'])
+                st.write("**Phone:**", order['sender_phone'])
+                st.write("**Product:**", order['product_name'])
             
             with col2:
-                st.write("**Receiver:**", booking['receiver_name'])
-                st.write("**Destination:**", booking['receiver_city'])
-                st.write("**Service:**", booking['delivery_type'])
+                st.write("**Quantity:**", order['quantity'])
+                st.write("**Destination:**", order['receiver_city'])
+                st.write("**Bilty No:**", order.get('bilty_number', 'Not created'))
             
             with col3:
-                st.write("**Status:**", booking['status'])
-                st.write("**Weight:**", f"{booking.get('parcel_weight', 'N/A')} kg")
+                st.write("**Status:**", order['status'])
+                st.write("**Location:**", order.get('current_location', 'N/A'))
                 
-                # Action buttons
-                col_edit, col_del = st.columns(2)
-                with col_edit:
-                    if st.button("✏️ Edit", key=f"edit_{booking['tracking_id']}"):
-                        st.session_state.editing = booking['tracking_id']
-                with col_del:
-                    if st.button("🗑️ Delete", key=f"del_{booking['tracking_id']}"):
-                        system.delete_booking(booking['tracking_id'])
-                        st.success("Booking deleted successfully!")
-                        st.experimental_rerun()
-    
-    # Edit functionality
-    if hasattr(st.session_state, 'editing'):
-        editing_id = st.session_state.editing
-        booking_to_edit = next((b for b in st.session_state.bookings if b['tracking_id'] == editing_id), None)
-        
-        if booking_to_edit:
-            st.markdown("---")
-            st.subheader(f"✏️ Edit Booking: {editing_id}")
-            
-            with st.form("edit_form"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    new_sender_name = st.text_input("Sender Name", value=booking_to_edit['sender_name'])
-                    new_sender_phone = st.text_input("Sender Phone", value=booking_to_edit['sender_phone'])
-                    new_sender_address = st.text_area("Sender Address", value=booking_to_edit.get('sender_address', ''))
-                
-                with col2:
-                    new_receiver_name = st.text_input("Receiver Name", value=booking_to_edit['receiver_name'])
-                    new_receiver_phone = st.text_input("Receiver Phone", value=booking_to_edit['receiver_phone'])
-                    new_receiver_location = st.text_input("Delivery Address", value=booking_to_edit['receiver_location'])
-                
-                col_save, col_cancel = st.columns(2)
-                with col_save:
-                    if st.form_submit_button("💾 Save Changes"):
-                        updated_data = {
-                            'sender_name': new_sender_name,
-                            'sender_phone': new_sender_phone,
-                            'sender_address': new_sender_address,
-                            'receiver_name': new_receiver_name,
-                            'receiver_phone': new_receiver_phone,
-                            'receiver_location': new_receiver_location
-                        }
-                        system.update_booking(editing_id, updated_data)
-                        del st.session_state.editing
-                        st.success("✅ Booking updated successfully!")
-                        st.experimental_rerun()
-                
-                with col_cancel:
-                    if st.form_submit_button("❌ Cancel"):
-                        del st.session_state.editing
-                        st.experimental_rerun()
+                # Add bilty number if not exists
+                if not order.get('bilty_number'):
+                    bilty_no = st.text_input("Enter Bilty No", key=f"bilty_{order['tracking_id']}")
+                    if st.button("✅ Add Bilty", key=f"add_bilty_{order['tracking_id']}"):
+                        if bilty_no:
+                            system.update_bilty_number(order['tracking_id'], bilty_no)
+                            st.success("Bilty number added!")
+                            st.experimental_rerun()
+                        else:
+                            st.error("Please enter bilty number")
 
 def show_status_update(system):
-    st.subheader("🔄 Update Parcel Status")
+    st.subheader("🔄 Update Order Status")
     
     if not st.session_state.bookings:
-        st.info("No bookings available")
+        st.info("No orders available")
         return
     
-    # Select booking to update
-    tracking_options = {f"{b['tracking_id']} - {b['sender_name']} → {b['receiver_name']}": b['tracking_id'] 
-                       for b in st.session_state.bookings}
+    # Select order to update
+    order_options = {f"{b['tracking_id']} - {b['product_name']} → {b['receiver_city']}": b['tracking_id'] 
+                   for b in st.session_state.bookings}
     
-    selected_display = st.selectbox("Select Parcel", list(tracking_options.keys()))
-    tracking_id = tracking_options[selected_display]
+    selected_display = st.selectbox("Select Order", list(order_options.keys()))
+    tracking_id = order_options[selected_display]
     
     if tracking_id:
-        booking = next((b for b in st.session_state.bookings if b['tracking_id'] == tracking_id), None)
+        order = system.get_booking_by_tracking(tracking_id)
         
-        if booking:
-            st.info(f"Current Status: **{booking['status']}**")
+        if order:
+            st.info(f"Current Status: **{order['status']}**")
             
             # Status update form
             with st.form("status_update"):
                 new_status = st.selectbox("New Status", [
-                    "Parcel Collected",
-                    "At Origin Hub", 
-                    "In Transit",
-                    "Arrived at Destination",
+                    "Order Received at Office",
+                    "Sent to Multan Warehouse", 
+                    "Bilty Created",
+                    "Handed to TCS",
+                    "In Transit with TCS",
+                    "At TCS Destination Hub",
                     "Out for Delivery",
-                    "Delivered",
-                    "Attempted - Not Delivered"
+                    "Delivered Successfully",
+                    "Delivery Attempted - Not Delivered"
                 ])
                 
-                location = st.text_input("Current Location", value=booking.get('current_location', 'Origin Branch'))
+                location = st.text_input("Current Location", value=order.get('current_location', 'Faisalabad Office'))
                 description = st.text_area("Status Description", placeholder="Enter detailed status description")
                 
-                if st.form_submit_button("🔄 Update Status"):
+                if st.form_submit_button("🔄 Update Status & Notify Customer"):
                     system.update_status(tracking_id, new_status, location, description)
-                    
-                    # Send WhatsApp update
-                    message = f"""🔄 *Status Update - Nutrion Logistics*
+                    st.success("✅ Status updated and customer notified!")
 
-📦 *Tracking ID:* {tracking_id}
-🔄 *New Status:* {new_status}
-📍 *Location:* {location}
-📝 *Remarks:* {description}
-
-Track your parcel: https://nutrion-bilty.streamlit.app/"""
-                    
-                    # Send to both sender and receiver
-                    system.whatsapp.send_message(booking['sender_phone'], message)
-                    system.whatsapp.send_message(booking['receiver_phone'], message)
-                    
-                    st.success("✅ Status updated and notifications sent!")
+def show_staff_management(system):
+    st.subheader("👥 Staff Management")
+    
+    st.info("**Current Staff Numbers for Order Notifications:**")
+    for i, number in enumerate(system.staff_numbers, 1):
+        st.write(f"{i}. {number}")
+    
+    # Add new staff number
+    st.subheader("Add New Staff Number")
+    new_number = st.text_input("Enter new staff number (with country code)", placeholder="923173037409")
+    
+    if st.button("Add Staff Number"):
+        if new_number and new_number not in system.staff_numbers:
+            system.staff_numbers.append(new_number)
+            st.success(f"Staff number {new_number} added successfully!")
+        else:
+            st.error("Please enter a valid number")
+    
+    # Test WhatsApp
+    st.subheader("Test WhatsApp Integration")
+    test_number = st.text_input("Test number", placeholder="923001234567")
+    test_message = st.text_area("Test message", value="Test message from Nutrion Logistics System")
+    
+    if st.button("Send Test Message"):
+        if system.whatsapp.send_message(test_number, test_message):
+            st.success("✅ Test message sent successfully!")
+        else:
+            st.error("❌ Failed to send test message")
 
 def get_status_icon(status):
     icons = {
-        "Booking Confirmed": "📦",
-        "Parcel Collected": "🚚",
-        "At Origin Hub": "🏢",
+        "Order Received": "📦",
+        "Bilty Created": "📄",
+        "Sent to Warehouse": "🚚",
+        "Handed to TCS": "📦",
         "In Transit": "✈️",
-        "Arrived at Destination": "📍",
+        "At Hub": "🏢",
         "Out for Delivery": "🚗",
         "Delivered": "✅",
         "Attempted": "🔄"
@@ -651,6 +582,18 @@ def get_status_icon(status):
         if key in status:
             return icon
     return "📦"
+
+def main():
+    # Check if limited access (customer tracking)
+    query_params = st.experimental_get_query_params()
+    tracking_id = query_params.get("tracking", [None])[0]
+    
+    if tracking_id:
+        # Show limited tracking page for customers
+        show_limited_tracking(tracking_id)
+    else:
+        # Show full admin system
+        main_system()
 
 if __name__ == "__main__":
     main()
