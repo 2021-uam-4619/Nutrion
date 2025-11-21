@@ -209,7 +209,7 @@ class LogisticsSystem:
 🔄 *Service:* {booking_data['delivery_type']}
 📮 *Pickup:* {booking_data['pickup_required']}
 
-Track your parcel: http://nutrion-logistics.com/track
+Track your parcel: https://nutrion-bilty.streamlit.app/
 
 Thank you for choosing Nutrion Logistics!"""
 
@@ -628,7 +628,7 @@ def show_status_update(system):
 📍 *Location:* {location}
 📝 *Remarks:* {description}
 
-Track your parcel: http://nutrion-logistics.com/track"""
+Track your parcel: https://nutrion-bilty.streamlit.app/"""
                     
                     # Send to both sender and receiver
                     system.whatsapp.send_message(booking['sender_phone'], message)
