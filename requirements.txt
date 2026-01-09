@@ -10,6 +10,7 @@ fpdf
 plotly
 xlsxwriter
 DatabaseManager
+sqlalchemy
 
 
 
