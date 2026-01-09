@@ -1,532 +1,430 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  LayoutDashboard, 
-  Sprout, 
-  Beef, 
-  Droplets, 
-  Receipt, 
-  FileText, 
-  Plus, 
-  Trash2, 
-  Edit3, 
-  TrendingUp, 
-  User,
-  Clock,
-  Wallet,
-  CheckCircle2,
-  AlertCircle
-} from 'lucide-react';
+import streamlit as st
+import pandas as pd
+import sqlite3
+from datetime import datetime, date, timedelta
+import time
 
-const App = () => {
-  // --- State Management ---
-  const [activeTab, setActiveTab] = useState('livestock');
-  const [transactions, setTransactions] = useState([]);
-  const [editingId, setEditingId] = useState(null);
+# --- PAGE CONFIGURATION ---
+st.set_page_config(page_title="Farm Manager & Accounting", layout="wide", page_icon="🚜")
 
-  // --- Initial State Form Logic ---
-  const [formData, setFormData] = useState({
-    date: new Date().toISOString().split('T')[0],
-    category: 'livestock', // livestock, crop, water, operational
-    subCategory: 'Wanda',
-    description: '',
-    amount: '',
-    managedBy: 'Self',
-    paidAmount: '',
-    animalType: 'Cow', // For livestock
-    cropName: 'Wheat', // For crops
-    farmerName: '',    // For water
-    startTime: '',     // For water
-    endTime: '',       // For water
-    rate: '',          // For water
-    type: 'Expense'    // Expense or Income
-  });
+# --- DATABASE MANAGEMENT ---
+DB_FILE = "farm_data.db"
 
-  // --- Calculations ---
-  const stats = useMemo(() => {
-    const totals = {
-      livestockExp: 0,
-      cropExp: 0,
-      waterInc: 0,
-      opExp: 0,
-      totalPayable: 0,
-      totalReceivable: 0
-    };
+def init_db():
+    """Initialize the SQLite database with necessary tables."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    
+    # Main transaction table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT,
+            module TEXT,            -- Livestock, Crop, Water, Operations
+            trans_type TEXT,        -- Expense, Income, Bill, Payment
+            category TEXT,          -- Cow, Wheat, Tubewell, Fuel, etc.
+            subcategory TEXT,       -- Wanda, Seed, Salary, etc.
+            description TEXT,
+            amount REAL,
+            party_name TEXT,        -- Who paid (Expense) or Who owes (Farmer)
+            qty REAL,               -- For hours or units
+            rate REAL,              -- For tubewell rate
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-    transactions.forEach(t => {
-      const amount = parseFloat(t.amount || 0);
-      const paid = parseFloat(t.paidAmount || 0);
-      
-      if (t.category === 'livestock') totals.livestockExp += amount;
-      if (t.category === 'crop') totals.cropExp += amount;
-      if (t.category === 'water') totals.waterInc += amount;
-      if (t.category === 'operational') totals.opExp += amount;
+def run_query(query, params=(), fetch=False):
+    """Helper to run SQL queries."""
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    try:
+        c.execute(query, params)
+        if fetch:
+            data = c.fetchall()
+            columns = [description[0] for description in c.description]
+            df = pd.DataFrame(data, columns=columns)
+            conn.close()
+            return df
+        else:
+            conn.commit()
+            conn.close()
+            return True
+    except Exception as e:
+        st.error(f"Database Error: {e}")
+        conn.close()
+        return False
 
-      if (t.type === 'Expense') {
-        totals.totalPayable += (amount - paid);
-      } else if (t.type === 'Income') {
-        totals.totalReceivable += (amount - paid);
-      }
-    });
+# Initialize DB on load
+init_db()
 
-    return totals;
-  }, [transactions]);
-
-  // --- Handlers ---
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const calculateWaterBill = () => {
-    if (formData.startTime && formData.endTime && formData.rate) {
-      // Split time string to avoid any literal parsing issues
-      const [startH, startM] = formData.startTime.split(':').map(Number);
-      const [endH, endM] = formData.endTime.split(':').map(Number);
-      
-      const startInMinutes = startH * 60 + startM;
-      const endInMinutes = endH * 60 + endM;
-      
-      let diffInMinutes = endInMinutes - startInMinutes;
-      if (diffInMinutes < 0) diffInMinutes += 24 * 60; // Handle overnight usage
-      
-      const hours = diffInMinutes / 60;
-      return (hours * parseFloat(formData.rate)).toFixed(2);
+# --- SIDEBAR & STYLING ---
+st.markdown("""
+<style>
+    .metric-card {
+        background-color: #f0f2f6;
+        border-radius: 10px;
+        padding: 15px;
+        margin: 5px;
+        border-left: 5px solid #2e7bcf;
     }
-    return 0;
-  };
+    .stTabs [data-baseweb="tab-list"] { gap: 20px; }
+    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f9f9f9; border-radius: 5px; }
+    .stTabs [aria-selected="true"] { background-color: #e6f3ff; border-bottom: 3px solid #0068c9; }
+</style>
+""", unsafe_allow_html=True)
 
-  const saveTransaction = (e) => {
-    e.preventDefault();
-    let finalAmount = formData.amount;
-    if (formData.category === 'water') {
-      finalAmount = calculateWaterBill();
-    }
+st.sidebar.title("🚜 Farm Manager")
+st.sidebar.info("Double-entry accounting system with automated ledgers.")
 
-    const newEntry = {
-      ...formData,
-      id: editingId || Date.now(),
-      amount: finalAmount,
-      timestamp: new Date().toLocaleString()
-    };
+# --- HELPER FUNCTIONS ---
+def save_transaction(date_val, module, trans_type, category, subcategory, desc, amount, party, qty=0, rate=0):
+    query = '''
+    INSERT INTO transactions (date, module, trans_type, category, subcategory, description, amount, party_name, qty, rate)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    '''
+    run_query(query, (date_val, module, trans_type, category, subcategory, desc, amount, party, qty, rate))
+    st.toast(f"Entry Saved: {subcategory} - {amount}")
+    time.sleep(0.5)
+    st.rerun()
 
-    if (editingId) {
-      setTransactions(transactions.map(t => t.id === editingId ? newEntry : t));
-      setEditingId(null);
-    } else {
-      setTransactions([newEntry, ...transactions]);
-    }
+def delete_transaction(tid):
+    run_query("DELETE FROM transactions WHERE id = ?", (tid,))
+    st.toast("Transaction Deleted")
+    time.sleep(0.5)
+    st.rerun()
 
-    // Reset Form based on current tab context
-    setFormData({
-      date: new Date().toISOString().split('T')[0],
-      category: activeTab,
-      subCategory: activeTab === 'livestock' ? 'Wanda' : activeTab === 'crop' ? 'Khad' : activeTab === 'operational' ? 'Salary' : 'Other',
-      description: '',
-      amount: '',
-      managedBy: 'Self',
-      paidAmount: '',
-      animalType: 'Cow',
-      cropName: 'Wheat',
-      farmerName: '',
-      startTime: '',
-      endTime: '',
-      rate: '',
-      type: activeTab === 'water' ? 'Income' : 'Expense'
-    });
-  };
+# --- TABS ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🐄 Tab 1: Livestock", 
+    "🌾 Tab 2: Crops", 
+    "💧 Tab 3: Water/Tubewell", 
+    "⚙️ Tab 4: Operations", 
+    "📊 Tab 5: Reports & Ledger"
+])
 
-  const deleteTransaction = (id) => {
-    setTransactions(transactions.filter(t => t.id !== id));
-  };
-
-  const editTransaction = (t) => {
-    setFormData(t);
-    setEditingId(t.id);
-    setActiveTab(t.category);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
-  // --- Components ---
-  const Card = ({ children, className = "" }) => (
-    <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-6 ${className}`}>
-      {children}
-    </div>
-  );
-
-  const StatBox = ({ label, value, color, icon: Icon }) => (
-    <Card className="flex items-center gap-4">
-      <div className={`p-3 rounded-lg ${color} bg-opacity-10`}>
-        <Icon className={`w-6 h-6 ${color.replace('bg-', 'text-')}`} />
-      </div>
-      <div>
-        <p className="text-sm text-slate-500 font-medium uppercase tracking-wider">{label}</p>
-        <p className="text-2xl font-bold text-slate-800">Rs. {Number(value).toLocaleString()}</p>
-      </div>
-    </Card>
-  );
-
-  return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
-      {/* Sidebar Navigation */}
-      <nav className="fixed left-0 top-0 h-full w-20 md:w-64 bg-slate-900 text-slate-400 flex flex-col items-center py-8 z-50">
-        <div className="mb-10 px-6 flex items-center gap-3 w-full">
-          <div className="bg-emerald-500 p-2 rounded-lg">
-            <LayoutDashboard className="text-white w-6 h-6" />
-          </div>
-          <span className="hidden md:block text-white font-bold text-xl tracking-tight">FarmLedger</span>
-        </div>
-        
-        <div className="flex flex-col gap-2 w-full px-4">
-          {[
-            { id: 'livestock', icon: Beef, label: 'Livestock' },
-            { id: 'crop', icon: Sprout, label: 'Crops' },
-            { id: 'water', icon: Droplets, label: 'Water Income' },
-            { id: 'operational', icon: Receipt, label: 'Operations' },
-            { id: 'reports', icon: FileText, label: 'Reports' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => {
-                setActiveTab(item.id);
-                setEditingId(null);
-                setFormData(prev => ({
-                    ...prev,
-                    category: item.id,
-                    type: item.id === 'water' ? 'Income' : 'Expense'
-                }));
-              }}
-              className={`flex items-center gap-4 p-3 rounded-xl transition-all ${
-                activeTab === item.id 
-                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' 
-                : 'hover:bg-slate-800 hover:text-slate-200'
-              }`}
-            >
-              <item.icon className="w-6 h-6" />
-              <span className="hidden md:block font-medium">{item.label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
-
-      {/* Main Content */}
-      <main className="ml-20 md:ml-64 p-4 md:p-8">
-        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-slate-800 capitalize">{activeTab.replace('-', ' ')} Management</h1>
-            <p className="text-slate-500">Manage your farm activities and ledger balances.</p>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-sm bg-slate-200 px-3 py-1 rounded-full font-medium text-slate-700">
-              {new Date().toDateString()}
-            </span>
-          </div>
-        </header>
-
-        {/* Dashboard Stats (Top Section) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <StatBox label="Livestock Exp" value={stats.livestockExp} color="bg-orange-500" icon={Beef} />
-          <StatBox label="Crop Exp" value={stats.cropExp} color="bg-emerald-500" icon={Sprout} />
-          <StatBox label="Water Income" value={stats.waterInc} color="bg-blue-500" icon={Droplets} />
-          <StatBox label="Net Balance" value={stats.waterInc - (stats.livestockExp + stats.cropExp + stats.opExp)} color="bg-purple-500" icon={TrendingUp} />
-        </div>
-
-        {activeTab !== 'reports' ? (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-            {/* Input Form Column */}
-            <div className="xl:col-span-1">
-              <Card>
-                <div className="flex items-center gap-2 mb-6 border-b pb-4">
-                  <Plus className="text-emerald-600 w-5 h-5" />
-                  <h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Entry' : 'New Entry'}</h2>
-                </div>
+# ==============================================================================
+# TAB 1: LIVESTOCK
+# ==============================================================================
+with tab1:
+    st.header("Livestock Management (Cow / Goat / Others)")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Add Expense / Income")
+        with st.form("livestock_form"):
+            date_ls = st.date_input("Date", date.today())
+            ls_type = st.selectbox("Animal Type", ["Cow", "Goat", "Buffalo", "Other"])
+            ls_action = st.selectbox("Transaction Type", ["Expense", "Income"])
+            
+            # Dynamic Subcategories
+            if ls_action == "Expense":
+                ls_item = st.selectbox("Item", ["Wanda", "Chokar", "Khal", "Tori", "Khas", "Medicine", "Other"])
+            else:
+                ls_item = st.selectbox("Source", ["Milk Sale", "Animal Sale", "Manure Sale"])
                 
-                <form onSubmit={saveTransaction} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Date</label>
-                      <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none" required />
-                    </div>
+            ls_desc = st.text_input("Description", placeholder="e.g. 5 Bags")
+            ls_amount = st.number_input("Amount", min_value=0.0, step=100.0)
+            
+            # Who paid?
+            if ls_action == "Expense":
+                ls_party = st.text_input("Paid By (Person Name)", value="Cash", help="Enter 'Cash' if farm paid, or person name if credit")
+            else:
+                ls_party = "Cash" # Income usually goes to cash
+                
+            submitted_ls = st.form_submit_button("Save Entry")
+            if submitted_ls:
+                save_transaction(date_ls, "Livestock", ls_action, ls_type, ls_item, ls_desc, ls_amount, ls_party)
 
-                    {activeTab === 'livestock' && (
-                      <div className="col-span-2">
-                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Animal Type</label>
-                        <select name="animalType" value={formData.animalType} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
-                          <option>Cow</option>
-                          <option>Goat</option>
-                          <option>Buffalo</option>
-                          <option>Sheep</option>
-                          <option>Others</option>
-                        </select>
-                      </div>
-                    )}
+    with col2:
+        st.subheader("Recent Records")
+        df_ls = run_query("SELECT * FROM transactions WHERE module='Livestock' ORDER BY date DESC", fetch=True)
+        
+        if not df_ls.empty:
+            st.dataframe(df_ls[['id', 'date', 'trans_type', 'category', 'subcategory', 'description', 'amount', 'party_name']], use_container_width=True)
+            
+            # Delete functionality
+            del_id = st.number_input("Enter ID to Delete (Livestock)", min_value=0, step=1)
+            if st.button("Delete Record", key="del_ls"):
+                if del_id in df_ls['id'].values:
+                    delete_transaction(del_id)
+                else:
+                    st.error("ID not found.")
+        else:
+            st.info("No livestock records found.")
 
-                    {activeTab === 'crop' && (
-                      <div className="col-span-2">
-                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Crop Name</label>
-                        <input type="text" name="cropName" value={formData.cropName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="e.g. Wheat, Rice" />
-                      </div>
-                    )}
+# ==============================================================================
+# TAB 2: CROPS
+# ==============================================================================
+with tab2:
+    st.header("Crop Management")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Add Crop Expense / Income")
+        with st.form("crop_form"):
+            date_cr = st.date_input("Date", date.today(), key="cr_date")
+            cr_crop = st.text_input("Crop Name", value="Wheat")
+            cr_action = st.selectbox("Transaction Type", ["Expense", "Income"], key="cr_type")
+            
+            if cr_action == "Expense":
+                cr_item = st.selectbox("Expense Item", ["Khad (Fertilizer)", "Spray", "Seed", "Diesel", "Labor", "Other"])
+            else:
+                cr_item = st.selectbox("Income Source", ["Crop Sale", "Straw Sale"])
+                
+            cr_desc = st.text_input("Details", placeholder="e.g. Urea 2 bags")
+            cr_amount = st.number_input("Amount", min_value=0.0, step=100.0, key="cr_amt")
+            
+            # Ledger Link
+            if cr_action == "Expense":
+                cr_party = st.text_input("Paid By (Person)", value="Cash", key="cr_party", help="Who paid for this?")
+            else:
+                cr_party = st.text_input("Sold To (Customer)", value="Cash", help="Leave Cash if immediate payment")
 
-                    {activeTab === 'water' ? (
-                      <>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Farmer Name</label>
-                          <input type="text" name="farmerName" value={formData.farmerName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" required />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Start Time</label>
-                          <input type="time" name="startTime" value={formData.startTime} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">End Time</label>
-                          <input type="time" name="endTime" value={formData.endTime} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Rate / Hour (Rs)</label>
-                          <input type="number" name="rate" value={formData.rate} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="800" />
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Category</label>
-                          <select name="subCategory" value={formData.subCategory} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
-                            {activeTab === 'livestock' && (
-                              <>
-                                <option>Wanda</option>
-                                <option>Chokar</option>
-                                <option>Khal</option>
-                                <option>Tori</option>
-                                <option>Khas</option>
-                                <option>Others</option>
-                              </>
-                            )}
-                            {activeTab === 'crop' && (
-                              <>
-                                <option>Khad (Fertilizer)</option>
-                                <option>Spray</option>
-                                <option>Seed</option>
-                                <option>Irrigation</option>
-                                <option>Others</option>
-                              </>
-                            )}
-                            {activeTab === 'operational' && (
-                              <>
-                                <option>Salary</option>
-                                <option>Fuel</option>
-                                <option>Machinery Purchase</option>
-                                <option>Maintenance</option>
-                                <option>Others</option>
-                              </>
-                            )}
-                          </select>
-                        </div>
-                        <div className="col-span-2">
-                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Total Amount (Rs)</label>
-                          <input type="number" name="amount" value={formData.amount} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" required />
-                        </div>
-                      </>
-                    )}
+            submitted_cr = st.form_submit_button("Save Crop Entry")
+            if submitted_cr:
+                save_transaction(date_cr, "Crop", cr_action, cr_crop, cr_item, cr_desc, cr_amount, cr_party)
 
-                    <div className="col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Managed By / Paid By</label>
-                      <input type="text" name="managedBy" value={formData.managedBy} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="e.g. Self, Name of Employee" />
-                    </div>
+    with col2:
+        st.subheader("Crop Ledger")
+        df_cr = run_query("SELECT * FROM transactions WHERE module='Crop' ORDER BY date DESC", fetch=True)
+        if not df_cr.empty:
+            st.dataframe(df_cr[['id', 'date', 'trans_type', 'category', 'subcategory', 'description', 'amount', 'party_name']], use_container_width=True)
+            
+            del_id_cr = st.number_input("Enter ID to Delete (Crop)", min_value=0, step=1)
+            if st.button("Delete Record", key="del_cr"):
+                if del_id_cr in df_cr['id'].values:
+                    delete_transaction(del_id_cr)
+        else:
+            st.info("No crop records found.")
 
-                    <div className="col-span-2">
-                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Amount Paid Now (Rs)</label>
-                      <input type="number" name="paidAmount" value={formData.paidAmount} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="Leave empty if fully paid" />
-                    </div>
+# ==============================================================================
+# TAB 3: WATER / TUBEWELL
+# ==============================================================================
+with tab3:
+    st.header("Tubewell Water Income")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("Calculate & Record Bill")
+        with st.form("water_form"):
+            date_wt = st.date_input("Date", date.today(), key="wt_date")
+            farmer_name = st.text_input("Farmer Name")
+            
+            t_start = st.time_input("Start Time", value=datetime.strptime("08:00", "%H:%M").time())
+            t_end = st.time_input("End Time", value=datetime.strptime("10:00", "%H:%M").time())
+            rate_per_hr = st.number_input("Rate per Hour", value=1500.0)
+            
+            # Auto Calc Logic preview
+            t1 = timedelta(hours=t_start.hour, minutes=t_start.minute)
+            t2 = timedelta(hours=t_end.hour, minutes=t_end.minute)
+            duration = (t2 - t1).total_seconds() / 3600
+            if duration < 0: duration += 24 # Handle overnight
+            
+            est_bill = duration * rate_per_hr
+            st.markdown(f"**Used Time:** {duration:.2f} hrs | **Total Bill:** :green[{est_bill:,.0f}]")
+            
+            submitted_wt = st.form_submit_button("Create Bill (Debit Farmer)")
+            if submitted_wt and farmer_name:
+                desc = f"{t_start} to {t_end}"
+                # Recording as Income (Bill Generated)
+                # Party Name is the Farmer (Who owes us)
+                save_transaction(date_wt, "Water", "Bill", "Tubewell", "Water Usage", desc, est_bill, farmer_name, qty=duration, rate=rate_per_hr)
 
-                    <div className="col-span-2 pt-2">
-                      <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2">
-                        <CheckCircle2 className="w-5 h-5" />
-                        {editingId ? 'Update Ledger' : 'Confirm & Save'}
-                      </button>
-                      {editingId && (
-                        <button type="button" onClick={() => setEditingId(null)} className="w-full mt-2 text-slate-500 text-sm py-2">Cancel Edit</button>
-                      )}
-                    </div>
-                  </div>
-                </form>
-              </Card>
-            </div>
+    with col2:
+        st.subheader("Receive Payment")
+        with st.form("water_payment"):
+            pay_date = st.date_input("Date", date.today())
+            pay_farmer = st.text_input("Farmer Name (Payer)")
+            pay_amount = st.number_input("Amount Received", min_value=1.0)
+            pay_desc = st.text_input("Note", "Cash Received")
+            
+            sub_pay = st.form_submit_button("Receive Payment (Credit Farmer)")
+            if sub_pay and pay_farmer:
+                # Type Payment means we received money against the debt
+                save_transaction(pay_date, "Water", "Payment", "Tubewell", "Recovery", pay_desc, pay_amount, pay_farmer)
 
-            {/* List Table Column */}
-            <div className="xl:col-span-2 space-y-6">
-              <Card className="p-0 overflow-hidden">
-                <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
-                  <h2 className="font-bold text-slate-800 flex items-center gap-2">
-                    <Receipt className="w-5 h-5 text-emerald-600" />
-                    Recent Transactions
-                  </h2>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="bg-slate-50 border-b text-slate-400 text-xs font-bold uppercase tracking-wider">
-                        <th className="px-6 py-4">Date / Detail</th>
-                        <th className="px-6 py-4">Financials</th>
-                        <th className="px-6 py-4">Managed By</th>
-                        <th className="px-6 py-4 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {transactions.filter(t => t.category === activeTab).map(t => {
-                        const balance = parseFloat(t.amount || 0) - parseFloat(t.paidAmount || 0);
-                        return (
-                          <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
-                            <td className="px-6 py-4">
-                              <p className="font-bold text-slate-800 text-sm">{t.date}</p>
-                              <p className="text-xs text-slate-500">
-                                {t.category === 'water' ? `Farmer: ${t.farmerName}` : `${t.subCategory} (${t.animalType || t.cropName || ''})`}
-                              </p>
-                              {t.startTime && <p className="text-[10px] text-slate-400">{t.startTime} - {t.endTime}</p>}
-                            </td>
-                            <td className="px-6 py-4">
-                              <p className={`font-bold text-sm ${t.type === 'Income' ? 'text-blue-600' : 'text-slate-800'}`}>
-                                Rs. {Number(t.amount).toLocaleString()}
-                              </p>
-                              <div className="flex items-center gap-1 mt-1">
-                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${balance > 0 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                  {balance > 0 ? `Unpaid: ${balance}` : 'Full Paid'}
-                                </span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center">
-                                  <User className="w-3 h-3 text-slate-500" />
-                                </div>
-                                <span className="text-xs text-slate-600 font-medium">{t.managedBy}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 text-right">
-                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onClick={() => editTransaction(t)} className="p-2 hover:bg-emerald-100 text-emerald-600 rounded-lg">
-                                  <Edit3 className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => deleteTransaction(t.id)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg">
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {transactions.filter(t => t.category === activeTab).length === 0 && (
-                        <tr>
-                          <td colSpan="4" className="px-6 py-12 text-center text-slate-400">
-                            No records found for this category.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </Card>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-8">
-            {/* Reports View */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <Card>
-                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                  <AlertCircle className="text-orange-500" />
-                  Account Payables (Dues to People)
-                </h2>
-                <div className="space-y-4">
-                  {transactions
-                    .filter(t => t.type === 'Expense' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0)
-                    .map(t => (
-                      <div key={t.id} className="flex justify-between items-center p-3 border-b border-slate-100">
-                        <div>
-                          <p className="font-bold text-sm text-slate-800">{t.managedBy}</p>
-                          <p className="text-xs text-slate-500">{t.subCategory} on {t.date}</p>
-                        </div>
-                        <p className="text-red-600 font-bold">Rs. {(parseFloat(t.amount) - parseFloat(t.paidAmount || 0)).toLocaleString()}</p>
-                      </div>
-                    ))}
-                    {transactions.filter(t => t.type === 'Expense' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0).length === 0 && (
-                      <p className="text-slate-400 text-center py-4">No outstanding payables.</p>
-                    )}
-                </div>
-              </Card>
+    st.divider()
+    st.subheader("Water Ledger (Recent)")
+    df_wt = run_query("SELECT * FROM transactions WHERE module='Water' ORDER BY date DESC", fetch=True)
+    if not df_wt.empty:
+        st.dataframe(df_wt[['id', 'date', 'trans_type', 'description', 'qty', 'rate', 'amount', 'party_name']], use_container_width=True)
+        
+        del_id_wt = st.number_input("Enter ID to Delete (Water)", min_value=0, step=1)
+        if st.button("Delete Record", key="del_wt"):
+            if del_id_wt in df_wt['id'].values:
+                delete_transaction(del_id_wt)
 
-              <Card>
-                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                  <Wallet className="text-blue-500" />
-                  Account Receivables (From Farmers)
-                </h2>
-                <div className="space-y-4">
-                  {transactions
-                    .filter(t => t.type === 'Income' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0)
-                    .map(t => (
-                      <div key={t.id} className="flex justify-between items-center p-3 border-b border-slate-100">
-                        <div>
-                          <p className="font-bold text-sm text-slate-800">{t.farmerName}</p>
-                          <p className="text-xs text-slate-500">Water Bill - {t.date}</p>
-                        </div>
-                        <p className="text-blue-600 font-bold">Rs. {(parseFloat(t.amount) - parseFloat(t.paidAmount || 0)).toLocaleString()}</p>
-                      </div>
-                    ))}
-                    {transactions.filter(t => t.type === 'Income' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0).length === 0 && (
-                      <p className="text-slate-400 text-center py-4">No outstanding receivables.</p>
-                    )}
-                </div>
-              </Card>
-            </div>
+# ==============================================================================
+# TAB 4: OPERATIONAL EXPENSES
+# ==============================================================================
+with tab4:
+    st.header("Operational & Salary Expenses")
+    st.info("Track salaries, fuel, and machinery maintenance. Manage who paid for it.")
+    
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        st.subheader("Add Expense")
+        with st.form("ops_form"):
+            date_op = st.date_input("Date", date.today(), key="op_date")
+            op_cat = st.selectbox("Category", ["Salaries", "Fuel", "Machinery Purchase", "Maintenance", "Misc"])
+            op_desc = st.text_input("Description", placeholder="e.g. Tractor Oil Change")
+            op_amount = st.number_input("Amount", min_value=0.0)
+            
+            # The "Managed By" logic
+            op_manager = st.text_input("Managed By / Paid By", value="Cash", help="If an employee paid from pocket, write their name. If farm cash, write Cash.")
+            
+            sub_op = st.form_submit_button("Record Expense")
+            if sub_op:
+                save_transaction(date_op, "Operations", "Expense", "General", op_cat, op_desc, op_amount, op_manager)
+    
+    with col2:
+        st.subheader("Settle Balance (Pay Back)")
+        with st.expander("Make Payment to Employee/Person"):
+            with st.form("settle_form"):
+                set_date = st.date_input("Date", date.today())
+                set_person = st.text_input("Person Name")
+                set_amount = st.number_input("Amount Paid", min_value=1.0)
+                set_note = st.text_input("Note", "Reimbursement")
+                
+                if st.form_submit_button("Record Payment"):
+                    # We are paying them back. 
+                    # Type: Payment (reduces their credit balance)
+                    save_transaction(set_date, "Operations", "Payment", "General", "Reimbursement", set_note, set_amount, set_person)
 
-            <Card className="overflow-hidden p-0">
-               <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
-                  <h2 className="text-xl font-bold">Full Transaction Ledger</h2>
-                  <button onClick={() => window.print()} className="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-xs font-bold transition-all">Download PDF</button>
-               </div>
-               <div className="overflow-x-auto">
-                 <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 border-b text-slate-500 text-[10px] font-bold uppercase">
-                        <th className="px-6 py-4">ID</th>
-                        <th className="px-6 py-4">Date</th>
-                        <th className="px-6 py-4">Category</th>
-                        <th className="px-6 py-4">Description</th>
-                        <th className="px-6 py-4">Debit (Exp)</th>
-                        <th className="px-6 py-4">Credit (Inc)</th>
-                        <th className="px-6 py-4">Balance Due</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {transactions.map((t, idx) => {
-                         const balance = (parseFloat(t.amount) - parseFloat(t.paidAmount || 0));
-                         return (
-                          <tr key={t.id} className="text-sm">
-                            <td className="px-6 py-4 text-slate-400 text-[10px]">{t.id}</td>
-                            <td className="px-6 py-4 font-medium">{t.date}</td>
-                            <td className="px-6 py-4">
-                              <span className="capitalize bg-slate-100 px-2 py-1 rounded text-[10px]">{t.category}</span>
-                            </td>
-                            <td className="px-6 py-4">
-                              {t.category === 'water' ? `Tubewell usage: ${t.farmerName}` : `${t.subCategory} for ${t.animalType || t.cropName}`}
-                            </td>
-                            <td className="px-6 py-4 font-bold text-red-500">{t.type === 'Expense' ? `Rs. ${Number(t.amount).toLocaleString()}` : '-'}</td>
-                            <td className="px-6 py-4 font-bold text-emerald-600">{t.type === 'Income' ? `Rs. ${Number(t.amount).toLocaleString()}` : '-'}</td>
-                            <td className="px-6 py-4 font-bold text-slate-700">{balance > 0 ? `Rs. ${balance.toLocaleString()}` : '-'}</td>
-                          </tr>
-                         )
-                      })}
-                    </tbody>
-                 </table>
-               </div>
-            </Card>
-          </div>
-        )}
-      </main>
+        st.subheader("Operations Log")
+        df_op = run_query("SELECT * FROM transactions WHERE module='Operations' ORDER BY date DESC", fetch=True)
+        if not df_op.empty:
+            st.dataframe(df_op[['id', 'date', 'subcategory', 'description', 'amount', 'party_name']], use_container_width=True)
+            
+            del_id_op = st.number_input("Enter ID to Delete (Ops)", min_value=0, step=1)
+            if st.button("Delete Record", key="del_op"):
+                if del_id_op in df_op['id'].values:
+                    delete_transaction(del_id_op)
 
-      {/* Mobile-only spacing */}
-      <div className="h-20 md:hidden"></div>
-    </div>
-  );
-};
+# ==============================================================================
+# TAB 5: REPORTS
+# ==============================================================================
+with tab5:
+    st.header("📊 Financial Reports & Ledger")
+    
+    # Fetch all data
+    df = run_query("SELECT * FROM transactions", fetch=True)
+    
+    if df.empty:
+        st.warning("No data available.")
+    else:
+        df['date'] = pd.to_datetime(df['date'])
+        
+        # --- FILTERS ---
+        colf1, colf2, colf3 = st.columns(3)
+        with colf1:
+            start_date = st.date_input("Start Date", date.today().replace(day=1))
+        with colf2:
+            end_date = st.date_input("End Date", date.today())
+        with colf3:
+            filter_party = st.multiselect("Filter by Person/Farmer", options=df['party_name'].unique())
 
-export default App;
+        # Filter Logic
+        mask = (df['date'].dt.date >= start_date) & (df['date'].dt.date <= end_date)
+        if filter_party:
+            mask = mask & (df['party_name'].isin(filter_party))
+        
+        filtered_df = df.loc[mask].copy()
+        
+        # --- TABULAR LEDGER LOGIC ---
+        # Concept: 
+        # For Expenses: If 'Cash', Farm spent money. If 'Person', Person gets Credit (we owe them).
+        # For Income: If 'Cash', Farm got money. If 'Person', Person gets Debit (they owe us).
+        # For Bills (Water): Farmer gets Debit (owes us).
+        # For Payments (Water): Farmer gets Credit (paid us).
+        
+        ledger_data = []
+        
+        for index, row in filtered_df.iterrows():
+            # Defaults
+            debit = 0
+            credit = 0
+            party = row['party_name']
+            
+            if row['module'] == 'Water':
+                if row['trans_type'] == 'Bill':
+                    # Farmer used water -> Farmer Debit (Receivable)
+                    debit = row['amount']
+                    credit = 0
+                elif row['trans_type'] == 'Payment':
+                    # Farmer paid -> Farmer Credit
+                    debit = 0
+                    credit = row['amount']
+            
+            elif row['module'] == 'Operations' or row['module'] == 'Livestock' or row['module'] == 'Crop':
+                if row['trans_type'] == 'Expense':
+                    if party.lower() != 'cash':
+                        # Person paid for us -> Person Credit (Payable)
+                        credit = row['amount']
+                        debit = 0
+                elif row['trans_type'] == 'Payment': # Reimbursement
+                     # We paid person back -> Person Debit
+                     debit = row['amount']
+                     credit = 0
+                elif row['trans_type'] == 'Income':
+                     # Usually Cash, but if sold on credit
+                     if party.lower() != 'cash':
+                         debit = row['amount']
+            
+            # Only add to ledger if it involves a specific person (not Cash)
+            if party.lower() != 'cash':
+                ledger_data.append({
+                    "Date": row['date'].date(),
+                    "Name": party,
+                    "Module": row['module'],
+                    "Details": f"{row['subcategory']} - {row['description']}",
+                    "Debit (They Owe Us/Paid Us Back)": debit,
+                    "Credit (We Owe Them/They Paid Us)": credit
+                })
+
+        ledger_df = pd.DataFrame(ledger_data)
+        
+        # --- DISPLAY SECTIONS ---
+        
+        st.subheader("1. Profit & Loss Summary (Farm View)")
+        pl_col1, pl_col2, pl_col3 = st.columns(3)
+        
+        # Simple Income vs Expense calculation
+        total_income = filtered_df[filtered_df['trans_type'].isin(['Income', 'Bill'])]['amount'].sum()
+        total_expense = filtered_df[filtered_df['trans_type'] == 'Expense']['amount'].sum()
+        
+        pl_col1.metric("Total Income/Billings", f"{total_income:,.0f}")
+        pl_col2.metric("Total Expenses", f"{total_expense:,.0f}")
+        pl_col3.metric("Net Profit", f"{total_income - total_expense:,.0f}", delta_color="normal")
+
+        st.divider()
+
+        st.subheader("2. Person/Farmer Ledger (Detailed)")
+        if not ledger_df.empty:
+            # Group by person to calculate running balances
+            st.dataframe(ledger_df, use_container_width=True)
+            
+            st.subheader("3. Outstanding Balances")
+            balance_df = ledger_df.groupby("Name")[["Debit (They Owe Us/Paid Us Back)", "Credit (We Owe Them/They Paid Us)"]].sum().reset_index()
+            balance_df["Net Balance"] = balance_df["Debit (They Owe Us/Paid Us Back)"] - balance_df["Credit (We Owe Them/They Paid Us)"]
+            
+            def get_status(val):
+                if val > 0: return "Collect from them"
+                elif val < 0: return "Pay them"
+                else: return "Settled"
+                
+            balance_df["Status"] = balance_df["Net Balance"].apply(get_status)
+            st.dataframe(balance_df, use_container_width=True)
+            
+        else:
+            st.info("No credit/debit transactions with individuals in this period.")
+            
+        st.divider()
+        st.subheader("4. Raw Data Export")
+        st.dataframe(filtered_df)
