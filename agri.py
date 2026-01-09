@@ -1,594 +1,518 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-import io
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  LayoutDashboard, 
+  Sprout, 
+  Beef, 
+  Droplets, 
+  Receipt, 
+  FileText, 
+  Plus, 
+  Trash2, 
+  Edit3, 
+  TrendingUp, 
+  User,
+  Clock,
+  Wallet,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react';
 
-# Set page configuration
-st.set_page_config(
-    page_title="Farm Accounts Ledger 2023-25",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+const App = () => {
+  // --- State Management ---
+  const [activeTab, setActiveTab] = useState('livestock');
+  const [transactions, setTransactions] = useState([]);
+  const [ledger, setLedger] = useState([]);
+  const [editingId, setEditingId] = useState(null);
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #2E8B57;
-        text-align: center;
-        margin-bottom: 2rem;
-        padding-bottom: 1rem;
-        border-bottom: 2px solid #2E8B57;
+  // --- Initial State Form Logic ---
+  const [formData, setFormData] = useState({
+    date: new Date().toISOString().split('T')[0],
+    category: 'livestock', // livestock, crop, water, operational
+    subCategory: 'Wanda',
+    description: '',
+    amount: '',
+    managedBy: 'Self',
+    paidAmount: '',
+    animalType: 'Cow', // For livestock
+    cropName: 'Wheat', // For crops
+    farmerName: '',    // For water
+    startTime: '',     // For water
+    endTime: '',       // For water
+    rate: '',          // For water
+    type: 'Expense'    // Expense or Income
+  });
+
+  // --- Calculations ---
+  const stats = useMemo(() => {
+    const totals = {
+      livestockExp: 0,
+      cropExp: 0,
+      waterInc: 0,
+      opExp: 0,
+      totalPayable: 0,
+      totalReceivable: 0
+    };
+
+    transactions.forEach(t => {
+      const amount = parseFloat(t.amount || 0);
+      const paid = parseFloat(t.paidAmount || 0);
+      
+      if (t.category === 'livestock') totals.livestockExp += amount;
+      if (t.category === 'crop') totals.cropExp += amount;
+      if (t.category === 'water') totals.waterInc += amount;
+      if (t.category === 'operational') totals.opExp += amount;
+
+      if (t.type === 'Expense') {
+        totals.totalPayable += (amount - paid);
+      } else if (t.type === 'Income') {
+        totals.totalReceivable += (amount - paid);
+      }
+    });
+
+    return totals;
+  }, [transactions]);
+
+  // --- Handlers ---
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const calculateWaterBill = () => {
+    if (formData.startTime && formData.endTime && formData.rate) {
+      const start = new Date(`2000-01-01T${formData.startTime}`);
+      const end = new Date(`2000-01-01T${formData.endTime}`);
+      let diff = (end - start) / (1000 * 60 * 60); // hours
+      if (diff < 0) diff += 24; // handle overnight
+      return (diff * parseFloat(formData.rate)).toFixed(2);
     }
-    .sub-header {
-        font-size: 1.8rem;
-        color: #3CB371;
-        margin-top: 2rem;
-        margin-bottom: 1rem;
+    return 0;
+  };
+
+  const saveTransaction = (e) => {
+    e.preventDefault();
+    let finalAmount = formData.amount;
+    if (formData.category === 'water') {
+      finalAmount = calculateWaterBill();
     }
-    .metric-card {
-        background-color: #f8f9fa;
-        padding: 1rem;
-        border-radius: 10px;
-        border-left: 5px solid #2E8B57;
-        margin-bottom: 1rem;
+
+    const newEntry = {
+      ...formData,
+      id: editingId || Date.now(),
+      amount: finalAmount,
+      timestamp: new Date().toLocaleString()
+    };
+
+    if (editingId) {
+      setTransactions(transactions.map(t => t.id === editingId ? newEntry : t));
+      setEditingId(null);
+    } else {
+      setTransactions([newEntry, ...transactions]);
     }
-    .positive {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .negative {
-        color: #dc3545;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
 
-# Create sample data based on the Excel structure
-@st.cache_data
-def create_sample_data():
-    """Create sample data based on the Excel structure"""
-    data = []
-    
-    # Sample data based on the provided Excel rows
-    sample_transactions = [
-        # Format: [S.NO, MAIN HEAD, CROP YEAR, INDIVIDUAL, SUB HEAD, ITEM, DETAIL TAKEN, UNIT, Qty, RATE, AMOUNT, DESCRIPTION, DATE, INCOME, EXPENSE, BALANCE]
-        [1, "Invest.", "2024-25", "Junaid", "Asset", "Tractor", "Acc. Group", "Each", 1, 800000, 800000, "FIAT 480 2012 Model", "2022-05-06", None, 800000, 800000],
-        [2, "Invest.", "2024-25", "Junaid", "Asset", "Hall", "Acc. Group", "Each", 1, 60000, 60000, "Hall Frame", "2022-05-06", None, 60000, 1400000],
-        [3, "Invest.", "2024-25", "Junaid", "Asset", "Insect", "Acc. Group", "Bundle", 6, 42500, 255000, "6 Bundle (1 Biggah) Insect @ Rs. 42500/Bundle", "2022-05-29", None, 255000, 1655000],
-        [4, "Invest.", "2024-25", "Junaid", "Asset", "Pipe", "Acc. Group", "Each", 260, 1517, 394420, "260 Pipes @ Rs. 1517/Pipe", "2022-06-04", None, 394420, 2049420],
-        [5, "Invest.", "2024-25", "Junaid", "Asset", "Pipe", "Acc. Group", "Each", 8, 1000, 8000, "8 Used Pipes From Riaz @ Rs. 1000/Pipe", "2022-06-09", None, 8000, 2057420],
-        [6, "Invest.", "2024-25", "Junaid", "Asset", "Steel", "Acc. Group", None, None, None, None, "Steel For Pipes", "2022-06-12", None, 24000, 2081420],
-        [7, "Invest.", "2024-25", "Junaid", "Asset", "Steel", "Acc. Group", None, None, None, None, "Steel For Pipes", "2022-06-15", None, 20000, 2101420],
-        [8, "Invest.", "2024-25", "Junaid", "Asset", "Steel", "Acc. Group", None, None, None, None, "Steel For Pipes", "2022-06-18", None, 12000, 2113420],
-        [9, "Invest.", "2023-24", "Junaid", "Kheera", "Rope", "Acc. Group", "Kg", 22.3, 330, 7400, "22.3 Kg Rope For Tunnel @ Rs. 330/Kg", "2022-06-26", None, 7400, 2120820],
-        [10, "Invest.", "2023-24", "Junaid", "Kheera", "Jaal", "Acc. Group", "Each", 50, 320, 16000, "50 Jaal @ Rs. 320/Jaal", "2022-06-26", None, 16000, 2136820],
-        [28, "Income", "2023-24", "Junaid", "Mustajri", "M. Bher", "Acc. Group", None, None, None, None, "Mustajri Received From M. Bher", "2023-05-16", 23000, None, 23000],
-        [29, "Income", "2023-24", "Junaid", "Mustajri", "M. Bher", "Acc. Group", None, None, None, None, "Mustajri Received From M. Bher", "2023-05-19", 27000, None, 50000],
-        [30, "Income", "2023-24", "Junaid", "Mustajri", "M. Bher", "Acc. Group", None, None, None, None, "Mustajri Received From M. Bher (Aslam)", "2023-06-05", 30000, None, 80000],
-        [31, "Income", "2023-24", "Junaid", "Mustajri", "M. Bher", "Acc. Group", None, None, None, None, "Mustajri Received From M. Bher (Pathan)", "2023-06-05", 60000, None, 140000],
-        [259, "Income", "2023-24", "Mannan", "Kheera", "Sale", "Inc. Group", "Shoppers", 150, 130, 19500, "A-6 Kheera Sale", "2023-09-17", 19500, None, 19500],
-        [278, "Income", "2023-24", "Mannan", "Kheera", "Sale", "Inc. Group", "Shoppers", 575, 102, 58650, "A-6 Kheera Sale", "2023-09-20", 58650, None, 78150],
-        [279, "Income", "2023-24", "Mannan", "Kheera", "Sale", "Inc. Group", "Shoppers", None, None, None, "A-4 Kheera Sale", "2023-09-21", 42280, None, 120430],
-        [291, "Income", "2023-24", "Junaid", "Kheera", "Sale", "Inc. Group", "Shoppers", 554, 33.123, 18350, "A-6 Kheera Sale", "2023-09-23", 18350, None, 18350],
-        [308, "Income", "2023-24", "Mannan", "Kheera", "Sale", "Inc. Group", "Shoppers", 525, 90, 47250, "A-6 Kheera Sale", "2023-09-29", 47250, None, 167680],
-        [319, "Income", "2023-24", "Mannan", "Kheera", "Sale", "Inc. Group", "Shoppers", 485, 166, 80510, "A-6 Kheera Sale", "2023-10-02", 80510, None, 248190],
-        [569, "Income", "2023-24", "Mannan", "Corn", "Sale", "Inc. Group", "Mun", 247, 1668.015, 412000, "Sale Of Corn To Asia Feed Mill", "2023-12-01", 412000, None, 660190],
-        [646, "Income", "2023-24", "Mannan", "Corn", "Sale", "Inc. Group", "Mun", None, None, None, "Sale Of Corn", "2023-12-15", 200000, None, 860190],
-    ]
-    
-    # Add more Mannan transactions
-    for i in range(20, 25):
-        sample_transactions.append([
-            i+100, "Invest.", "2023-24", "Mannan", "Kheera", "Seed", "Inv. Group", "Pckt", np.random.randint(5, 20), 
-            np.random.randint(3000, 5000), None, f"Seed Purchase {i}", 
-            f"2023-{np.random.randint(8,12):02d}-{np.random.randint(1,28):02d}", 
-            None, np.random.randint(5000, 20000), None
-        ])
-    
-    # Add more Junaid transactions
-    for i in range(25, 35):
-        sample_transactions.append([
-            i+200, "Invest.", "2023-24", "Junaid", "Corn", "Fertilizer", "Inv. Group", "Bag", 
-            np.random.randint(1, 10), np.random.randint(2000, 5000), None, f"Fertilizer Purchase {i}", 
-            f"2023-{np.random.randint(7,10):02d}-{np.random.randint(1,28):02d}", 
-            None, np.random.randint(10000, 50000), None
-        ])
-    
-    # Create DataFrame
-    df = pd.DataFrame(sample_transactions, columns=[
-        'S.NO', 'MAIN HEAD', 'CROP YEAR', 'INDIVIDUAL', 'SUB HEAD', 'ITEM', 
-        'DETAIL TAKEN', 'UNIT', 'Qty', 'RATE', 'AMOUNT', 'DESCRIPTION', 
-        'DATE', 'INCOME', 'EXPENSE', 'BALANCE'
-    ])
-    
-    # Convert date column
-    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-    
-    # Fill missing AMOUNT values
-    df['AMOUNT'] = df.apply(
-        lambda row: row['Qty'] * row['RATE'] if pd.notna(row['Qty']) and pd.notna(row['RATE']) else row['AMOUNT'],
-        axis=1
-    )
-    
-    # Calculate BALANCE for rows where it's missing
-    # This is simplified - in real scenario, balance would be cumulative
-    for idx, row in df.iterrows():
-        if pd.isna(row['BALANCE']):
-            if pd.notna(row['INCOME']):
-                df.at[idx, 'BALANCE'] = row['INCOME']
-            elif pd.notna(row['EXPENSE']):
-                df.at[idx, 'BALANCE'] = -row['EXPENSE']
-    
-    # Convert numeric columns
-    numeric_cols = ['S.NO', 'Qty', 'RATE', 'AMOUNT', 'INCOME', 'EXPENSE', 'BALANCE']
-    for col in numeric_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    
-    return df
+    // Reset Form
+    setFormData({
+      date: new Date().toISOString().split('T')[0],
+      category: activeTab,
+      subCategory: activeTab === 'livestock' ? 'Wanda' : activeTab === 'crop' ? 'Khad' : 'Salary',
+      description: '',
+      amount: '',
+      managedBy: 'Self',
+      paidAmount: '',
+      animalType: 'Cow',
+      cropName: 'Wheat',
+      farmerName: '',
+      startTime: '',
+      endTime: '',
+      rate: '',
+      type: activeTab === 'water' ? 'Income' : 'Expense'
+    });
+  };
 
-# Load the data
-df = create_sample_data()
+  const deleteTransaction = (id) => {
+    setTransactions(transactions.filter(t => t.id !== id));
+  };
 
-# Title and description
-st.markdown('<h1 class="main-header">🏪 Farm Accounts Ledger System 2023-25</h1>', unsafe_allow_html=True)
-st.markdown("""
-This dashboard provides a comprehensive view of agricultural investments, income, and expenses for multiple individuals
-across different crop years. Explore the data using the filters and visualizations below.
-""")
+  const editTransaction = (t) => {
+    setFormData(t);
+    setEditingId(t.id);
+    setActiveTab(t.category);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-# Sidebar for filters
-with st.sidebar:
-    st.markdown("### 🎛️ Filters")
-    
-    # Date range filter
-    if 'DATE' in df.columns:
-        min_date = df['DATE'].min().date()
-        max_date = df['DATE'].max().date()
-        date_range = st.date_input(
-            "Date Range",
-            value=(min_date, max_date),
-            min_value=min_date,
-            max_date=max_date
-        )
-    
-    # Individual filter
-    if 'INDIVIDUAL' in df.columns:
-        individuals = ['All'] + sorted(df['INDIVIDUAL'].dropna().unique().tolist())
-        selected_individual = st.selectbox("Select Individual", individuals)
-    
-    # Crop Year filter
-    if 'CROP YEAR' in df.columns:
-        crop_years = ['All'] + sorted(df['CROP YEAR'].dropna().unique().tolist())
-        selected_crop_year = st.selectbox("Select Crop Year", crop_years)
-    
-    # Main Head filter
-    if 'MAIN HEAD' in df.columns:
-        main_heads = ['All'] + sorted(df['MAIN HEAD'].dropna().unique().tolist())
-        selected_main_head = st.selectbox("Select Transaction Type", main_heads)
-    
-    # Sub Head filter
-    if 'SUB HEAD' in df.columns:
-        sub_heads = ['All'] + sorted(df['SUB HEAD'].dropna().unique().tolist())
-        selected_sub_head = st.selectbox("Select Sub Category", sub_heads)
-    
-    st.markdown("---")
-    st.markdown("### 💡 Tips")
-    st.info("Use the filters to drill down into specific data. Click on charts to see more details.")
-
-# Apply filters
-filtered_df = df.copy()
-
-if 'DATE' in filtered_df.columns:
-    if len(date_range) == 2:
-        start_date, end_date = date_range
-        filtered_df = filtered_df[
-            (filtered_df['DATE'].dt.date >= start_date) & 
-            (filtered_df['DATE'].dt.date <= end_date)
-        ]
-
-if 'INDIVIDUAL' in filtered_df.columns and selected_individual != 'All':
-    filtered_df = filtered_df[filtered_df['INDIVIDUAL'] == selected_individual]
-
-if 'CROP YEAR' in filtered_df.columns and selected_crop_year != 'All':
-    filtered_df = filtered_df[filtered_df['CROP YEAR'] == selected_crop_year]
-
-if 'MAIN HEAD' in filtered_df.columns and selected_main_head != 'All':
-    filtered_df = filtered_df[filtered_df['MAIN HEAD'] == selected_main_head]
-
-if 'SUB HEAD' in filtered_df.columns and selected_sub_head != 'All':
-    filtered_df = filtered_df[filtered_df['SUB HEAD'] == selected_sub_head]
-
-# Main dashboard layout
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Overview", "💰 Transactions", "📈 Analysis", "👥 By Individual", "📤 Export"])
-
-with tab1:
-    st.markdown('<h2 class="sub-header">Dashboard Overview</h2>', unsafe_allow_html=True)
-    
-    # Key metrics - handle missing columns gracefully
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        total_income = filtered_df['INCOME'].sum() if 'INCOME' in filtered_df.columns else 0
-        st.metric("Total Income", f"₹{total_income:,.0f}")
-    
-    with col2:
-        total_expense = filtered_df['EXPENSE'].sum() if 'EXPENSE' in filtered_df.columns else 0
-        st.metric("Total Expense", f"₹{total_expense:,.0f}")
-    
-    with col3:
-        net_balance = total_income - total_expense
-        st.metric("Net Balance", f"₹{net_balance:,.0f}")
-    
-    with col4:
-        transaction_count = len(filtered_df)
-        st.metric("Total Transactions", transaction_count)
-    
-    # Summary charts
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### Income vs Expense by Month")
-        if 'DATE' in filtered_df.columns and 'INCOME' in filtered_df.columns and 'EXPENSE' in filtered_df.columns:
-            monthly_data = filtered_df.copy()
-            monthly_data['Month'] = monthly_data['DATE'].dt.strftime('%Y-%m')
-            monthly_summary = monthly_data.groupby('Month').agg({
-                'INCOME': 'sum',
-                'EXPENSE': 'sum'
-            }).reset_index()
-            
-            if not monthly_summary.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Bar(
-                    x=monthly_summary['Month'],
-                    y=monthly_summary['INCOME'],
-                    name='Income',
-                    marker_color='#28a745'
-                ))
-                fig.add_trace(go.Bar(
-                    x=monthly_summary['Month'],
-                    y=monthly_summary['EXPENSE'],
-                    name='Expense',
-                    marker_color='#dc3545'
-                ))
-                fig.update_layout(
-                    barmode='group',
-                    xaxis_title='Month',
-                    yaxis_title='Amount (₹)',
-                    height=400
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No data available for the selected filters.")
-    
-    with col2:
-        st.markdown("#### Transaction Types")
-        if 'MAIN HEAD' in filtered_df.columns:
-            transaction_types = filtered_df['MAIN HEAD'].value_counts()
-            if not transaction_types.empty:
-                fig = px.pie(
-                    values=transaction_types.values,
-                    names=transaction_types.index,
-                    title="Distribution by Transaction Type",
-                    color_discrete_sequence=px.colors.sequential.Viridis
-                )
-                fig.update_traces(textposition='inside', textinfo='percent+label')
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No transaction type data available.")
-    
-    # Recent transactions
-    st.markdown("#### Recent Transactions")
-    if 'DATE' in filtered_df.columns:
-        recent_transactions = filtered_df.sort_values('DATE', ascending=False).head(10)
-        display_cols = []
-        for col in ['DATE', 'INDIVIDUAL', 'MAIN HEAD', 'SUB HEAD', 'ITEM', 'INCOME', 'EXPENSE', 'BALANCE']:
-            if col in filtered_df.columns:
-                display_cols.append(col)
-        
-        if display_cols:
-            st.dataframe(
-                recent_transactions[display_cols],
-                use_container_width=True
-            )
-
-with tab2:
-    st.markdown('<h2 class="sub-header">Transaction Details</h2>', unsafe_allow_html=True)
-    
-    # Search functionality
-    search_term = st.text_input("🔍 Search in Description", "")
-    if search_term and 'DESCRIPTION' in filtered_df.columns:
-        search_df = filtered_df[filtered_df['DESCRIPTION'].str.contains(search_term, case=False, na=False)]
-    else:
-        search_df = filtered_df
-    
-    # Detailed view with pagination
-    if len(search_df) > 0:
-        items_per_page = 20
-        total_pages = max(1, (len(search_df) - 1) // items_per_page + 1)
-        
-        page_number = st.number_input("Page", min_value=1, max_value=total_pages, value=1)
-        start_idx = (page_number - 1) * items_per_page
-        end_idx = min(start_idx + items_per_page, len(search_df))
-        
-        # Display the data
-        display_df = search_df.iloc[start_idx:end_idx].copy()
-        
-        # Format numeric columns
-        format_dict = {}
-        for col in ['INCOME', 'EXPENSE', 'BALANCE', 'AMOUNT', 'RATE']:
-            if col in display_df.columns:
-                format_dict[col] = '₹{:,.0f}'
-        
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            height=600
-        )
-        
-        # Pagination info
-        st.caption(f"Showing {start_idx + 1}-{end_idx} of {len(search_df)} transactions")
-    else:
-        st.info("No transactions found with the current filters.")
-
-with tab3:
-    st.markdown('<h2 class="sub-header">Detailed Analysis</h2>', unsafe_allow_html=True)
-    
-    # Analysis options
-    analysis_type = st.selectbox(
-        "Select Analysis Type",
-        ["Expense Breakdown", "Income Sources", "Monthly Trends", "Category Analysis"]
-    )
-    
-    if analysis_type == "Expense Breakdown":
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Expense by Individual")
-            if 'EXPENSE' in filtered_df.columns and 'INDIVIDUAL' in filtered_df.columns:
-                expense_data = filtered_df[filtered_df['EXPENSE'] > 0]
-                if not expense_data.empty:
-                    expense_by_individual = expense_data.groupby('INDIVIDUAL')['EXPENSE'].sum()
-                    fig = px.bar(
-                        x=expense_by_individual.index,
-                        y=expense_by_individual.values,
-                        title="Expense Distribution by Individual",
-                        labels={'x': 'Individual', 'y': 'Total Expense (₹)'},
-                        color=expense_by_individual.values,
-                        color_continuous_scale='Reds'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No expense data available.")
-        
-        with col2:
-            st.markdown("#### Expense by Category")
-            if 'EXPENSE' in filtered_df.columns and 'SUB HEAD' in filtered_df.columns:
-                expense_data = filtered_df[filtered_df['EXPENSE'] > 0]
-                if not expense_data.empty:
-                    expense_by_category = expense_data.groupby('SUB HEAD')['EXPENSE'].sum()
-                    if not expense_by_category.empty:
-                        fig = px.pie(
-                            values=expense_by_category.values,
-                            names=expense_by_category.index,
-                            title="Expense by Category",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("No expense categories available.")
-                else:
-                    st.info("No expense data available.")
-    
-    elif analysis_type == "Income Sources":
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### Income by Individual")
-            if 'INCOME' in filtered_df.columns and 'INDIVIDUAL' in filtered_df.columns:
-                income_data = filtered_df[filtered_df['INCOME'] > 0]
-                if not income_data.empty:
-                    income_by_individual = income_data.groupby('INDIVIDUAL')['INCOME'].sum()
-                    fig = px.bar(
-                        x=income_by_individual.index,
-                        y=income_by_individual.values,
-                        title="Income Distribution by Individual",
-                        labels={'x': 'Individual', 'y': 'Total Income (₹)'},
-                        color=income_by_individual.values,
-                        color_continuous_scale='Greens'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info("No income data available.")
-        
-        with col2:
-            st.markdown("#### Income Sources")
-            if 'INCOME' in filtered_df.columns and 'SUB HEAD' in filtered_df.columns:
-                income_data = filtered_df[filtered_df['INCOME'] > 0]
-                if not income_data.empty:
-                    income_sources = income_data.groupby('SUB HEAD')['INCOME'].sum()
-                    if not income_sources.empty:
-                        fig = px.pie(
-                            values=income_sources.values,
-                            names=income_sources.index,
-                            title="Income by Source",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info("No income sources available.")
-                else:
-                    st.info("No income data available.")
-    
-    elif analysis_type == "Monthly Trends":
-        st.markdown("#### Monthly Income & Expense Trends")
-        if 'DATE' in filtered_df.columns and 'INCOME' in filtered_df.columns and 'EXPENSE' in filtered_df.columns:
-            monthly_trends = filtered_df.copy()
-            monthly_trends['Month'] = monthly_trends['DATE'].dt.strftime('%Y-%m')
-            monthly_summary = monthly_trends.groupby('Month').agg({
-                'INCOME': 'sum',
-                'EXPENSE': 'sum'
-            }).reset_index()
-            
-            if not monthly_summary.empty:
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=monthly_summary['Month'],
-                    y=monthly_summary['INCOME'],
-                    name='Income',
-                    mode='lines+markers',
-                    line=dict(color='#28a745', width=3)
-                ))
-                fig.add_trace(go.Scatter(
-                    x=monthly_summary['Month'],
-                    y=monthly_summary['EXPENSE'],
-                    name='Expense',
-                    mode='lines+markers',
-                    line=dict(color='#dc3545', width=3)
-                ))
-                fig.update_layout(
-                    xaxis_title='Month',
-                    yaxis_title='Amount (₹)',
-                    height=500
-                )
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.info("No monthly trend data available.")
-
-with tab4:
-    st.markdown('<h2 class="sub-header">Individual Performance</h2>', unsafe_allow_html=True)
-    
-    # Select individual for detailed view
-    if 'INDIVIDUAL' in df.columns:
-        individuals_list = df['INDIVIDUAL'].dropna().unique().tolist()
-        selected_person = st.selectbox("Select Person to Analyze", individuals_list)
-        
-        person_data = df[df['INDIVIDUAL'] == selected_person].copy()
-        
-        # Individual metrics
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            person_income = person_data['INCOME'].sum() if 'INCOME' in person_data.columns else 0
-            st.metric(f"{selected_person}'s Total Income", f"₹{person_income:,.0f}")
-        
-        with col2:
-            person_expense = person_data['EXPENSE'].sum() if 'EXPENSE' in person_data.columns else 0
-            st.metric(f"{selected_person}'s Total Expense", f"₹{person_expense:,.0f}")
-        
-        with col3:
-            person_net = person_income - person_expense
-            st.metric(f"{selected_person}'s Net Balance", f"₹{person_net:,.0f}")
-        
-        # Individual analysis
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"#### {selected_person}'s Top Expenses")
-            if 'EXPENSE' in person_data.columns and 'DESCRIPTION' in person_data.columns:
-                expense_data = person_data[person_data['EXPENSE'] > 0]
-                if not expense_data.empty:
-                    top_expenses = expense_data.nlargest(10, 'EXPENSE')
-                    fig = px.bar(
-                        x=top_expenses['DESCRIPTION'].str[:50],
-                        y=top_expenses['EXPENSE'],
-                        title="Top 10 Expenses",
-                        labels={'x': 'Description', 'y': 'Amount (₹)'},
-                        color=top_expenses['EXPENSE'],
-                        color_continuous_scale='Reds'
-                    )
-                    fig.update_layout(xaxis_tickangle=45, height=400)
-                    st.plotly_chart(fig, use_container_width=True)
-                else:
-                    st.info(f"{selected_person} has no recorded expenses.")
-        
-        with col2:
-            st.markdown(f"#### {selected_person}'s Income Sources")
-            if 'INCOME' in person_data.columns and 'SUB HEAD' in person_data.columns:
-                income_data = person_data[person_data['INCOME'] > 0]
-                if not income_data.empty:
-                    income_sources = income_data.groupby('SUB HEAD')['INCOME'].sum()
-                    if not income_sources.empty:
-                        fig = px.pie(
-                            values=income_sources.values,
-                            names=income_sources.index,
-                            title="Income Sources Distribution",
-                            hole=0.3
-                        )
-                        st.plotly_chart(fig, use_container_width=True)
-                    else:
-                        st.info(f"No income sources data for {selected_person}.")
-                else:
-                    st.info(f"{selected_person} has no recorded income.")
-
-with tab5:
-    st.markdown('<h2 class="sub-header">Export Data</h2>', unsafe_allow_html=True)
-    
-    # Export options
-    export_format = st.radio(
-        "Select Export Format",
-        ["CSV", "Excel", "JSON"]
-    )
-    
-    # Customize export
-    st.markdown("#### Select Columns to Export")
-    all_columns = filtered_df.columns.tolist()
-    selected_columns = st.multiselect(
-        "Choose columns (select all for full dataset)",
-        all_columns,
-        default=all_columns
-    )
-    
-    export_df = filtered_df[selected_columns] if selected_columns else filtered_df
-    
-    if export_format == "CSV":
-        csv = export_df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download CSV",
-            data=csv,
-            file_name=f"farm_ledger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-            mime="text/csv"
-        )
-    
-    elif export_format == "Excel":
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            export_df.to_excel(writer, index=False, sheet_name='Ledger')
-        
-        st.download_button(
-            label="📥 Download Excel",
-            data=output.getvalue(),
-            file_name=f"farm_ledger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    
-    elif export_format == "JSON":
-        json_str = export_df.to_json(orient='records', indent=2)
-        st.download_button(
-            label="📥 Download JSON",
-            data=json_str,
-            file_name=f"farm_ledger_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-            mime="application/json"
-        )
-    
-    # Preview of export data
-    st.markdown("#### Preview of Export Data")
-    st.dataframe(export_df.head(10), use_container_width=True)
-
-# Footer
-st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: #666;'>
-        <p>Farm Accounts Ledger System | Data from 2023-2025 | Last Updated: September 2025</p>
-        <p>For queries, contact the farm administration</p>
+  // --- Components ---
+  const Card = ({ children, className = "" }) => (
+    <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-6 ${className}`}>
+      {children}
     </div>
-    """,
-    unsafe_allow_html=True
-)
+  );
+
+  const StatBox = ({ label, value, color, icon: Icon }) => (
+    <Card className="flex items-center gap-4">
+      <div className={`p-3 rounded-lg ${color} bg-opacity-10`}>
+        <Icon className={`w-6 h-6 ${color.replace('bg-', 'text-')}`} />
+      </div>
+      <div>
+        <p className="text-sm text-slate-500 font-medium uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-bold text-slate-800">Rs. {Number(value).toLocaleString()}</p>
+      </div>
+    </Card>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+      {/* Sidebar Navigation */}
+      <nav className="fixed left-0 top-0 h-full w-20 md:w-64 bg-slate-900 text-slate-400 flex flex-col items-center py-8 z-50">
+        <div className="mb-10 px-6 flex items-center gap-3 w-full">
+          <div className="bg-emerald-500 p-2 rounded-lg">
+            <LayoutDashboard className="text-white w-6 h-6" />
+          </div>
+          <span className="hidden md:block text-white font-bold text-xl tracking-tight">FarmLedger</span>
+        </div>
+        
+        <div className="flex flex-col gap-2 w-full px-4">
+          {[
+            { id: 'livestock', icon: Beef, label: 'Livestock' },
+            { id: 'crop', icon: Sprout, label: 'Crops' },
+            { id: 'water', icon: Droplets, label: 'Water Income' },
+            { id: 'operational', icon: Receipt, label: 'Operations' },
+            { id: 'reports', icon: FileText, label: 'Reports' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`flex items-center gap-4 p-3 rounded-xl transition-all ${
+                activeTab === item.id 
+                ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' 
+                : 'hover:bg-slate-800 hover:text-slate-200'
+              }`}
+            >
+              <item.icon className="w-6 h-6" />
+              <span className="hidden md:block font-medium">{item.label}</span>
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      {/* Main Content */}
+      <main className="ml-20 md:ml-64 p-4 md:p-8">
+        <header className="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-800 capitalize">{activeTab.replace('-', ' ')} Management</h1>
+            <p className="text-slate-500">Manage your farm activities and ledger balances.</p>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm bg-slate-200 px-3 py-1 rounded-full font-medium text-slate-700">
+              {new Date().toDateString()}
+            </span>
+          </div>
+        </header>
+
+        {/* Dashboard Stats (Top Section) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatBox label="Livestock Exp" value={stats.livestockExp} color="bg-orange-500" icon={Beef} />
+          <StatBox label="Crop Exp" value={stats.cropExp} color="bg-emerald-500" icon={Sprout} />
+          <StatBox label="Water Income" value={stats.waterInc} color="bg-blue-500" icon={Droplets} />
+          <StatBox label="Net Balance" value={stats.waterInc - (stats.livestockExp + stats.cropExp + stats.opExp)} color="bg-purple-500" icon={TrendingUp} />
+        </div>
+
+        {activeTab !== 'reports' ? (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+            {/* Input Form Column */}
+            <div className="xl:col-span-1">
+              <Card>
+                <div className="flex items-center gap-2 mb-6 border-b pb-4">
+                  <Plus className="text-emerald-600 w-5 h-5" />
+                  <h2 className="text-lg font-bold text-slate-800">{editingId ? 'Edit Entry' : 'New Entry'}</h2>
+                </div>
+                
+                <form onSubmit={saveTransaction} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Date</label>
+                      <input type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 focus:ring-2 focus:ring-emerald-500 outline-none" required />
+                    </div>
+
+                    {activeTab === 'livestock' && (
+                      <div className="col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Animal Type</label>
+                        <select name="animalType" value={formData.animalType} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
+                          <option>Cow</option>
+                          <option>Goat</option>
+                          <option>Buffalo</option>
+                          <option>Sheep</option>
+                          <option>Others</option>
+                        </select>
+                      </div>
+                    )}
+
+                    {activeTab === 'crop' && (
+                      <div className="col-span-2">
+                        <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Crop Name</label>
+                        <input type="text" name="cropName" value={formData.cropName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="e.g. Wheat, Rice" />
+                      </div>
+                    )}
+
+                    {activeTab === 'water' ? (
+                      <>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Farmer Name</label>
+                          <input type="text" name="farmerName" value={formData.farmerName} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" required />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Start Time</label>
+                          <input type="time" name="startTime" value={formData.startTime} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">End Time</label>
+                          <input type="time" name="endTime" value={formData.endTime} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" />
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Rate / Hour (Rs)</label>
+                          <input type="number" name="rate" value={formData.rate} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="800" />
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Category</label>
+                          <select name="subCategory" value={formData.subCategory} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2">
+                            {activeTab === 'livestock' && (
+                              <>
+                                <option>Wanda</option>
+                                <option>Chokar</option>
+                                <option>Khal</option>
+                                <option>Tori</option>
+                                <option>Khas</option>
+                                <option>Others</option>
+                              </>
+                            )}
+                            {activeTab === 'crop' && (
+                              <>
+                                <option>Khad (Fertilizer)</option>
+                                <option>Spray</option>
+                                <option>Seed</option>
+                                <option>Irrigation</option>
+                                <option>Others</option>
+                              </>
+                            )}
+                            {activeTab === 'operational' && (
+                              <>
+                                <option>Salary</option>
+                                <option>Fuel</option>
+                                <option>Machinery Purchase</option>
+                                <option>Maintenance</option>
+                                <option>Others</option>
+                              </>
+                            )}
+                          </select>
+                        </div>
+                        <div className="col-span-2">
+                          <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Total Amount (Rs)</label>
+                          <input type="number" name="amount" value={formData.amount} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" required />
+                        </div>
+                      </>
+                    )}
+
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Managed By / Paid By</label>
+                      <input type="text" name="managedBy" value={formData.managedBy} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="e.g. Self, Name of Employee" />
+                    </div>
+
+                    <div className="col-span-2">
+                      <label className="block text-xs font-bold text-slate-500 mb-1 uppercase">Amount Paid Now (Rs)</label>
+                      <input type="number" name="paidAmount" value={formData.paidAmount} onChange={handleInputChange} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2" placeholder="Leave empty if fully paid" />
+                    </div>
+
+                    <div className="col-span-2 pt-2">
+                      <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition-colors flex items-center justify-center gap-2">
+                        <CheckCircle2 className="w-5 h-5" />
+                        {editingId ? 'Update Ledger' : 'Confirm & Save'}
+                      </button>
+                      {editingId && (
+                        <button type="button" onClick={() => setEditingId(null)} className="w-full mt-2 text-slate-500 text-sm py-2">Cancel Edit</button>
+                      )}
+                    </div>
+                  </div>
+                </form>
+              </Card>
+            </div>
+
+            {/* List Table Column */}
+            <div className="xl:col-span-2 space-y-6">
+              <Card className="p-0 overflow-hidden">
+                <div className="p-6 border-b bg-slate-50 flex items-center justify-between">
+                  <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                    <Receipt className="w-5 h-5 text-emerald-600" />
+                    Recent Transactions
+                  </h2>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="bg-slate-50 border-b text-slate-400 text-xs font-bold uppercase tracking-wider">
+                        <th className="px-6 py-4">Date / Detail</th>
+                        <th className="px-6 py-4">Financials</th>
+                        <th className="px-6 py-4">Managed By</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {transactions.filter(t => t.category === activeTab).map(t => {
+                        const balance = parseFloat(t.amount || 0) - parseFloat(t.paidAmount || 0);
+                        return (
+                          <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
+                            <td className="px-6 py-4">
+                              <p className="font-bold text-slate-800 text-sm">{t.date}</p>
+                              <p className="text-xs text-slate-500">
+                                {t.category === 'water' ? `Farmer: ${t.farmerName}` : `${t.subCategory} (${t.animalType || t.cropName || ''})`}
+                              </p>
+                              {t.startTime && <p className="text-[10px] text-slate-400">{t.startTime} - {t.endTime}</p>}
+                            </td>
+                            <td className="px-6 py-4">
+                              <p className={`font-bold text-sm ${t.type === 'Income' ? 'text-blue-600' : 'text-slate-800'}`}>
+                                Rs. {Number(t.amount).toLocaleString()}
+                              </p>
+                              <div className="flex items-center gap-1 mt-1">
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${balance > 0 ? 'bg-red-100 text-red-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                  {balance > 0 ? `Unpaid: ${balance}` : 'Full Paid'}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="flex items-center gap-2">
+                                <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center">
+                                  <User className="w-3 h-3 text-slate-500" />
+                                </div>
+                                <span className="text-xs text-slate-600 font-medium">{t.managedBy}</span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={() => editTransaction(t)} className="p-2 hover:bg-emerald-100 text-emerald-600 rounded-lg">
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button onClick={() => deleteTransaction(t.id)} className="p-2 hover:bg-red-100 text-red-600 rounded-lg">
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {transactions.filter(t => t.category === activeTab).length === 0 && (
+                        <tr>
+                          <td colSpan="4" className="px-6 py-12 text-center text-slate-400">
+                            No records found for this category.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {/* Reports View */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              <Card>
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                  <AlertCircle className="text-orange-500" />
+                  Account Payables (Dues to People)
+                </h2>
+                <div className="space-y-4">
+                  {transactions
+                    .filter(t => t.type === 'Expense' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0)
+                    .map(t => (
+                      <div key={t.id} className="flex justify-between items-center p-3 border-b border-slate-100">
+                        <div>
+                          <p className="font-bold text-sm text-slate-800">{t.managedBy}</p>
+                          <p className="text-xs text-slate-500">{t.subCategory} on {t.date}</p>
+                        </div>
+                        <p className="text-red-600 font-bold">Rs. {(parseFloat(t.amount) - parseFloat(t.paidAmount || 0)).toLocaleString()}</p>
+                      </div>
+                    ))}
+                    {transactions.filter(t => t.type === 'Expense' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0).length === 0 && (
+                      <p className="text-slate-400 text-center py-4">No outstanding payables.</p>
+                    )}
+                </div>
+              </Card>
+
+              <Card>
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                  <Wallet className="text-blue-500" />
+                  Account Receivables (From Farmers)
+                </h2>
+                <div className="space-y-4">
+                  {transactions
+                    .filter(t => t.type === 'Income' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0)
+                    .map(t => (
+                      <div key={t.id} className="flex justify-between items-center p-3 border-b border-slate-100">
+                        <div>
+                          <p className="font-bold text-sm text-slate-800">{t.farmerName}</p>
+                          <p className="text-xs text-slate-500">Water Bill - {t.date}</p>
+                        </div>
+                        <p className="text-blue-600 font-bold">Rs. {(parseFloat(t.amount) - parseFloat(t.paidAmount || 0)).toLocaleString()}</p>
+                      </div>
+                    ))}
+                    {transactions.filter(t => t.type === 'Income' && (parseFloat(t.amount) - parseFloat(t.paidAmount || 0)) > 0).length === 0 && (
+                      <p className="text-slate-400 text-center py-4">No outstanding receivables.</p>
+                    )}
+                </div>
+              </Card>
+            </div>
+
+            <Card className="overflow-hidden p-0">
+               <div className="p-6 bg-slate-900 text-white flex justify-between items-center">
+                  <h2 className="text-xl font-bold">Full Transaction Ledger</h2>
+                  <button onClick={() => window.print()} className="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg text-xs font-bold transition-all">Download PDF</button>
+               </div>
+               <div className="overflow-x-auto">
+                 <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-slate-100 border-b text-slate-500 text-[10px] font-bold uppercase">
+                        <th className="px-6 py-4">ID</th>
+                        <th className="px-6 py-4">Date</th>
+                        <th className="px-6 py-4">Category</th>
+                        <th className="px-6 py-4">Description</th>
+                        <th className="px-6 py-4">Debit (Exp)</th>
+                        <th className="px-6 py-4">Credit (Inc)</th>
+                        <th className="px-6 py-4">Balance Due</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {transactions.map((t, idx) => {
+                         const balance = (parseFloat(t.amount) - parseFloat(t.paidAmount || 0));
+                         return (
+                          <tr key={t.id} className="text-sm">
+                            <td className="px-6 py-4 text-slate-400 text-[10px]">{t.id}</td>
+                            <td className="px-6 py-4 font-medium">{t.date}</td>
+                            <td className="px-6 py-4">
+                              <span className="capitalize bg-slate-100 px-2 py-1 rounded text-[10px]">{t.category}</span>
+                            </td>
+                            <td className="px-6 py-4">
+                              {t.category === 'water' ? `Tubewell usage: ${t.farmerName}` : `${t.subCategory} for ${t.animalType || t.cropName}`}
+                            </td>
+                            <td className="px-6 py-4 font-bold text-red-500">{t.type === 'Expense' ? `Rs. ${Number(t.amount).toLocaleString()}` : '-'}</td>
+                            <td className="px-6 py-4 font-bold text-emerald-600">{t.type === 'Income' ? `Rs. ${Number(t.amount).toLocaleString()}` : '-'}</td>
+                            <td className="px-6 py-4 font-bold text-slate-700">{balance > 0 ? `Rs. ${balance.toLocaleString()}` : '-'}</td>
+                          </tr>
+                         )
+                      })}
+                    </tbody>
+                 </table>
+               </div>
+            </Card>
+          </div>
+        )}
+      </main>
+
+      {/* Mobile-only spacing */}
+      <div className="h-20 md:hidden"></div>
+    </div>
+  );
+};
+
+export default App;
