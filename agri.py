@@ -21,7 +21,6 @@ const App = () => {
   // --- State Management ---
   const [activeTab, setActiveTab] = useState('livestock');
   const [transactions, setTransactions] = useState([]);
-  const [ledger, setLedger] = useState([]);
   const [editingId, setEditingId] = useState(null);
 
   // --- Initial State Form Logic ---
@@ -80,11 +79,18 @@ const App = () => {
 
   const calculateWaterBill = () => {
     if (formData.startTime && formData.endTime && formData.rate) {
-      const start = new Date(`2000-01-01T${formData.startTime}`);
-      const end = new Date(`2000-01-01T${formData.endTime}`);
-      let diff = (end - start) / (1000 * 60 * 60); // hours
-      if (diff < 0) diff += 24; // handle overnight
-      return (diff * parseFloat(formData.rate)).toFixed(2);
+      // Split time string to avoid any literal parsing issues
+      const [startH, startM] = formData.startTime.split(':').map(Number);
+      const [endH, endM] = formData.endTime.split(':').map(Number);
+      
+      const startInMinutes = startH * 60 + startM;
+      const endInMinutes = endH * 60 + endM;
+      
+      let diffInMinutes = endInMinutes - startInMinutes;
+      if (diffInMinutes < 0) diffInMinutes += 24 * 60; // Handle overnight usage
+      
+      const hours = diffInMinutes / 60;
+      return (hours * parseFloat(formData.rate)).toFixed(2);
     }
     return 0;
   };
@@ -110,11 +116,11 @@ const App = () => {
       setTransactions([newEntry, ...transactions]);
     }
 
-    // Reset Form
+    // Reset Form based on current tab context
     setFormData({
       date: new Date().toISOString().split('T')[0],
       category: activeTab,
-      subCategory: activeTab === 'livestock' ? 'Wanda' : activeTab === 'crop' ? 'Khad' : 'Salary',
+      subCategory: activeTab === 'livestock' ? 'Wanda' : activeTab === 'crop' ? 'Khad' : activeTab === 'operational' ? 'Salary' : 'Other',
       description: '',
       amount: '',
       managedBy: 'Self',
@@ -180,7 +186,15 @@ const App = () => {
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => setActiveTab(item.id)}
+              onClick={() => {
+                setActiveTab(item.id);
+                setEditingId(null);
+                setFormData(prev => ({
+                    ...prev,
+                    category: item.id,
+                    type: item.id === 'water' ? 'Income' : 'Expense'
+                }));
+              }}
               className={`flex items-center gap-4 p-3 rounded-xl transition-all ${
                 activeTab === item.id 
                 ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' 
