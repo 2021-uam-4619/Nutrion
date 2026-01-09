@@ -359,7 +359,7 @@ def generate_pdf_report(data, title, columns, filename="report.pdf"):
 # ============================================
 # SIDEBAR NAVIGATION
 # ============================================
-st.sidebar.image("", width=100)
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1046/1046784.png", width=100)
 st.sidebar.title("🌾 Farm Management")
 
 menu = st.sidebar.radio(
