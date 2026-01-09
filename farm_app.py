@@ -249,18 +249,14 @@ class DatabaseManager:
             if session.query(LivestockExpense).count() == 0:
                 # Add sample employees
                 employees = [
-                    Employee(name="Ali Ahmed", phone="03001234567", role="Farm Manager", salary=50000, joining_date=datetime.now().date()),
-                    Employee(name="Bilal Khan", phone="03001234568", role="Worker", salary=25000, joining_date=datetime.now().date()),
-                    Employee(name="Chaudhry Usman", phone="03001234569", role="Driver", salary=30000, joining_date=datetime.now().date()),
+
                 ]
                 for emp in employees:
                     session.add(emp)
                 
                 # Add sample farmers
                 farmers = [
-                    Farmer(name="Farmer Akbar", phone="03001234570", address="Village A"),
-                    Farmer(name="Farmer Babar", phone="03001234571", address="Village B"),
-                    Farmer(name="Farmer Chohan", phone="03001234572", address="Village C"),
+                  
                 ]
                 for farmer in farmers:
                     session.add(farmer)
