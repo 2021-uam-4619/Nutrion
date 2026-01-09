@@ -2433,26 +2433,19 @@ elif selected_menu == "⚙️ Settings":
     with tab3:
         st.subheader("About Farm Management System")
         
-        st.write("""
-        ### 🌾 Farm Management System v1.0
-        
-        A comprehensive farm management solution with integrated accounting.
-        
-        **Features:**
-        - Livestock expense and income tracking
-        - Crop management with expense recording
-        - Water bill generation and payment tracking
-        - Operational expense management
-        - Double-entry accounting system
-        - Profit & loss reporting
-        - Farmer and employee management
-        
-        **Developed with:** Streamlit, SQLite, Plotly
-        
-        **Contact:** farm@management.com
-        
-        **Version:** 1.0.0
-        """)
+        st.write("### 🌾 Farm Management System v1.0")
+        st.write("A comprehensive farm management solution with integrated accounting.")
+        st.write("**Features:**")
+        st.write("- Livestock expense and income tracking")
+        st.write("- Crop management with expense recording")
+        st.write("- Water bill generation and payment tracking")
+        st.write("- Operational expense management")
+        st.write("- Double-entry accounting system")
+        st.write("- Profit & loss reporting")
+        st.write("- Farmer and employee management")
+        st.write("**Developed with:** Streamlit, SQLite, Plotly")
+        st.write("**Contact:** farm@management.com")
+        st.write("**Version:** 1.0.0")
         
         st.info("For support and feature requests, please contact the administrator.")
 
@@ -2468,6 +2461,13 @@ st.sidebar.markdown("*Version 1.0*")
 # ============================================
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🚀 How to Run")
-st.sidebar.markdown("""
-1. Save this file as `farm_app.py`
-2. Install requirements:
+st.sidebar.markdown("1. Save this file as `farm_app.py`")
+st.sidebar.markdown("2. Install requirements:")
+st.sidebar.markdown("```bash\npip install streamlit pandas plotly sqlalchemy openpyxl\n```")
+st.sidebar.markdown("3. Run the app:")
+st.sidebar.markdown("```bash\nstreamlit run farm_app.py\n```")
+
+# Initialize database on first run
+if not st.session_state.db_initialized:
+    db.init_sample_data()
+    st.session_state.db_initialized = True
