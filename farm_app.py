@@ -293,6 +293,10 @@ def init_session_state():
         st.session_state.next_income_id = 1
     if 'next_payment_id' not in st.session_state:
         st.session_state.next_payment_id = 1
+    
+    # Report state
+    if 'generate_report' not in st.session_state:
+        st.session_state.generate_report = False
 
 # Load CSS and initialize
 load_css()
@@ -313,53 +317,90 @@ def get_next_id(id_type):
     st.session_state[id_var] += 1
     return current_id
 
+def convert_dates(df, date_columns=['date']):
+    """Convert date columns to datetime format"""
+    df = df.copy()
+    for col in date_columns:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+    return df
+
 def save_data():
     """Save all data to JSON files"""
-    data_to_save = {
-        'livestock': st.session_state.livestock_data.to_dict('records'),
-        'crop': st.session_state.crop_data.to_dict('records'),
-        'water_supply': st.session_state.water_supply_data.to_dict('records'),
-        'expenses': st.session_state.expenses_data.to_dict('records'),
-        'income': st.session_state.income_data.to_dict('records'),
-        'payments': st.session_state.payments_data.to_dict('records'),
-        'managers': st.session_state.managers,
-        'farmers': st.session_state.farmers
-    }
-    
-    with open('farm_data.json', 'w') as f:
-        json.dump(data_to_save, f, indent=4, default=str)
-    
-    return True
+    try:
+        data_to_save = {
+            'livestock': st.session_state.livestock_data.to_dict('records'),
+            'crop': st.session_state.crop_data.to_dict('records'),
+            'water_supply': st.session_state.water_supply_data.to_dict('records'),
+            'expenses': st.session_state.expenses_data.to_dict('records'),
+            'income': st.session_state.income_data.to_dict('records'),
+            'payments': st.session_state.payments_data.to_dict('records'),
+            'managers': st.session_state.managers,
+            'farmers': st.session_state.farmers
+        }
+        
+        # Convert dates to strings for JSON serialization
+        for key in ['livestock', 'crop', 'water_supply', 'expenses', 'income', 'payments']:
+            if key in data_to_save:
+                for record in data_to_save[key]:
+                    if 'date' in record and pd.notna(record['date']):
+                        if isinstance(record['date'], (pd.Timestamp, datetime)):
+                            record['date'] = record['date'].strftime('%Y-%m-%d')
+        
+        with open('farm_data.json', 'w') as f:
+            json.dump(data_to_save, f, indent=4, default=str)
+        
+        return True
+    except Exception as e:
+        st.error(f"Error saving data: {str(e)}")
+        return False
 
 def load_data():
     """Load data from JSON files"""
     try:
+        if not os.path.exists('farm_data.json'):
+            return False
+            
         with open('farm_data.json', 'r') as f:
             data = json.load(f)
         
+        # Load DataFrames
         st.session_state.livestock_data = pd.DataFrame(data.get('livestock', []))
         st.session_state.crop_data = pd.DataFrame(data.get('crop', []))
         st.session_state.water_supply_data = pd.DataFrame(data.get('water_supply', []))
         st.session_state.expenses_data = pd.DataFrame(data.get('expenses', []))
         st.session_state.income_data = pd.DataFrame(data.get('income', []))
         st.session_state.payments_data = pd.DataFrame(data.get('payments', []))
-        st.session_state.managers = data.get('managers', [])
-        st.session_state.farmers = data.get('farmers', [])
+        
+        # Convert date strings to datetime
+        st.session_state.livestock_data = convert_dates(st.session_state.livestock_data)
+        st.session_state.crop_data = convert_dates(st.session_state.crop_data)
+        st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
+        st.session_state.expenses_data = convert_dates(st.session_state.expenses_data)
+        st.session_state.income_data = convert_dates(st.session_state.income_data)
+        st.session_state.payments_data = convert_dates(st.session_state.payments_data)
+        
+        # Load managers and farmers
+        st.session_state.managers = data.get('managers', st.session_state.managers)
+        st.session_state.farmers = data.get('farmers', st.session_state.farmers)
         
         # Update next IDs
-        if not st.session_state.livestock_data.empty:
-            st.session_state.next_livestock_id = st.session_state.livestock_data['id'].max() + 1
-        if not st.session_state.crop_data.empty:
-            st.session_state.next_crop_id = st.session_state.crop_data['id'].max() + 1
-        if not st.session_state.water_supply_data.empty:
-            st.session_state.next_water_id = st.session_state.water_supply_data['id'].max() + 1
-        if not st.session_state.expenses_data.empty:
-            st.session_state.next_expense_id = st.session_state.expenses_data['id'].max() + 1
-        if not st.session_state.income_data.empty:
-            st.session_state.next_income_id = st.session_state.income_data['id'].max() + 1
+        if not st.session_state.livestock_data.empty and 'id' in st.session_state.livestock_data.columns:
+            st.session_state.next_livestock_id = int(st.session_state.livestock_data['id'].max()) + 1
+        if not st.session_state.crop_data.empty and 'id' in st.session_state.crop_data.columns:
+            st.session_state.next_crop_id = int(st.session_state.crop_data['id'].max()) + 1
+        if not st.session_state.water_supply_data.empty and 'id' in st.session_state.water_supply_data.columns:
+            st.session_state.next_water_id = int(st.session_state.water_supply_data['id'].max()) + 1
+        if not st.session_state.expenses_data.empty and 'id' in st.session_state.expenses_data.columns:
+            st.session_state.next_expense_id = int(st.session_state.expenses_data['id'].max()) + 1
+        if not st.session_state.income_data.empty and 'id' in st.session_state.income_data.columns:
+            st.session_state.next_income_id = int(st.session_state.income_data['id'].max()) + 1
+        if not st.session_state.payments_data.empty and 'id' in st.session_state.payments_data.columns:
+            st.session_state.next_payment_id = int(st.session_state.payments_data['id'].max()) + 1
         
         return True
-    except FileNotFoundError:
+    except Exception as e:
+        st.error(f"Error loading data: {str(e)}")
         return False
 
 def format_currency(value):
@@ -459,6 +500,8 @@ with tabs[0]:
                     st.session_state.livestock_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
+                # Convert date to datetime
+                st.session_state.livestock_data = convert_dates(st.session_state.livestock_data)
                 save_data()
                 st.success("Livestock expense added successfully!")
             else:
@@ -480,45 +523,85 @@ with tabs[0]:
         )
     
     with col2:
-        ledger_date_from = st.date_input("From Date", key="ledger_date_from")
+        ledger_date_from = st.date_input("From Date", key="ledger_date_from", value=None)
     
     with col3:
-        ledger_date_to = st.date_input("To Date", key="ledger_date_to")
+        ledger_date_to = st.date_input("To Date", key="ledger_date_to", value=None)
     
     with col4:
         if st.button("🔍 Filter Ledger", use_container_width=True):
             pass
     
-    # Display ledger
-    filtered_data = st.session_state.livestock_data.copy()
-    if ledger_category_filter != "All Categories":
-        filtered_data = filtered_data[filtered_data['category'] == ledger_category_filter]
-    if ledger_date_from:
-        filtered_data = filtered_data[filtered_data['date'] >= pd.Timestamp(ledger_date_from)]
-    if ledger_date_to:
-        filtered_data = filtered_data[filtered_data['date'] <= pd.Timestamp(ledger_date_to)]
-    
-    st.dataframe(
-        filtered_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    # Display ledger - FIXED DATE COMPARISON
+    if not st.session_state.livestock_data.empty:
+        filtered_data = st.session_state.livestock_data.copy()
+        
+        # Ensure date column is datetime
+        filtered_data = convert_dates(filtered_data)
+        
+        if ledger_category_filter != "All Categories":
+            # Remove the language part for comparison
+            category_english = ledger_category_filter.split(" (")[0]
+            filtered_data = filtered_data[filtered_data['category'].str.contains(category_english, na=False)]
+        
+        if ledger_date_from:
+            # Convert to datetime for comparison
+            filtered_data = filtered_data[filtered_data['date'] >= pd.Timestamp(ledger_date_from)]
+        
+        if ledger_date_to:
+            filtered_data = filtered_data[filtered_data['date'] <= pd.Timestamp(ledger_date_to)]
+        
+        if not filtered_data.empty:
+            # Format date for display
+            display_df = filtered_data.copy()
+            display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+            
+            st.dataframe(
+                display_df,
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("No records found for the selected filters.")
+    else:
+        st.info("No livestock records available.")
     
     # Statistics
     st.markdown("<div class='section-card'><h3>📊 Livestock Statistics</h3></div>", unsafe_allow_html=True)
     
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        total_expenses = filtered_data[filtered_data['transaction_type'] == 'expense']['amount'].sum()
-        st.metric("Total Expenses", format_currency(total_expenses))
-    
-    with col2:
-        total_income = filtered_data[filtered_data['transaction_type'] == 'income']['amount'].sum()
-        st.metric("Total Income", format_currency(total_income))
-    
-    with col3:
-        net_balance = total_income - total_expenses
-        st.metric("Net Balance", format_currency(net_balance), delta_color="inverse")
+    if not st.session_state.livestock_data.empty:
+        # Convert dates for calculation
+        calc_data = convert_dates(st.session_state.livestock_data)
+        
+        # Apply filters for statistics
+        if ledger_date_from:
+            calc_data = calc_data[calc_data['date'] >= pd.Timestamp(ledger_date_from)]
+        if ledger_date_to:
+            calc_data = calc_data[calc_data['date'] <= pd.Timestamp(ledger_date_to)]
+        if ledger_category_filter != "All Categories":
+            category_english = ledger_category_filter.split(" (")[0]
+            calc_data = calc_data[calc_data['category'].str.contains(category_english, na=False)]
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            total_expenses = calc_data[calc_data['transaction_type'] == 'expense']['amount'].sum()
+            st.metric("Total Expenses", format_currency(total_expenses))
+        
+        with col2:
+            total_income = calc_data[calc_data['transaction_type'] == 'income']['amount'].sum()
+            st.metric("Total Income", format_currency(total_income))
+        
+        with col3:
+            net_balance = total_income - total_expenses
+            st.metric("Net Balance", format_currency(net_balance), delta_color="inverse")
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Expenses", format_currency(0))
+        with col2:
+            st.metric("Total Income", format_currency(0))
+        with col3:
+            st.metric("Net Balance", format_currency(0))
 
 # Tab 2: Crop Management
 with tabs[1]:
@@ -580,6 +663,8 @@ with tabs[1]:
                     st.session_state.crop_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
+                # Convert date to datetime
+                st.session_state.crop_data = convert_dates(st.session_state.crop_data)
                 save_data()
                 st.success("Crop expense added successfully!")
             else:
@@ -587,11 +672,20 @@ with tabs[1]:
     
     # Crop Data Table
     st.markdown("<div class='section-card'><h3>📋 Crop Records (رکارڈز)</h3></div>", unsafe_allow_html=True)
-    st.dataframe(
-        st.session_state.crop_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    
+    if not st.session_state.crop_data.empty:
+        # Format date for display
+        display_df = st.session_state.crop_data.copy()
+        display_df = convert_dates(display_df)
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+        
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No crop records available.")
 
 # Tab 3: Water Supply
 with tabs[2]:
@@ -632,17 +726,21 @@ with tabs[2]:
             st.rerun()
     
     with col4:
-        manual_hours = st.number_input("Manual Hours", min_value=0.0, key="manual_hours")
+        manual_hours = st.number_input("Manual Hours", min_value=0.0, key="manual_hours", value=0.0)
     
     # Timer calculation
     total_hours = st.session_state.timer_seconds / 3600
+    if manual_hours > 0:
+        total_hours = manual_hours
     total_bill = total_hours * water_rate
     
     col5, col6, col7, col8 = st.columns(4)
     with col5:
-        st.text_input("Start Time", value="", disabled=True)
+        start_time_display = st.session_state.timer_start.strftime("%H:%M:%S") if st.session_state.timer_start else ""
+        st.text_input("Start Time", value=start_time_display, disabled=True)
     with col6:
-        st.text_input("End Time", value="", disabled=True)
+        end_time_display = datetime.now().strftime("%H:%M:%S") if st.session_state.timer_running else ""
+        st.text_input("End Time", value=end_time_display, disabled=True)
     with col7:
         st.number_input("Total Hours", value=round(total_hours, 2), disabled=True)
     with col8:
@@ -668,17 +766,24 @@ with tabs[2]:
                     st.session_state.water_supply_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
+                # Convert date to datetime
+                st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
                 save_data()
                 st.success("Water supply record saved successfully!")
     
     # Farmer Ledger
     st.markdown("<div class='section-card'><h3>📖 Farmer Ledger Management (کسان کھاتا)</h3></div>", unsafe_allow_html=True)
     
+    if not st.session_state.water_supply_data.empty:
+        farmer_names = list(st.session_state.water_supply_data['farmer_name'].unique())
+    else:
+        farmer_names = []
+    
     col1, col2 = st.columns(2)
     with col1:
         select_farmer = st.selectbox(
             "Select Farmer (کسان منتخب کریں)",
-            [""] + list(st.session_state.water_supply_data['farmer_name'].unique()),
+            [""] + farmer_names,
             key="select_farmer"
         )
     
@@ -687,7 +792,7 @@ with tabs[2]:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        payment_amount = st.number_input("Payment Amount (ادائیگی کی رقم)", min_value=0.0, key="payment_amount")
+        payment_amount = st.number_input("Payment Amount (ادائیگی کی رقم)", min_value=0.0, key="payment_amount", value=0.0)
     
     with col2:
         payment_date = st.date_input("Payment Date (ادائیگی کی تاریخ)", value=date.today(), key="payment_date")
@@ -716,10 +821,16 @@ with tabs[2]:
                 ], ignore_index=True)
                 
                 # Update water supply balance
-                mask = st.session_state.water_supply_data['farmer_name'] == select_farmer
-                st.session_state.water_supply_data.loc[mask, 'paid'] += payment_amount
-                st.session_state.water_supply_data.loc[mask, 'balance'] -= payment_amount
+                if not st.session_state.water_supply_data.empty:
+                    mask = st.session_state.water_supply_data['farmer_name'] == select_farmer
+                    if mask.any():
+                        st.session_state.water_supply_data.loc[mask, 'paid'] += payment_amount
+                        st.session_state.water_supply_data.loc[mask, 'balance'] -= payment_amount
+                        # Convert date to datetime
+                        st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
                 
+                # Convert payment data date to datetime
+                st.session_state.payments_data = convert_dates(st.session_state.payments_data)
                 save_data()
                 st.success("Payment recorded successfully!")
 
@@ -783,6 +894,8 @@ with tabs[3]:
                     st.session_state.expenses_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
+                # Convert date to datetime
+                st.session_state.expenses_data = convert_dates(st.session_state.expenses_data)
                 save_data()
                 st.success("Expense added successfully!")
             else:
@@ -793,33 +906,53 @@ with tabs[3]:
     
     col1, col2, col3 = st.columns(3)
     
-    today = date.today()
-    month_start = date(today.year, today.month, 1)
-    
-    with col1:
-        today_expenses = st.session_state.expenses_data[
-            st.session_state.expenses_data['date'] == pd.Timestamp(today)
-        ]['amount'].sum()
-        st.metric("Today's Expenses", format_currency(today_expenses))
-    
-    with col2:
-        month_expenses = st.session_state.expenses_data[
-            (st.session_state.expenses_data['date'] >= pd.Timestamp(month_start)) &
-            (st.session_state.expenses_data['date'] <= pd.Timestamp(today))
-        ]['amount'].sum()
-        st.metric("This Month", format_currency(month_expenses))
-    
-    with col3:
-        total_expenses = st.session_state.expenses_data['amount'].sum()
-        st.metric("Total Expenses", format_currency(total_expenses))
+    if not st.session_state.expenses_data.empty:
+        # Convert dates for calculation
+        expenses_data = convert_dates(st.session_state.expenses_data)
+        
+        today = date.today()
+        month_start = date(today.year, today.month, 1)
+        
+        with col1:
+            today_expenses = expenses_data[
+                expenses_data['date'].dt.date == today
+            ]['amount'].sum()
+            st.metric("Today's Expenses", format_currency(today_expenses))
+        
+        with col2:
+            month_expenses = expenses_data[
+                (expenses_data['date'].dt.date >= month_start) &
+                (expenses_data['date'].dt.date <= today)
+            ]['amount'].sum()
+            st.metric("This Month", format_currency(month_expenses))
+        
+        with col3:
+            total_expenses = expenses_data['amount'].sum()
+            st.metric("Total Expenses", format_currency(total_expenses))
+    else:
+        with col1:
+            st.metric("Today's Expenses", format_currency(0))
+        with col2:
+            st.metric("This Month", format_currency(0))
+        with col3:
+            st.metric("Total Expenses", format_currency(0))
     
     # All Expenses Table
     st.markdown("<div class='section-card'><h3>📋 All Expenses (تمام اخراجات)</h3></div>", unsafe_allow_html=True)
-    st.dataframe(
-        st.session_state.expenses_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    
+    if not st.session_state.expenses_data.empty:
+        # Format date for display
+        display_df = st.session_state.expenses_data.copy()
+        display_df = convert_dates(display_df)
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+        
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No expense records available.")
 
 # Tab 5: Income
 with tabs[4]:
@@ -880,6 +1013,8 @@ with tabs[4]:
                     st.session_state.income_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
+                # Convert date to datetime
+                st.session_state.income_data = convert_dates(st.session_state.income_data)
                 save_data()
                 st.success("Income recorded successfully!")
             else:
@@ -890,38 +1025,64 @@ with tabs[4]:
     
     col1, col2, col3, col4 = st.columns(4)
     
-    with col1:
-        livestock_income = st.session_state.income_data[
-            st.session_state.income_data['source'].str.contains('Livestock|Goats|Beef|Cows', na=False)
+    # Calculate livestock income
+    livestock_income = 0
+    crop_income = 0
+    water_income = 0
+    total_income = 0
+    
+    if not st.session_state.income_data.empty:
+        income_data = convert_dates(st.session_state.income_data)
+        
+        # Livestock income (including Goats, Beef, Cows)
+        livestock_keywords = ['Livestock', 'Goats', 'Beef', 'Cows']
+        for keyword in livestock_keywords:
+            mask = income_data['source'].astype(str).str.contains(keyword, na=False, case=False)
+            livestock_income += income_data[mask]['amount'].sum()
+    
+    if not st.session_state.crop_data.empty:
+        crop_data = convert_dates(st.session_state.crop_data)
+        crop_income = crop_data[crop_data['transaction_type'] == 'income']['amount'].sum()
+    
+    if not st.session_state.water_supply_data.empty:
+        water_income = st.session_state.water_supply_data['paid'].sum()
+    
+    if not st.session_state.income_data.empty:
+        other_income = income_data[
+            ~income_data['source'].astype(str).str.contains('|'.join(['Livestock', 'Goats', 'Beef', 'Cows', 'Crop']), na=False, case=False)
         ]['amount'].sum()
+        total_income = livestock_income + crop_income + water_income + other_income
+    else:
+        total_income = livestock_income + crop_income + water_income
+    
+    with col1:
         st.metric("Livestock Income", format_currency(livestock_income))
     
     with col2:
-        crop_income = st.session_state.income_data[
-            st.session_state.income_data['source'] == 'Crop Sale'
-        ]['amount'].sum()
         st.metric("Crop Income", format_currency(crop_income))
     
     with col3:
-        water_income = st.session_state.water_supply_data['paid'].sum()
         st.metric("Water Supply Income", format_currency(water_income))
     
     with col4:
-        total_income = (
-            livestock_income + crop_income + water_income +
-            st.session_state.income_data[
-                ~st.session_state.income_data['source'].str.contains('Livestock|Goats|Beef|Cows|Crop', na=False)
-            ]['amount'].sum()
-        )
         st.metric("Total Income", format_currency(total_income))
     
     # Income Records
     st.markdown("<div class='section-card'><h3>📋 Income Records (آمدنی کے رکارڈز)</h3></div>", unsafe_allow_html=True)
-    st.dataframe(
-        st.session_state.income_data,
-        use_container_width=True,
-        hide_index=True
-    )
+    
+    if not st.session_state.income_data.empty:
+        # Format date for display
+        display_df = st.session_state.income_data.copy()
+        display_df = convert_dates(display_df)
+        display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
+        
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
+    else:
+        st.info("No income records available.")
 
 # Tab 6: Reports
 with tabs[5]:
@@ -931,9 +1092,7 @@ with tabs[5]:
     with col1:
         report_type = st.selectbox(
             "Report Type (رپورٹ کی قسم)",
-            ["Summary Report (خلاصہ رپورٹ)", "Expense Report (اخراجات رپورٹ)", 
-             "Income Report (آمدنی رپورٹ)", "Ledger Report (کھاتا رپورٹ)",
-             "Manager Report (منتظم رپورٹ)", "Balance Sheet (بیلنس شیٹ)",
+            ["Summary Report", "Expense Report", "Income Report", 
              "Livestock Report", "Crops Report", "Water Report"],
             key="report_type"
         )
@@ -946,30 +1105,94 @@ with tabs[5]:
         )
     
     with col3:
-        report_date_from = st.date_input("From Date (تاریخ سے)", key="report_date_from")
+        report_date_from = st.date_input("From Date (تاریخ سے)", key="report_date_from", value=None)
     
     with col4:
-        report_date_to = st.date_input("To Date (تاریخ تک)", key="report_date_to")
+        report_date_to = st.date_input("To Date (تاریخ تک)", key="report_date_to", value=None)
     
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3 = st.columns(3)
     with col1:
         if st.button("📈 Generate Report", type="primary", use_container_width=True):
             st.session_state.generate_report = True
     
     # Report Preview
-    if 'generate_report' in st.session_state and st.session_state.generate_report:
+    if st.session_state.generate_report:
         st.markdown("<div class='section-card'><h3>📄 Report Preview (رپورٹ پیش نظارہ)</h3></div>", unsafe_allow_html=True)
         
-        # Calculate summary statistics
-        total_income = (
-            st.session_state.income_data['amount'].sum() +
-            st.session_state.water_supply_data['paid'].sum()
-        )
+        # Calculate summary statistics with date filtering
+        income_data_filtered = st.session_state.income_data.copy()
+        water_data_filtered = st.session_state.water_supply_data.copy()
+        expenses_data_filtered = st.session_state.expenses_data.copy()
+        livestock_data_filtered = st.session_state.livestock_data.copy()
+        crop_data_filtered = st.session_state.crop_data.copy()
         
+        # Apply date filters if provided
+        if report_date_from:
+            income_data_filtered = convert_dates(income_data_filtered)
+            income_data_filtered = income_data_filtered[income_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            water_data_filtered = convert_dates(water_data_filtered)
+            water_data_filtered = water_data_filtered[water_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            expenses_data_filtered = convert_dates(expenses_data_filtered)
+            expenses_data_filtered = expenses_data_filtered[expenses_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            livestock_data_filtered = convert_dates(livestock_data_filtered)
+            livestock_data_filtered = livestock_data_filtered[livestock_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            crop_data_filtered = convert_dates(crop_data_filtered)
+            crop_data_filtered = crop_data_filtered[crop_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+        
+        if report_date_to:
+            income_data_filtered = convert_dates(income_data_filtered)
+            income_data_filtered = income_data_filtered[income_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            water_data_filtered = convert_dates(water_data_filtered)
+            water_data_filtered = water_data_filtered[water_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            expenses_data_filtered = convert_dates(expenses_data_filtered)
+            expenses_data_filtered = expenses_data_filtered[expenses_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            livestock_data_filtered = convert_dates(livestock_data_filtered)
+            livestock_data_filtered = livestock_data_filtered[livestock_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            crop_data_filtered = convert_dates(crop_data_filtered)
+            crop_data_filtered = crop_data_filtered[crop_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+        
+        # Apply category filter
+        if report_category != "All (سب)":
+            category_map = {
+                "Livestock (مویشی)": "Livestock",
+                "Crop (فصل)": "Crop",
+                "Water (پانی)": "Water"
+            }
+            selected_category = category_map.get(report_category, "")
+            
+            if selected_category == "Livestock":
+                # Filter livestock-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Livestock|Goats|Beef|Cows', na=False, case=False)
+                ]
+            elif selected_category == "Crop":
+                # Filter crop-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+                expenses_data_filtered = expenses_data_filtered[
+                    expenses_data_filtered['category'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+            elif selected_category == "Water":
+                # Filter water-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Water', na=False, case=False)
+                ]
+        
+        # Calculate totals
+        total_income = income_data_filtered['amount'].sum() + water_data_filtered['paid'].sum()
         total_expenses = (
-            st.session_state.expenses_data['amount'].sum() +
-            st.session_state.livestock_data[st.session_state.livestock_data['transaction_type'] == 'expense']['amount'].sum() +
-            st.session_state.crop_data[st.session_state.crop_data['transaction_type'] == 'expense']['amount'].sum()
+            expenses_data_filtered['amount'].sum() +
+            livestock_data_filtered[livestock_data_filtered['transaction_type'] == 'expense']['amount'].sum() +
+            crop_data_filtered[crop_data_filtered['transaction_type'] == 'expense']['amount'].sum()
         )
         
         net_profit = total_income - total_expenses
@@ -987,81 +1210,102 @@ with tabs[5]:
         with col4:
             st.metric("Profit Margin", f"{profit_margin:.2f}%")
         
-        # Charts
-        col1, col2 = st.columns(2)
-        
-        with col1:
+        # Report-specific content
+        if report_type == "Summary Report":
+            st.markdown("### Detailed Breakdown")
+            
             # Income by source
-            income_by_source = st.session_state.income_data.groupby('source')['amount'].sum().reset_index()
-            if not income_by_source.empty:
-                fig1 = px.pie(
-                    income_by_source,
-                    values='amount',
-                    names='source',
-                    title='Income by Source'
-                )
-                st.plotly_chart(fig1, use_container_width=True)
-        
-        with col2:
+            if not income_data_filtered.empty:
+                st.subheader("Income by Source")
+                income_by_source = income_data_filtered.groupby('source')['amount'].sum().reset_index()
+                if not income_by_source.empty:
+                    fig1 = px.pie(
+                        income_by_source,
+                        values='amount',
+                        names='source',
+                        title='Income by Source'
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
+            
             # Expenses by category
-            expenses_by_category = st.session_state.expenses_data.groupby('category')['amount'].sum().reset_index()
-            if not expenses_by_category.empty:
-                fig2 = px.bar(
-                    expenses_by_category,
-                    x='category',
-                    y='amount',
-                    title='Expenses by Category',
-                    color='amount'
-                )
-                st.plotly_chart(fig2, use_container_width=True)
+            if not expenses_data_filtered.empty:
+                st.subheader("Expenses by Category")
+                expenses_by_category = expenses_data_filtered.groupby('category')['amount'].sum().reset_index()
+                if not expenses_by_category.empty:
+                    fig2 = px.bar(
+                        expenses_by_category,
+                        x='category',
+                        y='amount',
+                        title='Expenses by Category',
+                        color='amount'
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+        
+        elif report_type == "Livestock Report":
+            st.markdown("### Livestock Report")
+            if not livestock_data_filtered.empty:
+                st.dataframe(livestock_data_filtered, use_container_width=True)
+            else:
+                st.info("No livestock data available for the selected filters.")
+        
+        elif report_type == "Crops Report":
+            st.markdown("### Crops Report")
+            if not crop_data_filtered.empty:
+                st.dataframe(crop_data_filtered, use_container_width=True)
+            else:
+                st.info("No crop data available for the selected filters.")
+        
+        elif report_type == "Water Report":
+            st.markdown("### Water Supply Report")
+            if not water_data_filtered.empty:
+                st.dataframe(water_data_filtered, use_container_width=True)
+            else:
+                st.info("No water supply data available for the selected filters.")
         
         # Export options
         st.markdown("### Export Options")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
         with col1:
             # Export to CSV
-            csv_data = pd.concat([
-                st.session_state.livestock_data,
-                st.session_state.crop_data,
-                st.session_state.water_supply_data,
-                st.session_state.expenses_data,
-                st.session_state.income_data
-            ], ignore_index=True)
+            @st.cache_data
+            def convert_df_to_csv(df):
+                return df.to_csv(index=False).encode('utf-8')
             
-            csv = csv_data.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="📥 Download CSV",
-                data=csv,
-                file_name=f"farm_report_{date.today()}.csv",
-                mime="text/csv"
-            )
+            # Combine relevant data based on report type
+            if report_type == "Summary Report":
+                export_df = pd.concat([
+                    income_data_filtered,
+                    expenses_data_filtered,
+                    livestock_data_filtered,
+                    crop_data_filtered,
+                    water_data_filtered
+                ], ignore_index=True)
+            elif report_type == "Livestock Report":
+                export_df = livestock_data_filtered
+            elif report_type == "Crops Report":
+                export_df = crop_data_filtered
+            elif report_type == "Water Report":
+                export_df = water_data_filtered
+            else:
+                export_df = income_data_filtered
+            
+            if not export_df.empty:
+                csv = convert_df_to_csv(export_df)
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name=f"{report_type.replace(' ', '_')}_{date.today()}.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No data to export")
         
         with col2:
-            # Export to Excel
-            @st.cache_data
-            def convert_df_to_excel(df_dict):
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    for sheet_name, df in df_dict.items():
-                        df.to_excel(writer, sheet_name=sheet_name, index=False)
-                return output.getvalue()
-            
-            excel_data = {
-                "Livestock": st.session_state.livestock_data,
-                "Crop": st.session_state.crop_data,
-                "Water": st.session_state.water_supply_data,
-                "Expenses": st.session_state.expenses_data,
-                "Income": st.session_state.income_data
-            }
-            
-            excel_bytes = convert_df_to_excel(excel_data)
-            st.download_button(
-                label="📊 Download Excel",
-                data=excel_bytes,
-                file_name=f"farm_report_{date.today()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+            # Clear report button
+            if st.button("Clear Report", use_container_width=True):
+                st.session_state.generate_report = False
+                st.rerun()
 
 # Sidebar for data management
 with st.sidebar:
@@ -1078,7 +1322,7 @@ with st.sidebar:
             if load_data():
                 st.success("Data loaded successfully!")
             else:
-                st.warning("No saved data found")
+                st.info("No saved data found. Starting with empty dataset.")
     
     st.divider()
     
@@ -1086,11 +1330,11 @@ with st.sidebar:
     
     # Add new manager
     with st.expander("Add New Manager"):
-        new_manager_name = st.text_input("Manager Name")
-        new_manager_phone = st.text_input("Phone")
-        new_manager_designation = st.text_input("Designation")
+        new_manager_name = st.text_input("Manager Name", key="new_manager_name")
+        new_manager_phone = st.text_input("Phone", key="new_manager_phone")
+        new_manager_designation = st.text_input("Designation", key="new_manager_designation")
         
-        if st.button("Add Manager"):
+        if st.button("Add Manager", key="add_manager"):
             if new_manager_name:
                 new_manager = {
                     "id": len(st.session_state.managers) + 1,
@@ -1105,11 +1349,11 @@ with st.sidebar:
     
     # Add new farmer
     with st.expander("Add New Farmer"):
-        new_farmer_name = st.text_input("Farmer Name")
-        new_farmer_phone = st.text_input("Farmer Phone")
-        new_farmer_address = st.text_input("Address")
+        new_farmer_name = st.text_input("Farmer Name", key="new_farmer_name")
+        new_farmer_phone = st.text_input("Farmer Phone", key="new_farmer_phone")
+        new_farmer_address = st.text_input("Address", key="new_farmer_address")
         
-        if st.button("Add Farmer"):
+        if st.button("Add Farmer", key="add_farmer"):
             if new_farmer_name:
                 new_farmer = {
                     "id": len(st.session_state.farmers) + 1,
@@ -1126,24 +1370,33 @@ with st.sidebar:
     
     # System Statistics
     st.markdown("## 📈 System Statistics")
-    st.metric("Total Records", len(st.session_state.livestock_data) + 
-              len(st.session_state.crop_data) + 
-              len(st.session_state.water_supply_data) +
-              len(st.session_state.expenses_data) +
-              len(st.session_state.income_data))
+    
+    total_records = (
+        len(st.session_state.livestock_data) + 
+        len(st.session_state.crop_data) + 
+        len(st.session_state.water_supply_data) +
+        len(st.session_state.expenses_data) +
+        len(st.session_state.income_data)
+    )
+    
+    st.metric("Total Records", total_records)
     
     # Quick Actions
     st.markdown("## ⚡ Quick Actions")
+    
     if st.button("Clear All Data", type="secondary"):
         st.warning("This will clear all data. Are you sure?")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Yes, Clear All"):
+            if st.button("Yes, Clear All", key="confirm_clear"):
+                # Reinitialize session state
+                for key in list(st.session_state.keys()):
+                    del st.session_state[key]
                 init_session_state()
                 st.success("All data cleared!")
                 st.rerun()
         with col2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_clear"):
                 st.rerun()
 
 # Auto-save every 30 seconds
