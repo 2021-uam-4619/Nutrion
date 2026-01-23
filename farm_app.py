@@ -2299,163 +2299,96 @@ with tabs[5]:
                 st.button("📊 Download Excel", disabled=True, use_container_width=True)
         
         with col3:
-            # PDF Export with enhanced functionality
-            if not export_df.empty:
-                # Create PDF generation function
-                def generate_professional_pdf():
-                    from reportlab.lib import colors
-                    from reportlab.lib.pagesizes import letter, A4
-                    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
-                    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                    from reportlab.lib.units import inch
-                    from reportlab.lib.enums import TA_CENTER, TA_LEFT
-                    from io import BytesIO
-                    
-                    buffer = BytesIO()
-                    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=30, bottomMargin=30)
-                    elements = []
-                    
-                    # Styles
-                    styles = getSampleStyleSheet()
-                    title_style = ParagraphStyle(
-                        'CustomTitle',
-                        parent=styles['Heading1'],
-                        fontSize=24,
-                        textColor=colors.HexColor('#2c3e50'),
-                        spaceAfter=30,
-                        alignment=TA_CENTER
-                    )
-                    
-                    heading_style = ParagraphStyle(
-                        'CustomHeading',
-                        parent=styles['Heading2'],
-                        fontSize=14,
-                        textColor=colors.HexColor('#34495e'),
-                        spaceAfter=12
-                    )
-                    
-                    normal_style = ParagraphStyle(
-                        'CustomNormal',
-                        parent=styles['Normal'],
-                        fontSize=10,
-                        textColor=colors.HexColor('#2c3e50'),
-                        spaceAfter=6
-                    )
-                    
-                    # Title
-                    elements.append(Paragraph(f"{report_type}", title_style))
-                    elements.append(Paragraph(f"Generated on: {date.today().strftime('%B %d, %Y')}", normal_style))
-                    elements.append(Paragraph(f"Date Range: {report_summary['date_range']}", normal_style))
-                    elements.append(Spacer(1, 20))
-                    
-                    # Summary Section
-                    elements.append(Paragraph("Executive Summary", heading_style))
-                    
-                    # Summary Table
-                    summary_data = [
-                        ["Metric", "Value"],
-                        ["Total Income", format_currency(total_income)],
-                        ["Total Expenses", format_currency(total_expenses)],
-                        ["Net Profit", format_currency(net_profit)],
-                        ["Profit Margin", f"{profit_margin:.2f}%"],
-                        ["Report Category", report_category],
-                        ["Records Count", len(export_df)]
-                    ]
-                    
-                    summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch])
-                    summary_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3498db')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 12),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.grey),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ]))
-                    elements.append(summary_table)
-                    elements.append(Spacer(1, 30))
-                    
-                    # Data Table Section
-                    elements.append(Paragraph("Detailed Data", heading_style))
-                    
-                    # Prepare data for table (limit rows for PDF)
-                    pdf_df = export_df.head(50).copy()
-                    
-                    # Convert all columns to string
-                    pdf_df = pdf_df.astype(str)
-                    
-                    # Create table data
-                    table_data = [pdf_df.columns.tolist()] + pdf_df.values.tolist()
-                    
-                    # Create table
-                    data_table = Table(table_data, repeatRows=1)
-                    data_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2c3e50')),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 10),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
-                        ('FONTSIZE', (0, 1), (-1, -1), 8),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ]))
-                    elements.append(data_table)
-                    
-                    # Footer
-                    elements.append(Spacer(1, 20))
-                    elements.append(Paragraph(f"Page 1 of 1 • Total Records: {len(export_df)} • Generated by Farm Management System", 
-                                             ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, 
-                                                          textColor=colors.grey, alignment=TA_CENTER)))
-                    
-                    # Build PDF
-                    doc.build(elements)
-                    buffer.seek(0)
-                    return buffer.getvalue()
-                
-                # Download PDF button
-                if st.button("📑 Download PDF Report", use_container_width=True, key="tab6_download_pdf"):
-                    try:
-                        pdf_bytes = generate_professional_pdf()
-                        st.download_button(
-                            label="⬇️ Click to Save PDF",
-                            data=pdf_bytes,
-                            file_name=f"Professional_Report_{report_type.replace(' ', '_')}_{date.today()}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                        st.success("✅ PDF generated successfully! Click the download button above.")
-                    except Exception as e:
-                        st.error(f"Error generating PDF: {str(e)}")
-                        st.info("Please ensure all required packages are installed: pip install reportlab")
+          # PDF Export with simple template
+if not export_df.empty:
+    # Create simplified PDF generation function
+    def generate_simple_pdf():
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from io import BytesIO
         
-        # Additional actions row
-        st.markdown("---")
-        action_col1, action_col2 = st.columns(2)
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4)
+        elements = []
         
-        with action_col1:
-            if st.button("🖨️ Print Report", use_container_width=True, key="tab6_print"):
-                st.info("Use your browser's print function (Ctrl+P) to print this report")
+        # Simple styles
+        styles = getSampleStyleSheet()
         
-        with action_col2:
-            if st.button("🗑️ Clear Report", use_container_width=True, key="tab6_clear_report"):
-                st.session_state.generate_report = False
-                st.session_state.report_data = None
-                st.rerun()
+        # Title
+        elements.append(Paragraph(f"{report_type} Report", styles['Title']))
+        elements.append(Paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}", styles['Normal']))
+        elements.append(Spacer(1, 20))
         
-        # Report statistics
-        with st.expander("📊 Report Statistics"):
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Income Records", len(income_data_filtered))
-            with col2:
-                st.metric("Expense Records", len(expenses_data_filtered))
-            with col3:
-                st.metric("Total Records", len(export_df))
+        # Summary Section
+        elements.append(Paragraph("Summary", styles['Heading2']))
+        
+        # Simple summary table
+        summary_data = [
+            ["Total Income", format_currency(total_income)],
+            ["Total Expenses", format_currency(total_expenses)],
+            ["Net Profit", format_currency(net_profit)],
+            ["Profit Margin", f"{profit_margin:.2f}%"],
+            ["Date Range", report_summary['date_range']],
+            ["Total Records", len(export_df)]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[200, 200])
+        summary_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ]))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 20))
+        
+        # Data Table - simple version
+        elements.append(Paragraph("Details", styles['Heading2']))
+        
+        # Limit rows for PDF
+        pdf_df = export_df.head(100).copy()
+        
+        # Prepare table data
+        table_data = [pdf_df.columns.tolist()] + pdf_df.values.tolist()
+        
+        # Simple table
+        data_table = Table(table_data, repeatRows=1)
+        data_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ]))
+        elements.append(data_table)
+        
+        # Simple footer
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph(f"Report generated on {date.today().strftime('%Y-%m-%d')}", 
+                                 styles['Italic']))
+        
+        # Build PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    # Download PDF button
+    if st.button("📄 Download PDF", use_container_width=True, key="tab6_download_pdf"):
+        try:
+            pdf_bytes = generate_simple_pdf()
+            st.download_button(
+                label="⬇️ Download PDF",
+                data=pdf_bytes,
+                file_name=f"report_{date.today().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf",
+                use_container_width=True
+            )
+            st.success("PDF ready for download!")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+              
 # Tab 7: Farmer Ledger Details - FIXED VERSION
 with tabs[6]:
     st.markdown("<div class='section-card'><h3>👤 Farmer Ledger Details (کسان کھاتا کی تفصیل)</h3></div>", unsafe_allow_html=True)
