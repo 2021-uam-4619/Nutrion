@@ -12,6 +12,6 @@ xlsxwriter
 DatabaseManager
 sqlalchemy
 sql
-colors
+
 
 
