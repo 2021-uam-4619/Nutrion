@@ -450,40 +450,40 @@ with tabs[0]:
         livestock_category = st.selectbox(
             "Category *",
             ["", "Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"],
-            key="livestock_category"
+            key="tab1_livestock_category"
         )
     
     with col2:
-        livestock_quantity = st.number_input("Quantity (تعداد)", min_value=0, key="livestock_quantity")
+        livestock_quantity = st.number_input("Quantity (تعداد)", min_value=0, key="tab1_livestock_quantity")
     
     with col3:
         livestock_expense_type = st.selectbox(
             "Expense Type (اخراجات کی قسم)",
             ["Khal (کھل)", "Chokar (چوکر)", "Tori (ٹوری)", "Ghaas/Fodder (گھاس)", 
              "Medicine (دوائیں)", "Vaccination (ٹیکہ)", "Others (دیگر)"],
-            key="livestock_expense_type"
+            key="tab1_livestock_expense_type"
         )
     
     with col4:
-        livestock_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="livestock_amount")
+        livestock_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="tab1_livestock_amount")
     
     col5, col6, col7 = st.columns(3)
     with col5:
         expense_manager = st.selectbox(
             "Expense Managed By *",
             [""] + [m["name"] for m in st.session_state.managers],
-            key="expense_manager"
+            key="tab1_expense_manager"
         )
     
     with col6:
-        livestock_date = st.date_input("Date *", value=date.today(), key="livestock_date")
+        livestock_date = st.date_input("Date *", value=date.today(), key="tab1_livestock_date")
     
     with col7:
-        livestock_remarks = st.text_area("Remarks (ریمارکس)", key="livestock_remarks")
+        livestock_remarks = st.text_area("Remarks (ریمارکس)", key="tab1_livestock_remarks")
     
     col8, col9, col10 = st.columns([1, 1, 2])
     with col8:
-        if st.button("➕ Add Expense", type="primary", use_container_width=True):
+        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="tab1_add_expense"):
             if livestock_category and livestock_amount > 0 and expense_manager:
                 new_entry = {
                     'id': get_next_id('livestock'),
@@ -508,7 +508,7 @@ with tabs[0]:
                 st.error("Please fill all required fields")
     
     with col9:
-        if st.button("🧹 Clear Form", use_container_width=True):
+        if st.button("🧹 Clear Form", use_container_width=True, key="tab1_clear_form"):
             st.rerun()
     
     # Livestock Ledger
@@ -519,17 +519,17 @@ with tabs[0]:
         ledger_category_filter = st.selectbox(
             "Filter by Category",
             ["All Categories", "Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"],
-            key="ledger_category_filter"
+            key="tab1_ledger_category_filter"
         )
     
     with col2:
-        ledger_date_from = st.date_input("From Date", key="ledger_date_from", value=None)
+        ledger_date_from = st.date_input("From Date", key="tab1_ledger_date_from", value=None)
     
     with col3:
-        ledger_date_to = st.date_input("To Date", key="ledger_date_to", value=None)
+        ledger_date_to = st.date_input("To Date", key="tab1_ledger_date_to", value=None)
     
     with col4:
-        if st.button("🔍 Filter Ledger", use_container_width=True):
+        if st.button("🔍 Filter Ledger", use_container_width=True, key="tab1_filter_ledger"):
             pass
     
     # Display ledger - FIXED DATE COMPARISON
@@ -585,23 +585,23 @@ with tabs[0]:
         col1, col2, col3 = st.columns(3)
         with col1:
             total_expenses = calc_data[calc_data['transaction_type'] == 'expense']['amount'].sum()
-            st.metric("Total Expenses", format_currency(total_expenses))
+            st.metric("Total Expenses", format_currency(total_expenses), key="tab1_total_expenses")
         
         with col2:
             total_income = calc_data[calc_data['transaction_type'] == 'income']['amount'].sum()
-            st.metric("Total Income", format_currency(total_income))
+            st.metric("Total Income", format_currency(total_income), key="tab1_total_income")
         
         with col3:
             net_balance = total_income - total_expenses
-            st.metric("Net Balance", format_currency(net_balance), delta_color="inverse")
+            st.metric("Net Balance", format_currency(net_balance), delta_color="inverse", key="tab1_net_balance")
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Expenses", format_currency(0))
+            st.metric("Total Expenses", format_currency(0), key="tab1_total_expenses_empty")
         with col2:
-            st.metric("Total Income", format_currency(0))
+            st.metric("Total Income", format_currency(0), key="tab1_total_income_empty")
         with col3:
-            st.metric("Net Balance", format_currency(0))
+            st.metric("Net Balance", format_currency(0), key="tab1_net_balance_empty")
 
 # Tab 2: Crop Management
 with tabs[1]:
@@ -613,40 +613,40 @@ with tabs[1]:
             "Crop Type (فصل کی قسم)",
             ["", "Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", 
              "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"],
-            key="crop_type"
+            key="tab2_crop_type"
         )
     
     with col2:
-        crop_area = st.number_input("Area (ایکڑ)", min_value=0.0, key="crop_area")
+        crop_area = st.number_input("Area (ایکڑ)", min_value=0.0, key="tab2_crop_area")
     
     with col3:
         crop_expense_type = st.selectbox(
             "Expense Type (اخراجات کی قسم)",
             ["Labor (مزدوری)", "Seeds (بیج)", "Fertilizer (کھاد)", 
              "Spray (سپرے)", "Land Preparation", "Others (دیگر)"],
-            key="crop_expense_type"
+            key="tab2_crop_expense_type"
         )
     
     with col4:
-        crop_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="crop_amount")
+        crop_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="tab2_crop_amount")
     
     col5, col6, col7 = st.columns(3)
     with col5:
         crop_manager = st.selectbox(
             "Expense Managed By *",
             [""] + [m["name"] for m in st.session_state.managers],
-            key="crop_manager"
+            key="tab2_crop_manager"
         )
     
     with col6:
-        crop_date = st.date_input("Date *", value=date.today(), key="crop_date")
+        crop_date = st.date_input("Date *", value=date.today(), key="tab2_crop_date")
     
     with col7:
-        crop_remarks = st.text_area("Remarks (ریمارکس)", key="crop_remarks")
+        crop_remarks = st.text_area("Remarks (ریمارکس)", key="tab2_crop_remarks")
     
     col8, col9 = st.columns(2)
     with col8:
-        if st.button("➕ Add Crop Expense", type="primary", use_container_width=True):
+        if st.button("➕ Add Crop Expense", type="primary", use_container_width=True, key="tab2_add_crop_expense"):
             if crop_type and crop_amount > 0 and crop_manager:
                 new_entry = {
                     'id': get_next_id('crop'),
@@ -693,16 +693,16 @@ with tabs[2]:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        farmer_name = st.text_input("Farmer Name (کسان کا نام) *", key="farmer_name")
+        farmer_name = st.text_input("Farmer Name (کسان کا نام) *", key="tab3_farmer_name")
     
     with col2:
-        farmer_phone = st.text_input("Phone Number (فون نمبر)", key="farmer_phone")
+        farmer_phone = st.text_input("Phone Number (فون نمبر)", key="tab3_farmer_phone")
     
     with col3:
-        water_rate = st.number_input("Rate per Hour (فی گھنٹہ ریٹ) *", min_value=0.0, value=500.0, key="water_rate")
+        water_rate = st.number_input("Rate per Hour (فی گھنٹہ ریٹ) *", min_value=0.0, value=500.0, key="tab3_water_rate")
     
     with col4:
-        water_date = st.date_input("Date *", value=date.today(), key="water_date")
+        water_date = st.date_input("Date *", value=date.today(), key="tab3_water_date")
     
     # Timer Section
     st.markdown("<div class='section-card'><h3>⏱️ Water Supply Timer (ٹائمر)</h3></div>", unsafe_allow_html=True)
@@ -711,22 +711,22 @@ with tabs[2]:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if st.button("▶️ Start Timer", type="primary", use_container_width=True):
+        if st.button("▶️ Start Timer", type="primary", use_container_width=True, key="tab3_start_timer"):
             start_timer()
             st.rerun()
     
     with col2:
-        if st.button("⏹️ Stop Timer", type="secondary", use_container_width=True):
+        if st.button("⏹️ Stop Timer", type="secondary", use_container_width=True, key="tab3_stop_timer"):
             stop_timer()
             st.rerun()
     
     with col3:
-        if st.button("🔄 Reset Timer", use_container_width=True):
+        if st.button("🔄 Reset Timer", use_container_width=True, key="tab3_reset_timer"):
             reset_timer()
             st.rerun()
     
     with col4:
-        manual_hours = st.number_input("Manual Hours", min_value=0.0, key="manual_hours", value=0.0)
+        manual_hours = st.number_input("Manual Hours", min_value=0.0, key="tab3_manual_hours", value=0.0)
     
     # Timer calculation
     total_hours = st.session_state.timer_seconds / 3600
@@ -737,19 +737,19 @@ with tabs[2]:
     col5, col6, col7, col8 = st.columns(4)
     with col5:
         start_time_display = st.session_state.timer_start.strftime("%H:%M:%S") if st.session_state.timer_start else ""
-        st.text_input("Start Time", value=start_time_display, disabled=True)
+        st.text_input("Start Time", value=start_time_display, disabled=True, key="tab3_start_time")
     with col6:
         end_time_display = datetime.now().strftime("%H:%M:%S") if st.session_state.timer_running else ""
-        st.text_input("End Time", value=end_time_display, disabled=True)
+        st.text_input("End Time", value=end_time_display, disabled=True, key="tab3_end_time")
     with col7:
-        st.number_input("Total Hours", value=round(total_hours, 2), disabled=True)
+        st.number_input("Total Hours", value=round(total_hours, 2), disabled=True, key="tab3_total_hours")
     with col8:
-        st.number_input("Total Bill", value=round(total_bill, 2), disabled=True)
+        st.number_input("Total Bill", value=round(total_bill, 2), disabled=True, key="tab3_total_bill")
     
     # Save Water Supply
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("💾 Save Record", type="primary", use_container_width=True):
+        if st.button("💾 Save Record", type="primary", use_container_width=True, key="tab3_save_record"):
             if farmer_name and water_rate > 0:
                 new_entry = {
                     'id': get_next_id('water'),
@@ -784,7 +784,7 @@ with tabs[2]:
         select_farmer = st.selectbox(
             "Select Farmer (کسان منتخب کریں)",
             [""] + farmer_names,
-            key="select_farmer"
+            key="tab3_select_farmer"
         )
     
     # Payment Management
@@ -792,20 +792,20 @@ with tabs[2]:
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        payment_amount = st.number_input("Payment Amount (ادائیگی کی رقم)", min_value=0.0, key="payment_amount", value=0.0)
+        payment_amount = st.number_input("Payment Amount (ادائیگی کی رقم)", min_value=0.0, key="tab3_payment_amount", value=0.0)
     
     with col2:
-        payment_date = st.date_input("Payment Date (ادائیگی کی تاریخ)", value=date.today(), key="payment_date")
+        payment_date = st.date_input("Payment Date (ادائیگی کی تاریخ)", value=date.today(), key="tab3_payment_date")
     
     with col3:
         payment_method = st.selectbox(
             "Payment Method (ادائیگی کا طریقہ)",
             ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"],
-            key="payment_method"
+            key="tab3_payment_method"
         )
     
     with col4:
-        if st.button("💰 Record Payment", type="primary", use_container_width=True):
+        if st.button("💰 Record Payment", type="primary", use_container_width=True, key="tab3_record_payment"):
             if select_farmer and payment_amount > 0:
                 new_payment = {
                     'id': get_next_id('payment'),
@@ -850,35 +850,35 @@ with tabs[3]:
         expense_category = st.selectbox(
             "Expense Category (اخراجات کی قسم) *",
             expense_categories,
-            key="expense_category"
+            key="tab4_expense_category"
         )
     
     with col2:
-        expense_description = st.text_input("Description (تفصیل) *", key="expense_description")
+        expense_description = st.text_input("Description (تفصیل) *", key="tab4_expense_description")
     
     with col3:
-        expense_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="expense_amount")
+        expense_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="tab4_expense_amount")
     
     with col4:
-        expense_date = st.date_input("Date *", value=date.today(), key="expense_date")
+        expense_date = st.date_input("Date *", value=date.today(), key="tab4_expense_date")
     
     col5, col6, col7 = st.columns(3)
     with col5:
         expense_managed_by = st.selectbox(
             "Managed By (منتظم) *",
             [""] + [m["name"] for m in st.session_state.managers],
-            key="expense_managed_by"
+            key="tab4_expense_managed_by"
         )
     
     with col6:
-        expense_receipt_no = st.text_input("Receipt No (رسید نمبر)", key="expense_receipt_no")
+        expense_receipt_no = st.text_input("Receipt No (رسید نمبر)", key="tab4_expense_receipt_no")
     
     with col7:
-        expense_remarks = st.text_area("Remarks (ریمارکس)", key="expense_remarks")
+        expense_remarks = st.text_area("Remarks (ریمارکس)", key="tab4_expense_remarks")
     
     col8, col9 = st.columns(2)
     with col8:
-        if st.button("➕ Add Expense", type="primary", use_container_width=True):
+        if st.button("➕ Add Expense", type="primary", use_container_width=True, key="tab4_add_expense"):
             if expense_category and expense_description and expense_amount > 0 and expense_managed_by:
                 new_entry = {
                     'id': get_next_id('expense'),
@@ -917,25 +917,25 @@ with tabs[3]:
             today_expenses = expenses_data[
                 expenses_data['date'].dt.date == today
             ]['amount'].sum()
-            st.metric("Today's Expenses", format_currency(today_expenses))
+            st.metric("Today's Expenses", format_currency(today_expenses), key="tab4_today_expenses")
         
         with col2:
             month_expenses = expenses_data[
                 (expenses_data['date'].dt.date >= month_start) &
                 (expenses_data['date'].dt.date <= today)
             ]['amount'].sum()
-            st.metric("This Month", format_currency(month_expenses))
+            st.metric("This Month", format_currency(month_expenses), key="tab4_month_expenses")
         
         with col3:
             total_expenses = expenses_data['amount'].sum()
-            st.metric("Total Expenses", format_currency(total_expenses))
+            st.metric("Total Expenses", format_currency(total_expenses), key="tab4_total_expenses")
     else:
         with col1:
-            st.metric("Today's Expenses", format_currency(0))
+            st.metric("Today's Expenses", format_currency(0), key="tab4_today_expenses_empty")
         with col2:
-            st.metric("This Month", format_currency(0))
+            st.metric("This Month", format_currency(0), key="tab4_month_expenses_empty")
         with col3:
-            st.metric("Total Expenses", format_currency(0))
+            st.metric("Total Expenses", format_currency(0), key="tab4_total_expenses_empty")
     
     # All Expenses Table
     st.markdown("<div class='section-card'><h3>📋 All Expenses (تمام اخراجات)</h3></div>", unsafe_allow_html=True)
@@ -969,35 +969,35 @@ with tabs[4]:
         income_source = st.selectbox(
             "Income Source (آمدنی کا ذریعہ) *",
             income_sources,
-            key="income_source"
+            key="tab5_income_source"
         )
     
     with col2:
-        income_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="income_amount")
+        income_amount = st.number_input("Amount (PKR) *", min_value=0.0, key="tab5_income_amount")
     
     with col3:
-        income_date = st.date_input("Date *", value=date.today(), key="income_date")
+        income_date = st.date_input("Date *", value=date.today(), key="tab5_income_date")
     
     with col4:
         income_received_by = st.selectbox(
             "Received By (وصول کنندہ)",
             [""] + [m["name"] for m in st.session_state.managers],
-            key="income_received_by"
+            key="tab5_income_received_by"
         )
     
     col5, col6, col7 = st.columns(3)
     with col5:
-        income_customer = st.text_input("Customer/Payer (گاہک/ادا کرنے والا)", key="income_customer")
+        income_customer = st.text_input("Customer/Payer (گاہک/ادا کرنے والا)", key="tab5_income_customer")
     
     with col6:
-        income_receipt_no = st.text_input("Receipt No (رسید نمبر)", key="income_receipt_no")
+        income_receipt_no = st.text_input("Receipt No (رسید نمبر)", key="tab5_income_receipt_no")
     
     with col7:
-        income_remarks = st.text_area("Remarks (ریمارکس)", key="income_remarks")
+        income_remarks = st.text_area("Remarks (ریمارکس)", key="tab5_income_remarks")
     
     col8, col9 = st.columns(2)
     with col8:
-        if st.button("➕ Add Income", type="primary", use_container_width=True):
+        if st.button("➕ Add Income", type="primary", use_container_width=True, key="tab5_add_income"):
             if income_source and income_amount > 0:
                 new_entry = {
                     'id': get_next_id('income'),
@@ -1056,16 +1056,16 @@ with tabs[4]:
         total_income = livestock_income + crop_income + water_income
     
     with col1:
-        st.metric("Livestock Income", format_currency(livestock_income))
+        st.metric("Livestock Income", format_currency(livestock_income), key="tab5_livestock_income")
     
     with col2:
-        st.metric("Crop Income", format_currency(crop_income))
+        st.metric("Crop Income", format_currency(crop_income), key="tab5_crop_income")
     
     with col3:
-        st.metric("Water Supply Income", format_currency(water_income))
+        st.metric("Water Supply Income", format_currency(water_income), key="tab5_water_income")
     
     with col4:
-        st.metric("Total Income", format_currency(total_income))
+        st.metric("Total Income", format_currency(total_income), key="tab5_total_income")
     
     # Income Records
     st.markdown("<div class='section-card'><h3>📋 Income Records (آمدنی کے رکارڈز)</h3></div>", unsafe_allow_html=True)
@@ -1094,25 +1094,25 @@ with tabs[5]:
             "Report Type (رپورٹ کی قسم)",
             ["Summary Report", "Expense Report", "Income Report", 
              "Livestock Report", "Crops Report", "Water Report"],
-            key="report_type"
+            key="tab6_report_type"
         )
     
     with col2:
         report_category = st.selectbox(
             "Category (زمرہ)",
             ["All (سب)", "Livestock (مویشی)", "Crop (فصل)", "Water (پانی)"],
-            key="report_category"
+            key="tab6_report_category"
         )
     
     with col3:
-        report_date_from = st.date_input("From Date (تاریخ سے)", key="report_date_from", value=None)
+        report_date_from = st.date_input("From Date (تاریخ سے)", key="tab6_report_date_from", value=None)
     
     with col4:
-        report_date_to = st.date_input("To Date (تاریخ تک)", key="report_date_to", value=None)
+        report_date_to = st.date_input("To Date (تاریخ تک)", key="tab6_report_date_to", value=None)
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("📈 Generate Report", type="primary", use_container_width=True):
+        if st.button("📈 Generate Report", type="primary", use_container_width=True, key="tab6_generate_report"):
             st.session_state.generate_report = True
     
     # Report Preview
@@ -1202,13 +1202,13 @@ with tabs[5]:
         st.markdown("### Financial Summary (مالی خلاصہ)")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Income", format_currency(total_income))
+            st.metric("Total Income", format_currency(total_income), key="tab6_total_income")
         with col2:
-            st.metric("Total Expenses", format_currency(total_expenses))
+            st.metric("Total Expenses", format_currency(total_expenses), key="tab6_total_expenses")
         with col3:
-            st.metric("Net Profit", format_currency(net_profit), delta_color="inverse")
+            st.metric("Net Profit", format_currency(net_profit), delta_color="inverse", key="tab6_net_profit")
         with col4:
-            st.metric("Profit Margin", f"{profit_margin:.2f}%")
+            st.metric("Profit Margin", f"{profit_margin:.2f}%", key="tab6_profit_margin")
         
         # Report-specific content
         if report_type == "Summary Report":
@@ -1225,7 +1225,7 @@ with tabs[5]:
                         names='source',
                         title='Income by Source'
                     )
-                    st.plotly_chart(fig1, use_container_width=True)
+                    st.plotly_chart(fig1, use_container_width=True, key="tab6_income_pie")
             
             # Expenses by category
             if not expenses_data_filtered.empty:
@@ -1239,7 +1239,7 @@ with tabs[5]:
                         title='Expenses by Category',
                         color='amount'
                     )
-                    st.plotly_chart(fig2, use_container_width=True)
+                    st.plotly_chart(fig2, use_container_width=True, key="tab6_expenses_bar")
         
         elif report_type == "Livestock Report":
             st.markdown("### Livestock Report")
@@ -1296,14 +1296,15 @@ with tabs[5]:
                     label="📥 Download CSV",
                     data=csv,
                     file_name=f"{report_type.replace(' ', '_')}_{date.today()}.csv",
-                    mime="text/csv"
+                    mime="text/csv",
+                    key="tab6_download_csv"
                 )
             else:
                 st.warning("No data to export")
         
         with col2:
             # Clear report button
-            if st.button("Clear Report", use_container_width=True):
+            if st.button("Clear Report", use_container_width=True, key="tab6_clear_report"):
                 st.session_state.generate_report = False
                 st.rerun()
 
@@ -1313,12 +1314,12 @@ with st.sidebar:
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("💾 Save All Data", use_container_width=True):
+        if st.button("💾 Save All Data", use_container_width=True, key="sidebar_save_data"):
             if save_data():
                 st.success("Data saved successfully!")
     
     with col2:
-        if st.button("📂 Load Data", use_container_width=True):
+        if st.button("📂 Load Data", use_container_width=True, key="sidebar_load_data"):
             if load_data():
                 st.success("Data loaded successfully!")
             else:
@@ -1330,11 +1331,11 @@ with st.sidebar:
     
     # Add new manager
     with st.expander("Add New Manager"):
-        new_manager_name = st.text_input("Manager Name", key="new_manager_name")
-        new_manager_phone = st.text_input("Phone", key="new_manager_phone")
-        new_manager_designation = st.text_input("Designation", key="new_manager_designation")
+        new_manager_name = st.text_input("Manager Name", key="sidebar_new_manager_name")
+        new_manager_phone = st.text_input("Phone", key="sidebar_new_manager_phone")
+        new_manager_designation = st.text_input("Designation", key="sidebar_new_manager_designation")
         
-        if st.button("Add Manager", key="add_manager"):
+        if st.button("Add Manager", key="sidebar_add_manager"):
             if new_manager_name:
                 new_manager = {
                     "id": len(st.session_state.managers) + 1,
@@ -1349,11 +1350,11 @@ with st.sidebar:
     
     # Add new farmer
     with st.expander("Add New Farmer"):
-        new_farmer_name = st.text_input("Farmer Name", key="new_farmer_name")
-        new_farmer_phone = st.text_input("Farmer Phone", key="new_farmer_phone")
-        new_farmer_address = st.text_input("Address", key="new_farmer_address")
+        new_farmer_name = st.text_input("Farmer Name", key="sidebar_new_farmer_name")
+        new_farmer_phone = st.text_input("Farmer Phone", key="sidebar_new_farmer_phone")
+        new_farmer_address = st.text_input("Address", key="sidebar_new_farmer_address")
         
-        if st.button("Add Farmer", key="add_farmer"):
+        if st.button("Add Farmer", key="sidebar_add_farmer"):
             if new_farmer_name:
                 new_farmer = {
                     "id": len(st.session_state.farmers) + 1,
@@ -1379,16 +1380,16 @@ with st.sidebar:
         len(st.session_state.income_data)
     )
     
-    st.metric("Total Records", total_records)
+    st.metric("Total Records", total_records, key="sidebar_total_records")
     
     # Quick Actions
     st.markdown("## ⚡ Quick Actions")
     
-    if st.button("Clear All Data", type="secondary"):
+    if st.button("Clear All Data", type="secondary", key="sidebar_clear_all_data"):
         st.warning("This will clear all data. Are you sure?")
         col1, col2 = st.columns(2)
         with col1:
-            if st.button("Yes, Clear All", key="confirm_clear"):
+            if st.button("Yes, Clear All", key="sidebar_confirm_clear"):
                 # Reinitialize session state
                 for key in list(st.session_state.keys()):
                     del st.session_state[key]
@@ -1396,7 +1397,7 @@ with st.sidebar:
                 st.success("All data cleared!")
                 st.rerun()
         with col2:
-            if st.button("Cancel", key="cancel_clear"):
+            if st.button("Cancel", key="sidebar_cancel_clear"):
                 st.rerun()
 
 # Auto-save every 30 seconds
