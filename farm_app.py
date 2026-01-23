@@ -201,17 +201,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Initialize database with proper structure
+@st.cache_resource
 def init_database():
     conn = sqlite3.connect('farm_management.db', check_same_thread=False)
     cursor = conn.cursor()
-    
-    # Drop tables if they exist to start fresh
-    tables = ['livestock', 'crops', 'water_supply', 'expenses', 'income', 'managers', 'farmers', 'water_payments', 'import_logs']
-    for table in tables:
-        try:
-            cursor.execute(f"DROP TABLE IF EXISTS {table}")
-        except:
-            pass
     
     # Livestock table
     cursor.execute('''
@@ -349,7 +342,7 @@ def init_database():
         )
     ''')
     
-    # Insert default managers
+    # Insert default managers if not exists
     default_managers = [
         ("Ali Khan", "0300-1234567", "Farm Manager"),
         ("Ahmed Raza", "0312-9876543", "Livestock Manager"),
@@ -357,22 +350,18 @@ def init_database():
         ("Bilal Ahmed", "0345-1122334", "Finance Manager")
     ]
     
-    cursor.executemany(
-        "INSERT OR IGNORE INTO managers (name, phone, designation) VALUES (?, ?, ?)",
-        default_managers
-    )
+    for manager in default_managers:
+        cursor.execute("INSERT OR IGNORE INTO managers (name, phone, designation) VALUES (?, ?, ?)", manager)
     
-    # Insert default farmers
+    # Insert default farmers if not exists
     default_farmers = [
         ("Farmer 1", "0301-2345678", "Village A"),
         ("Farmer 2", "0302-3456789", "Village B"),
         ("Farmer 3", "0303-4567890", "Village C")
     ]
     
-    cursor.executemany(
-        "INSERT OR IGNORE INTO farmers (name, phone, address) VALUES (?, ?, ?)",
-        default_farmers
-    )
+    for farmer in default_farmers:
+        cursor.execute("INSERT OR IGNORE INTO farmers (name, phone, address) VALUES (?, ?, ?)", farmer)
     
     conn.commit()
     return conn
@@ -380,17 +369,24 @@ def init_database():
 # Initialize database
 conn = init_database()
 
+# Session state for tracking updates
+if 'refresh_data' not in st.session_state:
+    st.session_state.refresh_data = False
+
 # Helper functions
 def show_message(message, type="success"):
     """Show status message"""
+    placeholder = st.empty()
     if type == "success":
-        st.success(message)
+        placeholder.success(message)
     elif type == "error":
-        st.error(message)
+        placeholder.error(message)
     elif type == "warning":
-        st.warning(message)
+        placeholder.warning(message)
     elif type == "info":
-        st.info(message)
+        placeholder.info(message)
+    time.sleep(2)
+    placeholder.empty()
 
 def get_managers():
     """Get list of managers from database"""
@@ -760,6 +756,7 @@ def update_record(table_name, record_id, update_data):
             ))
         
         conn.commit()
+        st.session_state.refresh_data = True
         return True, "Record updated successfully!"
         
     except Exception as e:
@@ -784,6 +781,7 @@ def delete_record(table_name, record_id):
             cursor.execute("DELETE FROM water_supply WHERE id=?", (record_id,))
         
         conn.commit()
+        st.session_state.refresh_data = True
         return True, "Record deleted successfully!"
         
     except Exception as e:
@@ -992,13 +990,13 @@ elif menu == "🐄 Livestock":
                 
                 remarks = st.text_area("📝 Remarks")
             
-            submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True, type="primary")
             
             if submitted:
                 if amount <= 0:
-                    show_message("❌ Amount must be greater than 0", "error")
+                    st.error("❌ Amount must be greater than 0")
                 elif not manager:
-                    show_message("❌ Manager is required", "error")
+                    st.error("❌ Manager is required")
                 else:
                     try:
                         cursor = conn.cursor()
@@ -1009,9 +1007,11 @@ elif menu == "🐄 Livestock":
                         """, (date.strftime("%Y-%m-%d"), category, quantity, expense_type, 
                              amount, manager, remarks, transaction_type))
                         conn.commit()
-                        show_message("✅ Livestock record saved successfully!", "success")
+                        st.success("✅ Livestock record saved successfully!")
+                        time.sleep(1)
+                        st.rerun()
                     except Exception as e:
-                        show_message(f"❌ Error saving record: {str(e)}", "error")
+                        st.error(f"❌ Error saving record: {str(e)}")
     
     with tab2:
         st.markdown("<h2 class='sub-header'>View & Manage Livestock Records</h2>", unsafe_allow_html=True)
@@ -1108,19 +1108,21 @@ elif menu == "🐄 Livestock":
                         }
                         success, message = update_record('livestock', selected_id, update_data)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     
                     if delete_btn:
                         if st.checkbox("⚠️ Confirm deletion", key=f"confirm_del_{selected_id}"):
                             success, message = delete_record('livestock', selected_id)
                             if success:
-                                show_message(message, "success")
+                                st.success(message)
+                                time.sleep(1)
                                 st.rerun()
                             else:
-                                show_message(message, "error")
+                                st.error(message)
             
             # Display all records
             st.markdown("---")
@@ -1173,9 +1175,9 @@ elif menu == "🐄 Livestock":
                 with st.spinner("Importing data..."):
                     success, message = import_data('livestock', uploaded_file)
                     if success:
-                        show_message(message, "success")
+                        st.success(message)
                     else:
-                        show_message(message, "error")
+                        st.error(message)
     
     with tab4:
         st.markdown("<h2 class='sub-header'>📥 Export Livestock Data</h2>", unsafe_allow_html=True)
@@ -1252,13 +1254,13 @@ elif menu == "🌱 Crops":
                 
                 remarks = st.text_area("📝 Remarks")
             
-            submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True, type="primary")
             
             if submitted:
                 if amount <= 0:
-                    show_message("❌ Amount must be greater than 0", "error")
+                    st.error("❌ Amount must be greater than 0")
                 elif not manager:
-                    show_message("❌ Manager is required", "error")
+                    st.error("❌ Manager is required")
                 else:
                     try:
                         cursor = conn.cursor()
@@ -1269,15 +1271,45 @@ elif menu == "🌱 Crops":
                         """, (date.strftime("%Y-%m-%d"), crop_type, area, expense_type,
                              amount, manager, remarks, transaction_type))
                         conn.commit()
-                        show_message("✅ Crop record saved successfully!", "success")
+                        st.success("✅ Crop record saved successfully!")
+                        time.sleep(1)
+                        st.rerun()
                     except Exception as e:
-                        show_message(f"❌ Error saving record: {str(e)}", "error")
+                        st.error(f"❌ Error saving record: {str(e)}")
     
     with tab2:
         st.markdown("<h2 class='sub-header'>View & Manage Crop Records</h2>", unsafe_allow_html=True)
         
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_crop = st.selectbox("Filter by Crop Type", 
+                                      ["All"] + ["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)",
+                                                 "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", 
+                                                 "Fruits", "Pulses", "Others"])
+        with col2:
+            filter_type = st.selectbox("Filter by Transaction", ["All", "expense", "income"])
+        with col3:
+            crop_start_date = st.date_input("From Date", datetime.now() - timedelta(days=30), key="crop_start")
+            crop_end_date = st.date_input("To Date", datetime.now(), key="crop_end")
+        
+        # Build query
+        query = "SELECT * FROM crops WHERE 1=1"
+        params = []
+        
+        if filter_crop != "All":
+            query += " AND crop_type = ?"
+            params.append(filter_crop)
+        
+        if filter_type != "All":
+            query += " AND transaction_type = ?"
+            params.append(filter_type)
+        
+        query += " AND date BETWEEN ? AND ? ORDER BY date DESC"
+        params.extend([crop_start_date.strftime("%Y-%m-%d"), crop_end_date.strftime("%Y-%m-%d")])
+        
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM crops ORDER BY date DESC")
+        cursor.execute(query, params)
         records = cursor.fetchall()
         
         if records:
@@ -1342,19 +1374,21 @@ elif menu == "🌱 Crops":
                         }
                         success, message = update_record('crops', selected_id, update_data)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     
                     if delete_btn:
                         if st.checkbox("⚠️ Confirm deletion", key=f"crop_confirm_del_{selected_id}"):
                             success, message = delete_record('crops', selected_id)
                             if success:
-                                show_message(message, "success")
+                                st.success(message)
+                                time.sleep(1)
                                 st.rerun()
                             else:
-                                show_message(message, "error")
+                                st.error(message)
             
             # Display all records
             st.markdown("---")
@@ -1399,13 +1433,13 @@ elif menu == "💰 Expenses":
                 receipt_no = st.text_input("🧾 Receipt No")
                 remarks = st.text_area("📋 Remarks")
             
-            submitted = st.form_submit_button("💾 Save Expense", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Expense", use_container_width=True, type="primary")
             
             if submitted:
                 if amount <= 0 or not description:
-                    show_message("❌ Please fill all required fields", "error")
+                    st.error("❌ Please fill all required fields")
                 elif not manager:
-                    show_message("❌ Manager is required", "error")
+                    st.error("❌ Manager is required")
                 else:
                     try:
                         cursor = conn.cursor()
@@ -1416,15 +1450,46 @@ elif menu == "💰 Expenses":
                         """, (date.strftime("%Y-%m-%d"), category, description, amount,
                              manager, receipt_no, remarks))
                         conn.commit()
-                        show_message("✅ Expense recorded successfully!", "success")
+                        st.success("✅ Expense recorded successfully!")
+                        time.sleep(1)
+                        st.rerun()
                     except Exception as e:
-                        show_message(f"❌ Error saving expense: {str(e)}", "error")
+                        st.error(f"❌ Error saving expense: {str(e)}")
     
     with tab2:
         st.markdown("<h2 class='sub-header'>View & Manage Expenses</h2>", unsafe_allow_html=True)
         
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_category = st.selectbox("Filter by Category", 
+                                         ["All"] + ["Salary (تنخواہ)", "Machinery (مشینری)", 
+                                                    "Kitchen", "Construction",
+                                                    "Petrol", "Diesel", 
+                                                    "Electricity Bill", "Turbine Bill",
+                                                    "Maintenance (مرمت)", "Livestock Feed",
+                                                    "Crop Inputs", "Transport", "Others"])
+        with col2:
+            expense_start_date = st.date_input("From Date", datetime.now() - timedelta(days=30), key="exp_start")
+            expense_end_date = st.date_input("To Date", datetime.now(), key="exp_end")
+        with col3:
+            min_amount = st.number_input("Minimum Amount", min_value=0.0, value=0.0)
+            max_amount = st.number_input("Maximum Amount", min_value=0.0, value=1000000.0)
+        
+        # Build query
+        query = "SELECT * FROM expenses WHERE 1=1"
+        params = []
+        
+        if filter_category != "All":
+            query += " AND category = ?"
+            params.append(filter_category)
+        
+        query += " AND date BETWEEN ? AND ? AND amount BETWEEN ? AND ? ORDER BY date DESC"
+        params.extend([expense_start_date.strftime("%Y-%m-%d"), expense_end_date.strftime("%Y-%m-%d"),
+                      min_amount, max_amount])
+        
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM expenses ORDER BY date DESC")
+        cursor.execute(query, params)
         records = cursor.fetchall()
         
         if records:
@@ -1485,19 +1550,21 @@ elif menu == "💰 Expenses":
                         }
                         success, message = update_record('expenses', selected_id, update_data)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     
                     if delete_btn:
                         if st.checkbox("⚠️ Confirm deletion", key=f"exp_confirm_del_{selected_id}"):
                             success, message = delete_record('expenses', selected_id)
                             if success:
-                                show_message(message, "success")
+                                st.success(message)
+                                time.sleep(1)
                                 st.rerun()
                             else:
-                                show_message(message, "error")
+                                st.error(message)
             
             # Display all records
             st.markdown("---")
@@ -1540,11 +1607,11 @@ elif menu == "💵 Income":
                 receipt_no = st.text_input("🧾 Receipt No")
                 remarks = st.text_area("📋 Remarks")
             
-            submitted = st.form_submit_button("💾 Save Income", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Income", use_container_width=True, type="primary")
             
             if submitted:
                 if amount <= 0:
-                    show_message("❌ Amount must be greater than 0", "error")
+                    st.error("❌ Amount must be greater than 0")
                 else:
                     try:
                         cursor = conn.cursor()
@@ -1555,15 +1622,44 @@ elif menu == "💵 Income":
                         """, (date.strftime("%Y-%m-%d"), source, amount,
                              received_by, customer, receipt_no, remarks))
                         conn.commit()
-                        show_message("✅ Income recorded successfully!", "success")
+                        st.success("✅ Income recorded successfully!")
+                        time.sleep(1)
+                        st.rerun()
                     except Exception as e:
-                        show_message(f"❌ Error saving income: {str(e)}", "error")
+                        st.error(f"❌ Error saving income: {str(e)}")
     
     with tab2:
         st.markdown("<h2 class='sub-header'>View & Manage Income</h2>", unsafe_allow_html=True)
         
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_source = st.selectbox("Filter by Source", 
+                                       ["All"] + ["Livestock Sale", "Goats Sale", "Beef Sale", 
+                                                 "Cows Sale", "Milk Sale", "Crop Sale",
+                                                 "Water Supply", "Rental Income", 
+                                                 "Consultation", "Others"])
+        with col2:
+            income_start_date = st.date_input("From Date", datetime.now() - timedelta(days=30), key="inc_start")
+            income_end_date = st.date_input("To Date", datetime.now(), key="inc_end")
+        with col3:
+            inc_min_amount = st.number_input("Minimum Amount", min_value=0.0, value=0.0, key="inc_min")
+            inc_max_amount = st.number_input("Maximum Amount", min_value=0.0, value=1000000.0, key="inc_max")
+        
+        # Build query
+        query = "SELECT * FROM income WHERE 1=1"
+        params = []
+        
+        if filter_source != "All":
+            query += " AND source = ?"
+            params.append(filter_source)
+        
+        query += " AND date BETWEEN ? AND ? AND amount BETWEEN ? AND ? ORDER BY date DESC"
+        params.extend([income_start_date.strftime("%Y-%m-%d"), income_end_date.strftime("%Y-%m-%d"),
+                      inc_min_amount, inc_max_amount])
+        
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM income ORDER BY date DESC")
+        cursor.execute(query, params)
         records = cursor.fetchall()
         
         if records:
@@ -1625,19 +1721,21 @@ elif menu == "💵 Income":
                         }
                         success, message = update_record('income', selected_id, update_data)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     
                     if delete_btn:
                         if st.checkbox("⚠️ Confirm deletion", key=f"inc_confirm_del_{selected_id}"):
                             success, message = delete_record('income', selected_id)
                             if success:
-                                show_message(message, "success")
+                                st.success(message)
+                                time.sleep(1)
                                 st.rerun()
                             else:
-                                show_message(message, "error")
+                                st.error(message)
             
             # Display all records
             st.markdown("---")
@@ -1695,7 +1793,7 @@ elif menu == "💧 Water Supply":
             with col3:
                 st.metric("⚖️ Balance", f"PKR {balance:,.0f}")
             
-            submitted = st.form_submit_button("💾 Save Record", use_container_width=True)
+            submitted = st.form_submit_button("💾 Save Record", use_container_width=True, type="primary")
             
             if submitted:
                 if farmer_name and rate > 0:
@@ -1710,17 +1808,48 @@ elif menu == "💧 Water Supply":
                              start_time.strftime("%H:%M"), end_time.strftime("%H:%M"),
                              hours, rate, total_bill, paid, balance, remarks))
                         conn.commit()
-                        show_message("✅ Water supply record saved successfully!", "success")
+                        st.success("✅ Water supply record saved successfully!")
+                        time.sleep(1)
+                        st.rerun()
                     except Exception as e:
-                        show_message(f"❌ Error saving record: {str(e)}", "error")
+                        st.error(f"❌ Error saving record: {str(e)}")
                 else:
-                    show_message("❌ Please fill all required fields", "error")
+                    st.error("❌ Please fill all required fields")
     
     with tab2:
         st.markdown("<h2 class='sub-header'>View & Manage Water Supply</h2>", unsafe_allow_html=True)
         
+        # Filters
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filter_farmer = st.selectbox("Filter by Farmer", ["All"] + get_farmers())
+        with col2:
+            water_start_date = st.date_input("From Date", datetime.now() - timedelta(days=30), key="water_start")
+            water_end_date = st.date_input("To Date", datetime.now(), key="water_end")
+        with col3:
+            filter_status = st.selectbox("Filter by Payment Status", ["All", "Paid", "Pending", "Partial"])
+        
+        # Build query
+        query = "SELECT * FROM water_supply WHERE 1=1"
+        params = []
+        
+        if filter_farmer != "All":
+            query += " AND farmer_name = ?"
+            params.append(filter_farmer)
+        
+        if filter_status != "All":
+            if filter_status == "Paid":
+                query += " AND balance = 0"
+            elif filter_status == "Pending":
+                query += " AND paid = 0"
+            elif filter_status == "Partial":
+                query += " AND paid > 0 AND balance > 0"
+        
+        query += " AND date BETWEEN ? AND ? ORDER BY date DESC"
+        params.extend([water_start_date.strftime("%Y-%m-%d"), water_end_date.strftime("%Y-%m-%d")])
+        
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM water_supply ORDER BY date DESC")
+        cursor.execute(query, params)
         records = cursor.fetchall()
         
         if records:
@@ -1728,6 +1857,12 @@ elif menu == "💧 Water Supply":
                                               'Start Time', 'End Time', 'Hours', 'Rate',
                                               'Total Bill', 'Paid', 'Balance', 'Status',
                                               'Remarks', 'Created At', 'Updated At'])
+            
+            # Calculate payment status
+            df['Payment Status'] = df.apply(lambda row: 
+                'Paid' if row['Balance'] == 0 else 
+                'Pending' if row['Paid'] == 0 else 
+                'Partial', axis=1)
             
             # Display metrics
             total_bill = df['Total Bill'].sum()
@@ -1799,26 +1934,30 @@ elif menu == "💧 Water Supply":
                         }
                         success, message = update_record('water_supply', selected_id, update_data)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     
                     if delete_btn:
                         if st.checkbox("⚠️ Confirm deletion", key=f"water_confirm_del_{selected_id}"):
                             success, message = delete_record('water_supply', selected_id)
                             if success:
-                                show_message(message, "success")
+                                st.success(message)
+                                time.sleep(1)
                                 st.rerun()
                             else:
-                                show_message(message, "error")
+                                st.error(message)
             
             # Display all records
             st.markdown("---")
             st.markdown("<h3>📋 All Records</h3>", unsafe_allow_html=True)
             display_cols = ['Farmer Name', 'Phone', 'Date', 'Start Time', 'End Time',
-                          'Hours', 'Rate', 'Total Bill', 'Paid', 'Balance', 'Remarks']
-            st.dataframe(df[display_cols], use_container_width=True)
+                          'Hours', 'Rate', 'Total Bill', 'Paid', 'Balance', 'Payment Status', 'Remarks']
+            st.dataframe(df[['Farmer Name', 'Phone', 'Date', 'Start Time', 'End Time',
+                           'Hours', 'Rate', 'Total Bill', 'Paid', 'Balance', 'Payment Status', 'Remarks']], 
+                        use_container_width=True)
         else:
             st.info("📭 No water supply records found")
 
@@ -1838,7 +1977,7 @@ elif menu == "📈 Reports":
     with col2:
         to_date = st.date_input("To Date", datetime.now())
     
-    if st.button("📊 Generate Report", use_container_width=True):
+    if st.button("📊 Generate Report", use_container_width=True, type="primary"):
         cursor = conn.cursor()
         
         if report_type == "Financial Summary":
@@ -1854,6 +1993,24 @@ elif menu == "📈 Reports":
                          (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
             total_expenses = cursor.fetchone()[0]
             
+            # Get livestock income/expenses
+            cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM livestock WHERE date BETWEEN ? AND ? AND transaction_type = 'income'", 
+                         (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            livestock_income = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM livestock WHERE date BETWEEN ? AND ? AND transaction_type = 'expense'", 
+                         (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            livestock_expenses = cursor.fetchone()[0]
+            
+            # Get crop income/expenses
+            cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM crops WHERE date BETWEEN ? AND ? AND transaction_type = 'income'", 
+                         (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            crop_income = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COALESCE(SUM(amount), 0) FROM crops WHERE date BETWEEN ? AND ? AND transaction_type = 'expense'", 
+                         (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            crop_expenses = cursor.fetchone()[0]
+            
             net_profit = total_income - total_expenses
             profit_margin = (net_profit / total_income * 100) if total_income > 0 else 0
             
@@ -1867,6 +2024,17 @@ elif menu == "📈 Reports":
                 st.metric("⚖️ Net Profit", f"PKR {net_profit:,.0f}")
             with col4:
                 st.metric("📈 Profit Margin", f"{profit_margin:.1f}%")
+            
+            # Detailed breakdown
+            st.markdown("### 📊 Detailed Breakdown")
+            breakdown_data = {
+                'Category': ['Total Income', 'Total Expenses', 'Livestock Income', 'Livestock Expenses', 
+                           'Crop Income', 'Crop Expenses', 'Net Profit'],
+                'Amount (PKR)': [total_income, total_expenses, livestock_income, livestock_expenses,
+                               crop_income, crop_expenses, net_profit]
+            }
+            breakdown_df = pd.DataFrame(breakdown_data)
+            st.dataframe(breakdown_df, use_container_width=True)
             
             # Charts
             col1, col2 = st.columns(2)
@@ -1933,6 +2101,11 @@ elif menu == "📈 Reports":
                     st.metric("💸 Livestock Expenses", f"PKR {livestock_expenses:,.0f}")
                 
                 st.dataframe(df, use_container_width=True)
+                
+                # Chart
+                fig = px.bar(df, x='Category', y='Amount', color='Type',
+                           title="Livestock Income/Expenses by Category")
+                st.plotly_chart(fig, use_container_width=True)
         
         elif report_type == "Crop Report":
             st.markdown("<h2 class='sub-header'>🌱 Crop Report</h2>", unsafe_allow_html=True)
@@ -1964,6 +2137,151 @@ elif menu == "📈 Reports":
                     st.metric("💸 Crop Expenses", f"PKR {crop_expenses:,.0f}")
                 
                 st.dataframe(df, use_container_width=True)
+                
+                # Chart
+                fig = px.bar(df, x='Crop Type', y='Amount', color='Type',
+                           title="Crop Income/Expenses by Type")
+                st.plotly_chart(fig, use_container_width=True)
+        
+        elif report_type == "Water Supply Report":
+            st.markdown("<h2 class='sub-header'>💧 Water Supply Report</h2>", unsafe_allow_html=True)
+            
+            cursor.execute("""
+                SELECT farmer_name, SUM(total_bill) as total_bill,
+                       SUM(paid) as total_paid, SUM(balance) as total_balance,
+                       COUNT(*) as supply_count
+                FROM water_supply
+                WHERE date BETWEEN ? AND ?
+                GROUP BY farmer_name
+                ORDER BY total_bill DESC
+            """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            
+            data = cursor.fetchall()
+            
+            if data:
+                df = pd.DataFrame(data, columns=['Farmer Name', 'Total Bill', 'Total Paid', 
+                                               'Total Balance', 'Supply Count'])
+                
+                # Display metrics
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    total_bill = df['Total Bill'].sum()
+                    st.metric("💰 Total Bill", f"PKR {total_bill:,.0f}")
+                with col2:
+                    total_paid = df['Total Paid'].sum()
+                    st.metric("💸 Total Paid", f"PKR {total_paid:,.0f}")
+                with col3:
+                    total_balance = df['Total Balance'].sum()
+                    st.metric("⚖️ Total Balance", f"PKR {total_balance:,.0f}")
+                
+                st.dataframe(df, use_container_width=True)
+        
+        elif report_type == "Expense Analysis":
+            st.markdown("<h2 class='sub-header'>💸 Expense Analysis</h2>", unsafe_allow_html=True)
+            
+            # Monthly trend
+            cursor.execute("""
+                SELECT strftime('%Y-%m', date) as month, 
+                       SUM(amount) as monthly_total
+                FROM expenses
+                WHERE date BETWEEN ? AND ?
+                GROUP BY month
+                ORDER BY month
+            """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            
+            trend_data = cursor.fetchall()
+            
+            if trend_data:
+                df_trend = pd.DataFrame(trend_data, columns=['Month', 'Amount'])
+                
+                # Top expense categories
+                cursor.execute("""
+                    SELECT category, SUM(amount) as total
+                    FROM expenses
+                    WHERE date BETWEEN ? AND ?
+                    GROUP BY category
+                    ORDER BY total DESC
+                    LIMIT 10
+                """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+                
+                category_data = cursor.fetchall()
+                df_categories = pd.DataFrame(category_data, columns=['Category', 'Amount'])
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig = px.line(df_trend, x='Month', y='Amount', markers=True,
+                                title="Monthly Expense Trend")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = px.pie(df_categories, values='Amount', names='Category',
+                                title="Top Expense Categories")
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        elif report_type == "Income Analysis":
+            st.markdown("<h2 class='sub-header'>💰 Income Analysis</h2>", unsafe_allow_html=True)
+            
+            # Monthly trend
+            cursor.execute("""
+                SELECT strftime('%Y-%m', date) as month, 
+                       SUM(amount) as monthly_total
+                FROM income
+                WHERE date BETWEEN ? AND ?
+                GROUP BY month
+                ORDER BY month
+            """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            
+            trend_data = cursor.fetchall()
+            
+            if trend_data:
+                df_trend = pd.DataFrame(trend_data, columns=['Month', 'Amount'])
+                
+                # Top income sources
+                cursor.execute("""
+                    SELECT source, SUM(amount) as total
+                    FROM income
+                    WHERE date BETWEEN ? AND ?
+                    GROUP BY source
+                    ORDER BY total DESC
+                    LIMIT 10
+                """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+                
+                source_data = cursor.fetchall()
+                df_sources = pd.DataFrame(source_data, columns=['Source', 'Amount'])
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    fig = px.line(df_trend, x='Month', y='Amount', markers=True,
+                                title="Monthly Income Trend")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                with col2:
+                    fig = px.bar(df_sources, x='Source', y='Amount',
+                                title="Top Income Sources")
+                    st.plotly_chart(fig, use_container_width=True)
+        
+        elif report_type == "Manager Performance":
+            st.markdown("<h2 class='sub-header'>👤 Manager Performance</h2>", unsafe_allow_html=True)
+            
+            # Manager expenses
+            cursor.execute("""
+                SELECT manager, COUNT(*) as transaction_count,
+                       SUM(amount) as total_amount,
+                       AVG(amount) as avg_amount
+                FROM expenses
+                WHERE date BETWEEN ? AND ?
+                GROUP BY manager
+                ORDER BY total_amount DESC
+            """, (from_date.strftime("%Y-%m-%d"), to_date.strftime("%Y-%m-%d")))
+            
+            manager_data = cursor.fetchall()
+            
+            if manager_data:
+                df_managers = pd.DataFrame(manager_data, 
+                                         columns=['Manager', 'Transactions', 'Total Amount', 'Average Amount'])
+                st.dataframe(df_managers, use_container_width=True)
 
 # Settings
 elif menu == "⚙️ Settings":
@@ -1983,16 +2301,17 @@ elif menu == "⚙️ Settings":
                 phone = st.text_input("📞 Phone Number")
                 designation = st.text_input("🏷️ Designation *")
                 
-                if st.form_submit_button("➕ Add Manager", use_container_width=True):
+                if st.form_submit_button("➕ Add Manager", use_container_width=True, type="primary"):
                     if name and designation:
                         success, message = add_manager(name, phone, designation)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     else:
-                        show_message("❌ Name and designation are required", "error")
+                        st.error("❌ Name and designation are required")
         
         with col2:
             st.markdown("### Existing Managers")
@@ -2003,6 +2322,17 @@ elif menu == "⚙️ Settings":
             if managers:
                 df_managers = pd.DataFrame(managers, columns=['ID', 'Name', 'Phone', 'Designation', 'Created'])
                 st.dataframe(df_managers[['Name', 'Phone', 'Designation']], use_container_width=True)
+                
+                # Delete manager option
+                st.markdown("### Delete Manager")
+                manager_to_delete = st.selectbox("Select Manager to Delete", 
+                                               df_managers['Name'].tolist())
+                if st.button("🗑️ Delete Selected Manager", use_container_width=True):
+                    cursor.execute("DELETE FROM managers WHERE name = ?", (manager_to_delete,))
+                    conn.commit()
+                    st.success(f"✅ Manager '{manager_to_delete}' deleted successfully!")
+                    time.sleep(1)
+                    st.rerun()
             else:
                 st.info("📭 No managers found")
     
@@ -2018,16 +2348,17 @@ elif menu == "⚙️ Settings":
                 phone = st.text_input("📞 Phone Number")
                 address = st.text_input("🏠 Address")
                 
-                if st.form_submit_button("➕ Add Farmer", use_container_width=True):
+                if st.form_submit_button("➕ Add Farmer", use_container_width=True, type="primary"):
                     if name:
                         success, message = add_farmer(name, phone, address)
                         if success:
-                            show_message(message, "success")
+                            st.success(message)
+                            time.sleep(1)
                             st.rerun()
                         else:
-                            show_message(message, "error")
+                            st.error(message)
                     else:
-                        show_message("❌ Farmer name is required", "error")
+                        st.error("❌ Farmer name is required")
         
         with col2:
             st.markdown("### Existing Farmers")
@@ -2038,6 +2369,17 @@ elif menu == "⚙️ Settings":
             if farmers:
                 df_farmers = pd.DataFrame(farmers, columns=['ID', 'Name', 'Phone', 'Address', 'Created'])
                 st.dataframe(df_farmers[['Name', 'Phone', 'Address']], use_container_width=True)
+                
+                # Delete farmer option
+                st.markdown("### Delete Farmer")
+                farmer_to_delete = st.selectbox("Select Farmer to Delete", 
+                                              df_farmers['Name'].tolist())
+                if st.button("🗑️ Delete Selected Farmer", use_container_width=True):
+                    cursor.execute("DELETE FROM farmers WHERE name = ?", (farmer_to_delete,))
+                    conn.commit()
+                    st.success(f"✅ Farmer '{farmer_to_delete}' deleted successfully!")
+                    time.sleep(1)
+                    st.rerun()
             else:
                 st.info("📭 No farmers found")
     
@@ -2048,7 +2390,7 @@ elif menu == "⚙️ Settings":
         
         with col1:
             st.markdown("### Create Backup")
-            if st.button("💾 Create Full Backup", use_container_width=True):
+            if st.button("💾 Create Full Backup", use_container_width=True, type="primary"):
                 backup_data = {}
                 tables = ['livestock', 'crops', 'water_supply', 'expenses', 'income', 'managers', 'farmers']
                 
@@ -2067,13 +2409,13 @@ elif menu == "⚙️ Settings":
                 b64 = base64.b64encode(backup_json.encode()).decode()
                 href = f'<a href="data:application/json;base64,{b64}" download="farm_backup_{datetime.now().strftime("%Y%m%d_%H%M%S")}.json">📥 Download Backup</a>'
                 st.markdown(href, unsafe_allow_html=True)
-                show_message("✅ Backup created successfully!", "success")
+                st.success("✅ Backup created successfully!")
         
         with col2:
             st.markdown("### Restore Backup")
             uploaded_file = st.file_uploader("Choose backup file", type=['json'])
             
-            if uploaded_file and st.button("🔄 Restore Backup", use_container_width=True):
+            if uploaded_file and st.button("🔄 Restore Backup", use_container_width=True, type="primary"):
                 try:
                     backup_data = json.load(uploaded_file)
                     
@@ -2094,16 +2436,62 @@ elif menu == "⚙️ Settings":
                             cursor.executemany(f"INSERT INTO {table} ({column_names}) VALUES ({placeholders})", data)
                     
                     conn.commit()
-                    show_message("✅ Backup restored successfully!", "success")
+                    st.success("✅ Backup restored successfully!")
+                    time.sleep(2)
                     st.rerun()
                 except Exception as e:
-                    show_message(f"❌ Error restoring backup: {str(e)}", "error")
+                    st.error(f"❌ Error restoring backup: {str(e)}")
+    
+    with tab4:
+        st.markdown("<h2 class='sub-header'>📊 System Information</h2>", unsafe_allow_html=True)
+        
+        # Database statistics
+        cursor = conn.cursor()
+        
+        stats = []
+        tables = ['livestock', 'crops', 'water_supply', 'expenses', 'income', 'managers', 'farmers']
+        
+        for table in tables:
+            cursor.execute(f"SELECT COUNT(*) FROM {table}")
+            count = cursor.fetchone()[0]
+            cursor.execute(f"SELECT COALESCE(SUM(amount), 0) FROM {table} WHERE amount IS NOT NULL")
+            total = cursor.fetchone()[0]
+            stats.append({
+                'Table': table,
+                'Records': count,
+                'Total Amount': f"PKR {total:,.0f}" if total > 0 else 'N/A'
+            })
+        
+        df_stats = pd.DataFrame(stats)
+        st.dataframe(df_stats, use_container_width=True)
+        
+        # System info
+        st.markdown("### System Status")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("📊 Total Tables", len(tables))
+        with col2:
+            total_records = df_stats['Records'].sum()
+            st.metric("🗃️ Total Records", f"{total_records:,}")
+        with col3:
+            st.metric("💾 Database Size", "Online")
+        
+        # Reset database button (for development only)
+        st.markdown("---")
+        st.markdown("### ⚠️ Development Tools")
+        if st.button("🔄 Reset Database (Development Only)", use_container_width=True):
+            # Reinitialize database
+            init_database()
+            st.success("✅ Database reset successfully!")
+            time.sleep(1)
+            st.rerun()
 
 # Footer with export options
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📤 Export Options")
 
-if st.sidebar.button("📥 Export All Data", use_container_width=True):
+if st.sidebar.button("📥 Export All Data", use_container_width=True, type="secondary"):
     # Create Excel writer
     excel_buffer = BytesIO()
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
@@ -2130,6 +2518,3 @@ st.sidebar.markdown("""
     <p>Version 3.0 • © 2024</p>
 </div>
 """, unsafe_allow_html=True)
-
-# Close database connection
-conn.close()
