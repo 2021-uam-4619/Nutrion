@@ -1977,486 +1977,443 @@ with tabs[4]:
         if not income_by_source.empty:
             fig = px.pie(income_by_source, values='amount', names='source', title='Income Distribution by Source')
             st.plotly_chart(fig, use_container_width=True)
+# Tab 6: Reports
+with tabs[5]:
+    st.markdown("<div class='section-card'><h3>📊 Comprehensive Reports (جامع رپورٹس)</h3></div>", unsafe_allow_html=True)
+    
+    # Report Configuration Section
+    with st.container():
+        st.markdown("### Report Configuration (رپورٹ ترتیب)")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            report_type = st.selectbox(
+                "Report Type (رپورٹ کی قسم)",
+                ["Summary Report", "Expense Report", "Income Report", 
+                 "Livestock Report", "Crops Report", "Water Report", 
+                 "Financial Statement", "Performance Analysis"],
+                key="tab6_report_type"
+            )
+        
+        with col2:
+            report_category = st.selectbox(
+                "Category (زمرہ)",
+                ["All (سب)", "Livestock (مویشی)", "Crop (فصل)", "Water (پانی)", "Financial (مالی)"],
+                key="tab6_report_category"
+            )
+        
         with col3:
-            # PDF Export with professional functionality
-            if not export_df.empty:
-                # Create enhanced PDF generation function
-                def generate_enhanced_pdf():
-                    from reportlab.lib import colors
-                    from reportlab.lib.pagesizes import A4
-                    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-                    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-                    from reportlab.lib.units import inch, cm
-                    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-                    from reportlab.pdfgen import canvas
-                    from io import BytesIO
-                    import pandas as pd
-                    from datetime import datetime
+            report_date_from = st.date_input("From Date (تاریخ سے)", key="tab6_report_date_from", value=None)
+        
+        with col4:
+            report_date_to = st.date_input("To Date (تاریخ تک)", key="tab6_report_date_to", value=None)
+    
+    # Action Buttons
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("📈 Generate Report", type="primary", use_container_width=True, key="tab6_generate_report"):
+            st.session_state.generate_report = True
+            st.session_state.report_generated = False
+    
+    with col2:
+        if st.button("🔄 Reset Filters", use_container_width=True, key="tab6_reset_filters"):
+            st.session_state.generate_report = False
+            st.rerun()
+    
+    with col3:
+        st.download_button(
+            label="📄 Quick Export CSV",
+            data="",
+            file_name="report.csv",
+            disabled=True,
+            use_container_width=True,
+            key="tab6_quick_export"
+        )
+    
+    with col4:
+        if st.button("📊 Preview Data", use_container_width=True, key="tab6_preview"):
+            st.session_state.preview_data = True
+
+    # Report Preview
+    if st.session_state.get('generate_report', False):
+        st.markdown("<div class='section-card'><h3>📄 Report Preview (رپورٹ پیش نظارہ)</h3></div>", unsafe_allow_html=True)
+        
+        # Calculate summary statistics with date filtering
+        income_data_filtered = st.session_state.income_data.copy()
+        water_data_filtered = st.session_state.water_supply_data.copy()
+        expenses_data_filtered = st.session_state.expenses_data.copy()
+        livestock_data_filtered = st.session_state.livestock_data.copy()
+        crop_data_filtered = st.session_state.crop_data.copy()
+        
+        # Apply date filters if provided
+        def filter_by_date(df, date_col='date'):
+            df = convert_dates(df.copy())
+            if 'date' not in df.columns:
+                return df
+            if report_date_from:
+                df = df[df['date'] >= pd.Timestamp(report_date_from)]
+            if report_date_to:
+                df = df[df['date'] <= pd.Timestamp(report_date_to)]
+            return df
+        
+        income_data_filtered = filter_by_date(income_data_filtered)
+        water_data_filtered = filter_by_date(water_data_filtered)
+        expenses_data_filtered = filter_by_date(expenses_data_filtered)
+        livestock_data_filtered = filter_by_date(livestock_data_filtered)
+        crop_data_filtered = filter_by_date(crop_data_filtered)
+        
+        # Apply category filter
+        if report_category != "All (سب)":
+            category_map = {
+                "Livestock (مویشی)": "Livestock",
+                "Crop (فصل)": "Crop",
+                "Water (پانی)": "Water",
+                "Financial (مالی)": "Financial"
+            }
+            selected_category = category_map.get(report_category, "")
+            
+            if selected_category == "Livestock":
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Livestock|Goats|Beef|Cows', na=False, case=False)
+                ]
+            elif selected_category == "Crop":
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+                expenses_data_filtered = expenses_data_filtered[
+                    expenses_data_filtered['category'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+            elif selected_category == "Water":
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Water', na=False, case=False)
+                ]
+        
+        # Calculate totals
+        total_income = income_data_filtered['amount'].sum() + water_data_filtered['paid'].sum()
+        total_expenses = (
+            expenses_data_filtered['amount'].sum() +
+            livestock_data_filtered[livestock_data_filtered['transaction_type'] == 'expense']['amount'].sum() +
+            crop_data_filtered[crop_data_filtered['transaction_type'] == 'expense']['amount'].sum()
+        )
+        
+        net_profit = total_income - total_expenses
+        profit_margin = (net_profit / total_income * 100) if total_income > 0 else 0
+        
+        # Create report summary
+        report_summary = {
+            "report_type": report_type,
+            "date_range": f"{report_date_from} to {report_date_to}" if report_date_from and report_date_to else "All Dates",
+            "category": report_category,
+            "total_income": total_income,
+            "total_expenses": total_expenses,
+            "net_profit": net_profit,
+            "profit_margin": profit_margin,
+            "generated_date": date.today().strftime("%Y-%m-%d")
+        }
+        
+        # Store report data in session state for PDF generation
+        st.session_state.report_data = {
+            'summary': report_summary,
+            'income': income_data_filtered,
+            'expenses': expenses_data_filtered,
+            'livestock': livestock_data_filtered,
+            'crops': crop_data_filtered,
+            'water': water_data_filtered
+        }
+        
+        # Display financial summary in a styled container
+        with st.container():
+            st.markdown("### Financial Summary (مالی خلاصہ)")
+            summary_cols = st.columns(4)
+            
+            metrics_config = [
+                ("Total Income", format_currency(total_income), "📈", "#2ecc71"),
+                ("Total Expenses", format_currency(total_expenses), "📉", "#e74c3c"),
+                ("Net Profit", format_currency(net_profit), "💰", "#f39c12"),
+                ("Profit Margin", f"{profit_margin:.2f}%", "📊", "#3498db")
+            ]
+            
+            for idx, (title, value, icon, color) in enumerate(metrics_config):
+                with summary_cols[idx]:
+                    st.markdown(f"""
+                    <div style="background-color: {color}20; padding: 15px; border-radius: 10px; border-left: 5px solid {color}; margin: 5px 0;">
+                        <div style="font-size: 12px; color: #7f8c8d;">{title}</div>
+                        <div style="font-size: 24px; font-weight: bold; color: {color};">{icon} {value}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        # Report-specific content
+        st.markdown("---")
+        
+        if report_type == "Summary Report":
+            st.markdown("### Detailed Breakdown")
+            
+            tab1, tab2, tab3, tab4 = st.tabs(["📊 Income Analysis", "💸 Expense Analysis", "📈 Trends", "📋 Data Tables"])
+            
+            with tab1:
+                if not income_data_filtered.empty:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.subheader("Income by Source")
+                        income_by_source = income_data_filtered.groupby('source')['amount'].sum().reset_index()
+                        if not income_by_source.empty:
+                            fig1 = px.pie(
+                                income_by_source,
+                                values='amount',
+                                names='source',
+                                title='Income Distribution by Source',
+                                color_discrete_sequence=px.colors.sequential.Blues_r
+                            )
+                            st.plotly_chart(fig1, use_container_width=True)
                     
-                    buffer = BytesIO()
-                    
-                    # Professional document setup
-                    doc = SimpleDocTemplate(
-                        buffer,
-                        pagesize=A4,
-                        topMargin=0.5*inch,
-                        bottomMargin=0.5*inch,
-                        leftMargin=0.5*inch,
-                        rightMargin=0.5*inch,
-                        title=f"{report_type} - Farm Management System"
-                    )
-                    
-                    elements = []
-                    
-                    # Professional color palette
-                    PRIMARY_COLOR = colors.HexColor('#1A5276')  # Professional blue
-                    SECONDARY_COLOR = colors.HexColor('#2E86C1')  # Light blue
-                    ACCENT_COLOR = colors.HexColor('#E74C3C')  # Red for alerts
-                    SUCCESS_COLOR = colors.HexColor('#27AE60')  # Green for positive
-                    LIGHT_GRAY = colors.HexColor('#F8F9FA')
-                    DARK_GRAY = colors.HexColor('#2C3E50')
-                    HEADER_BG = colors.HexColor('#34495E')
-                    
-                    # Enhanced styles
-                    styles = getSampleStyleSheet()
-                    
-                    # Main Title Style
-                    title_style = ParagraphStyle(
-                        'TitleStyle',
-                        parent=styles['Title'],
-                        fontSize=24,
-                        textColor=PRIMARY_COLOR,
-                        spaceAfter=10,
-                        alignment=TA_CENTER,
-                        fontName='Helvetica-Bold',
-                        underlineWidth=1
-                    )
-                    
-                    # Report Subtitle
-                    subtitle_style = ParagraphStyle(
-                        'SubtitleStyle',
-                        parent=styles['Heading2'],
-                        fontSize=12,
-                        textColor=DARK_GRAY,
-                        spaceAfter=15,
-                        alignment=TA_CENTER,
-                        fontName='Helvetica-Oblique'
-                    )
-                    
-                    # Section Headers
-                    section_style = ParagraphStyle(
-                        'SectionStyle',
-                        parent=styles['Heading2'],
-                        fontSize=14,
-                        textColor=HEADER_BG,
-                        spaceAfter=10,
-                        spaceBefore=20,
-                        fontName='Helvetica-Bold',
-                        borderPadding=5,
-                        leftIndent=10,
-                        backgroundColor=LIGHT_GRAY
-                    )
-                    
-                    # Data Label Style
-                    label_style = ParagraphStyle(
-                        'LabelStyle',
-                        parent=styles['Normal'],
-                        fontSize=10,
-                        textColor=DARK_GRAY,
-                        spaceAfter=2,
-                        fontName='Helvetica-Bold'
-                    )
-                    
-                    # Data Value Style
-                    value_style = ParagraphStyle(
-                        'ValueStyle',
-                        parent=styles['Normal'],
-                        fontSize=10,
-                        textColor=DARK_GRAY,
-                        spaceAfter=6
-                    )
-                    
-                    # Footer Style
-                    footer_style = ParagraphStyle(
-                        'FooterStyle',
-                        parent=styles['Normal'],
-                        fontSize=8,
-                        textColor=colors.grey,
-                        alignment=TA_CENTER
-                    )
-                    
-                    # ===== PAGE 1: COVER PAGE =====
-                    # Farm Logo/Header
-                    elements.append(Spacer(1, 2*inch))
-                    elements.append(Paragraph("FARM MANAGEMENT SYSTEM", title_style))
-                    elements.append(Spacer(1, 0.2*inch))
-                    elements.append(Paragraph("Professional Report", subtitle_style))
-                    elements.append(Spacer(1, 0.5*inch))
-                    
-                    # Report Title
-                    elements.append(Paragraph(report_type.upper(), ParagraphStyle(
-                        'ReportTitle',
-                        parent=styles['Heading1'],
-                        fontSize=28,
-                        textColor=PRIMARY_COLOR,
-                        spaceAfter=20,
-                        alignment=TA_CENTER,
-                        fontName='Helvetica-Bold'
-                    )))
-                    
-                    elements.append(Spacer(1, 0.3*inch))
-                    
-                    # Report Details Table
-                    details_data = [
-                        ["Report Period:", report_summary['date_range']],
-                        ["Category:", report_category],
-                        ["Generated:", datetime.now().strftime("%B %d, %Y %I:%M %p")],
-                        ["Report ID:", f"FMS-{datetime.now().strftime('%Y%m%d')}-{report_type[:3].upper()}"]
-                    ]
-                    
-                    details_table = Table(details_data, colWidths=[1.5*inch, 4*inch])
-                    details_table.setStyle(TableStyle([
-                        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-                        ('FONTNAME', (1, 0), (1, -1), 'Helvetica'),
-                        ('FONTSIZE', (0, 0), (-1, -1), 11),
-                        ('TOPPADDING', (0, 0), (-1, -1), 8),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
-                        ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                    ]))
-                    elements.append(details_table)
-                    
-                    elements.append(Spacer(1, 1.5*inch))
-                    
-                    # Confidential Notice
-                    elements.append(Paragraph(
-                        "CONFIDENTIAL BUSINESS REPORT",
-                        ParagraphStyle(
-                            'Confidential',
-                            parent=styles['Normal'],
-                            fontSize=10,
-                            textColor=colors.grey,
-                            alignment=TA_CENTER,
-                            fontName='Helvetica-Oblique'
+                    with col2:
+                        st.subheader("Top Income Sources")
+                        top_income = income_by_source.nlargest(5, 'amount')
+                        fig2 = px.bar(
+                            top_income,
+                            x='source',
+                            y='amount',
+                            title='Top 5 Income Sources',
+                            color='amount',
+                            color_continuous_scale='Viridis'
                         )
-                    ))
-                    
-                    elements.append(PageBreak())
-                    
-                    # ===== PAGE 2: EXECUTIVE SUMMARY =====
-                    elements.append(Paragraph("EXECUTIVE SUMMARY", section_style))
-                    
-                    # Financial Highlights
-                    highlights_data = [
-                        ["FINANCIAL HIGHLIGHTS", "", "", ""],
-                        ["Metric", "Amount", "Status", "Trend"],
-                        ["Total Revenue", format_currency(total_income), 
-                         "✓ Positive" if total_income > 0 else "⚠️ No Revenue",
-                         "📈 Increasing" if total_income > 0 else "➡️ Stable"],
-                        ["Total Expenses", format_currency(total_expenses),
-                         "✓ Controlled" if abs(total_expenses) < total_income else "⚠️ High",
-                         "📉 Decreasing" if abs(total_expenses) < total_income else "⚠️ Increasing"],
-                        ["Net Profit/Loss", format_currency(net_profit),
-                         "💰 Profitable" if net_profit > 0 else "📉 Loss",
-                         "✅ Positive" if net_profit > 0 else "❌ Negative"],
-                        ["Profit Margin", f"{profit_margin:.2f}%",
-                         "🏆 Strong" if profit_margin > 20 else "👍 Moderate" if profit_margin > 10 else "📊 Weak",
-                         "↗️ Improving" if profit_margin > 10 else "➡️ Stable"]
-                    ]
-                    
-                    highlights_table = Table(highlights_data, colWidths=[1.8*inch, 1.5*inch, 1.5*inch, 1.2*inch])
-                    highlights_table.setStyle(TableStyle([
-                        ('SPAN', (0, 0), (-1, 0)),
-                        ('BACKGROUND', (0, 0), (-1, 0), HEADER_BG),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, 1), PRIMARY_COLOR),
-                        ('TEXTCOLOR', (0, 1), (-1, 1), colors.white),
-                        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 1), (-1, 1), 10),
-                        ('BACKGROUND', (0, 2), (-1, -1), LIGHT_GRAY),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                        ('ALIGN', (1, 2), (1, -1), 'RIGHT'),
-                        ('ALIGN', (2, 2), (3, -1), 'CENTER'),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                        ('TEXTCOLOR', (1, 4), (1, 4), SUCCESS_COLOR if net_profit > 0 else ACCENT_COLOR),
-                        ('FONTNAME', (1, 4), (1, 4), 'Helvetica-Bold'),
-                    ]))
-                    elements.append(highlights_table)
-                    
-                    elements.append(Spacer(1, 15))
-                    
-                    # Key Performance Indicators
-                    elements.append(Paragraph("KEY PERFORMANCE INDICATORS", section_style))
-                    
-                    kpi_data = [
-                        ["Records Analysis", "Count", "Percentage"],
-                        ["Total Transactions", f"{len(export_df):,}", "100%"],
-                        ["Income Records", f"{len(income_data_filtered):,}", 
-                         f"{(len(income_data_filtered)/len(export_df)*100):.1f}%" if len(export_df) > 0 else "0%"],
-                        ["Expense Records", f"{len(expenses_data_filtered):,}", 
-                         f"{(len(expenses_data_filtered)/len(export_df)*100):.1f}%" if len(export_df) > 0 else "0%"],
-                        ["Livestock Records", f"{len(livestock_data_filtered):,}", 
-                         f"{(len(livestock_data_filtered)/len(export_df)*100):.1f}%" if len(export_df) > 0 else "0%"],
-                        ["Water Supply Records", f"{len(water_data_filtered):,}", 
-                         f"{(len(water_data_filtered)/len(export_df)*100):.1f}%" if len(export_df) > 0 else "0%"]
-                    ]
-                    
-                    kpi_table = Table(kpi_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
-                    kpi_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), SECONDARY_COLOR),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('ALIGN', (1, 0), (2, -1), 'CENTER'),
-                        ('GRID', (0, 0), (-1, -1), 0.5, colors.lightgrey),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, colors.white]),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ]))
-                    elements.append(kpi_table)
-                    
-                    elements.append(Spacer(1, 20))
-                    
-                    # Financial Analysis
-                    elements.append(Paragraph("FINANCIAL ANALYSIS", section_style))
-                    
-                    analysis_text = f"""
-                    <b>Financial Overview:</b> This report covers the period from {report_summary['date_range']}. 
-                    The farm has generated <b>{format_currency(total_income)}</b> in revenue with expenses totaling 
-                    <b>{format_currency(total_expenses)}</b>, resulting in a net {("profit" if net_profit > 0 else "loss")} 
-                    of <b>{format_currency(net_profit)}</b>.
-                    
-                    <b>Profitability Analysis:</b> The profit margin stands at <b>{profit_margin:.2f}%</b>, indicating 
-                    {("a strong" if profit_margin > 20 else "a moderate" if profit_margin > 10 else "a weak")} 
-                    financial performance for the reporting period.
-                    
-                    <b>Operational Efficiency:</b> With {len(export_df)} total transactions processed, the farm maintains 
-                    comprehensive record-keeping across all operational areas.
-                    """
-                    
-                    elements.append(Paragraph(analysis_text, ParagraphStyle(
-                        'AnalysisStyle',
-                        parent=styles['Normal'],
-                        fontSize=10,
-                        textColor=DARK_GRAY,
-                        spaceAfter=15,
-                        leading=14
-                    )))
-                    
-                    elements.append(PageBreak())
-                    
-                    # ===== PAGE 3: DETAILED TRANSACTIONS =====
-                    elements.append(Paragraph("DETAILED TRANSACTION DATA", section_style))
-                    
-                    # Data table preparation
-                    pdf_df = export_df.copy()
-                    
-                    # Format numeric columns
-                    if 'amount' in pdf_df.columns:
-                        pdf_df['amount'] = pdf_df['amount'].apply(lambda x: format_currency(x) if pd.notnull(x) else "")
-                    
-                    if 'paid' in pdf_df.columns:
-                        pdf_df['paid'] = pdf_df['paid'].apply(lambda x: format_currency(x) if pd.notnull(x) else "")
-                    
-                    # Format date columns
-                    date_columns = ['date', 'Date', 'created_at', 'updated_at']
-                    for col in date_columns:
-                        if col in pdf_df.columns:
-                            try:
-                                pdf_df[col] = pd.to_datetime(pdf_df[col]).dt.strftime('%Y-%m-%d')
-                            except:
-                                pass
-                    
-                    # Limit rows for readability
-                    max_rows = 100
-                    show_all = len(pdf_df) <= max_rows
-                    if not show_all:
-                        pdf_df = pdf_df.head(max_rows)
-                        elements.append(Paragraph(
-                            f"*Note: Showing first {max_rows} of {len(export_df)} records for readability*",
-                            ParagraphStyle(
-                                'NoteStyle',
-                                parent=styles['Normal'],
-                                fontSize=9,
-                                textColor=colors.grey,
-                                alignment=TA_CENTER
-                            )
-                        ))
-                        elements.append(Spacer(1, 10))
-                    
-                    # Create enhanced table
-                    table_data = [pdf_df.columns.tolist()] + pdf_df.values.tolist()
-                    
-                    # Calculate column widths
-                    num_cols = len(pdf_df.columns)
-                    col_width = (7*inch) / num_cols if num_cols > 0 else 1*inch
-                    
-                    data_table = Table(table_data, repeatRows=1, colWidths=[col_width] * num_cols)
-                    data_table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), HEADER_BG),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 9),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
-                        ('TOPPADDING', (0, 0), (-1, 0), 8),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                        ('GRID', (0, 0), (-1, -1), 0.25, colors.lightgrey),
-                        ('FONTSIZE', (0, 1), (-1, -1), 8),
-                        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [LIGHT_GRAY, colors.white]),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('TOPPADDING', (0, 1), (-1, -1), 4),
-                        ('BOTTOMPADDING', (0, 1), (-1, -1), 4),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                    ]))
-                    elements.append(data_table)
-                    
-                    # Summary Footer
-                    elements.append(Spacer(1, 20))
-                    
-                    summary_footer = Table([
-                        ["REPORT SUMMARY", "", ""],
-                        ["Total Revenue:", format_currency(total_income), ""],
-                        ["Total Expenses:", format_currency(total_expenses), ""],
-                        ["Net Result:", 
-                         Paragraph(f"<b><font color='{SUCCESS_COLOR.hexColor() if net_profit > 0 else ACCENT_COLOR.hexColor()}'>{format_currency(net_profit)}</font></b>", 
-                                  ParagraphStyle('ResultStyle', parent=styles['Normal'], fontSize=10, alignment=TA_LEFT)),
-                         f"{profit_margin:.2f}% Margin"]
-                    ], colWidths=[2*inch, 2*inch, 2*inch])
-                    
-                    summary_footer.setStyle(TableStyle([
-                        ('SPAN', (0, 0), (-1, 0)),
-                        ('BACKGROUND', (0, 0), (-1, 0), DARK_GRAY),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
-                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 11),
-                        ('FONTNAME', (0, 1), (0, 3), 'Helvetica-Bold'),
-                        ('ALIGN', (0, 1), (0, 3), 'RIGHT'),
-                        ('ALIGN', (1, 1), (1, 3), 'LEFT'),
-                        ('ALIGN', (2, 3), (2, 3), 'CENTER'),
-                        ('GRID', (0, 1), (-1, -1), 0.5, colors.lightgrey),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.white),
-                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-                        ('TOPPADDING', (0, 0), (-1, -1), 6),
-                        ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
-                    ]))
-                    elements.append(summary_footer)
-                    
-                    # ===== FOOTER =====
-                    elements.append(Spacer(1, 15))
-                    
-                    # Page count and footer
-                    footer_text = f"""
-                    <para alignment='center'>
-                    <font size=7 color='gray'>
-                    Farm Management System Report | Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')} | 
-                    Report ID: FMS-{datetime.now().strftime('%Y%m%d%H%M')} | 
-                    Confidential - For Internal Use Only | 
-                    Page <page/>
-                    </font>
-                    </para>
-                    """
-                    
-                    # Add footer
-                    class FooterCanvas(canvas.Canvas):
-                        def __init__(self, *args, **kwargs):
-                            canvas.Canvas.__init__(self, *args, **kwargs)
-                            self._saved_page_states = []
-                        
-                        def showPage(self):
-                            self._saved_page_states.append(dict(self.__dict__))
-                            self._startPage()
-                        
-                        def save(self):
-                            """add page info to each page (page x of y)"""
-                            num_pages = len(self._saved_page_states)
-                            for state in self._saved_page_states:
-                                self.__dict__.update(state)
-                                self.draw_page_footer(num_pages)
-                                canvas.Canvas.showPage(self)
-                            canvas.Canvas.save(self)
-                        
-                        def draw_page_footer(self, page_count):
-                            self.saveState()
-                            self.setFont('Helvetica', 7)
-                            self.setFillColor(colors.grey)
-                            
-                            # Footer text
-                            footer_line = f"Farm Management System • Page {self._pageNumber} of {page_count} • {datetime.now().strftime('%Y-%m-%d')}"
-                            text_width = self.stringWidth(footer_line, 'Helvetica', 7)
-                            
-                            # Draw footer
-                            self.drawString((A4[0] - text_width) / 2, 0.4*inch, footer_line)
-                            
-                            # Draw separator line
-                            self.setStrokeColor(colors.lightgrey)
-                            self.setLineWidth(0.5)
-                            self.line(0.5*inch, 0.5*inch, A4[0] - 0.5*inch, 0.5*inch)
-                            
-                            self.restoreState()
-                    
-                    # Build PDF with custom footer
-                    doc.build(elements, canvasmaker=FooterCanvas)
-                    buffer.seek(0)
-                    return buffer.getvalue()
-                
-                # Download PDF button with enhanced UI
-                if st.button("📑 Generate Professional PDF", 
-                           use_container_width=True, 
-                           key="tab6_download_pdf",
-                           type="primary",
-                           help="Create a professional PDF report with multiple pages and detailed analysis"):
-                    try:
-                        with st.spinner("🔄 Generating professional PDF report..."):
-                            pdf_bytes = generate_enhanced_pdf()
-                            
-                            # Create download button
-                            st.download_button(
-                                label="⬇️ Download PDF Report",
-                                data=pdf_bytes,
-                                file_name=f"Professional_{report_type.replace(' ', '_')}_Report_{date.today().strftime('%Y%m%d')}.pdf",
-                                mime="application/pdf",
-                                use_container_width=True,
-                                key="tab6_pdf_download_btn",
-                                icon="📥"
-                            )
-                            
-                            st.success("✅ Professional PDF report generated successfully!")
-                            
-                            # Show report preview
-                            with st.expander("📋 Report Preview", expanded=False):
-                                st.info(f"""
-                                **Report Features:**
-                                - Professional cover page with report details
-                                - Executive summary with financial highlights
-                                - Key performance indicators (KPIs)
-                                - Detailed transaction data with formatting
-                                - Confidential footer with page numbering
-                                - Optimized for printing and digital distribution
-                                
-                                **File Details:**
-                                - Name: `Professional_{report_type.replace(' ', '_')}_Report_{date.today().strftime('%Y%m%d')}.pdf`
-                                - Format: A4 Standard
-                                - Pages: Multiple (as needed)
-                                - Quality: Print-ready
-                                """)
-                                
-                    except Exception as e:
-                        st.error(f"❌ Error generating PDF: {str(e)}")
-                        st.info("💡 Please ensure all required packages are installed: `pip install reportlab pandas numpy`")
-                        st.code("pip install reportlab pandas numpy", language="bash")
+                        st.plotly_chart(fig2, use_container_width=True)
+            
+            with tab2:
+                if not expenses_data_filtered.empty:
+                    st.subheader("Expenses by Category")
+                    expenses_by_category = expenses_data_filtered.groupby('category')['amount'].sum().reset_index()
+                    if not expenses_by_category.empty:
+                        fig2 = px.bar(
+                            expenses_by_category,
+                            x='category',
+                            y='amount',
+                            title='Expenses Breakdown',
+                            color='amount',
+                            color_continuous_scale='Reds'
+                        )
+                        st.plotly_chart(fig2, use_container_width=True)
+            
+            with tab3:
+                # Time series analysis
+                if not income_data_filtered.empty:
+                    income_data_filtered['date'] = pd.to_datetime(income_data_filtered['date'])
+                    monthly_income = income_data_filtered.resample('M', on='date')['amount'].sum().reset_index()
+                    fig3 = px.line(
+                        monthly_income,
+                        x='date',
+                        y='amount',
+                        title='Monthly Income Trend',
+                        markers=True
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+            
+            with tab4:
+                st.dataframe(income_data_filtered.head(20), use_container_width=True)
+        
+        elif report_type == "Livestock Report":
+            st.markdown("### Livestock Report")
+            if not livestock_data_filtered.empty:
+                st.dataframe(livestock_data_filtered, use_container_width=True)
             else:
-                st.button("📑 Download PDF Report", 
-                         disabled=True, 
-                         use_container_width=True,
-                         help="No data available for PDF export")
+                st.info("No livestock data available for the selected filters.")
+        
+        elif report_type == "Crops Report":
+            st.markdown("### Crops Report")
+            if not crop_data_filtered.empty:
+                st.dataframe(crop_data_filtered, use_container_width=True)
+            else:
+                st.info("No crop data available for the selected filters.")
+        
+        elif report_type == "Water Report":
+            st.markdown("### Water Supply Report")
+            if not water_data_filtered.empty:
+                st.dataframe(water_data_filtered, use_container_width=True)
+            else:
+                st.info("No water supply data available for the selected filters.")
+        
+        # Export options section
+        st.markdown("---")
+        st.markdown("### Export Options (برآمد کے اختیارات)")
+        
+        # Create two columns for export buttons
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Export to CSV
+            @st.cache_data
+            def convert_df_to_csv(df):
+                return df.to_csv(index=False, encoding='utf-8-sig')
+            
+            # Combine relevant data based on report type
+            if report_type == "Summary Report":
+                export_df = pd.concat([
+                    income_data_filtered,
+                    expenses_data_filtered,
+                    livestock_data_filtered,
+                    crop_data_filtered,
+                    water_data_filtered
+                ], ignore_index=True)
+            elif report_type == "Livestock Report":
+                export_df = livestock_data_filtered
+            elif report_type == "Crops Report":
+                export_df = crop_data_filtered
+            elif report_type == "Water Report":
+                export_df = water_data_filtered
+            else:
+                export_df = income_data_filtered
+            
+            if not export_df.empty:
+                csv_data = convert_df_to_csv(export_df)
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv_data,
+                    file_name=f"{report_type.replace(' ', '_')}_{date.today()}.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                    help="Export data in CSV format for Excel/Google Sheets"
+                )
+            else:
+                st.button("📥 Download CSV", disabled=True, use_container_width=True)
+        
+        with col2:
+            # Export to Excel
+            if not export_df.empty:
+                @st.cache_data
+                def convert_df_to_excel(df):
+                    output = BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        df.to_excel(writer, index=False, sheet_name='Report')
+                    return output.getvalue()
+                
+                excel_data = convert_df_to_excel(export_df)
+                st.download_button(
+                    label="📊 Download Excel",
+                    data=excel_data,
+                    file_name=f"{report_type.replace(' ', '_')}_{date.today()}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    help="Export data in Excel format with better formatting"
+                )
+            else:
+                st.button("📊 Download Excel", disabled=True, use_container_width=True)
+        
+        with col3:
+            # PDF Export with simple template
+if not export_df.empty:
+    # Create simple PDF generation function
+    def generate_simple_pdf():
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet
+        from io import BytesIO
+        from reportlab.lib import colors
+        
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=20, bottomMargin=20)
+        elements = []
+        
+        # Simple styles
+        styles = getSampleStyleSheet()
+        
+        # Title
+        elements.append(Paragraph(f"{report_type}", styles['Title']))
+        elements.append(Paragraph(f"Date: {date.today().strftime('%Y-%m-%d')}", styles['Normal']))
+        if report_date_from and report_date_to:
+            elements.append(Paragraph(f"Period: {report_date_from} to {report_date_to}", styles['Normal']))
+        elements.append(Spacer(1, 15))
+        
+        # Summary Section
+        elements.append(Paragraph("Summary", styles['Heading2']))
+        
+        # Simple summary table
+        summary_data = [
+            ["Total Income", format_currency(total_income)],
+            ["Total Expenses", format_currency(total_expenses)],
+            ["Net Profit", format_currency(net_profit)],
+            ["Profit Margin", f"{profit_margin:.2f}%"],
+            ["Category", report_category],
+            ["Total Records", len(export_df)]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[200, 200])
+        summary_table.setStyle(TableStyle([
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ]))
+        elements.append(summary_table)
+        elements.append(Spacer(1, 15))
+        
+        # Data Table Section
+        elements.append(Paragraph("Data Details", styles['Heading2']))
+        
+        # Limit rows for PDF
+        pdf_df = export_df.head(100).copy()
+        
+        # Prepare table data
+        table_data = [pdf_df.columns.tolist()] + pdf_df.values.tolist()
+        
+        # Simple table
+        data_table = Table(table_data, repeatRows=1)
+        data_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ]))
+        elements.append(data_table)
+        
+        # Simple footer
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph(f"Generated on {date.today().strftime('%Y-%m-%d %H:%M')}", 
+                                 styles['Italic']))
+        
+        # Build PDF
+        doc.build(elements)
+        buffer.seek(0)
+        return buffer.getvalue()
+    
+    # Download PDF button - SIMPLIFIED
+    if st.button("📄 Download PDF", use_container_width=True, key="tab6_download_pdf"):
+        try:
+            with st.spinner("Generating PDF..."):
+                pdf_bytes = generate_simple_pdf()
+                st.download_button(
+                    label="⬇️ Download PDF File",
+                    data=pdf_bytes,
+                    file_name=f"{report_type.replace(' ', '_')}_{date.today().strftime('%Y%m%d')}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+            st.success("PDF generated successfully!")
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
+            st.info("Install required packages: pip install reportlab")
+        # Additional actions row
+        st.markdown("---")
+        action_col1, action_col2 = st.columns(2)
+        
+        with action_col1:
+            if st.button("🖨️ Print Report", use_container_width=True, key="tab6_print"):
+                st.info("Use your browser's print function (Ctrl+P) to print this report")
+        
+        with action_col2:
+            if st.button("🗑️ Clear Report", use_container_width=True, key="tab6_clear_report"):
+                st.session_state.generate_report = False
+                st.session_state.report_data = None
+                st.rerun()
+        
+        # Report statistics
+        with st.expander("📊 Report Statistics"):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Income Records", len(income_data_filtered))
+            with col2:
+                st.metric("Expense Records", len(expenses_data_filtered))
+            with col3:
+                st.metric("Total Records", len(export_df))
 # Tab 7: Farmer Ledger Details - FIXED VERSION
 with tabs[6]:
     st.markdown("<div class='section-card'><h3>👤 Farmer Ledger Details (کسان کھاتا کی تفصیل)</h3></div>", unsafe_allow_html=True)
