@@ -1977,525 +1977,230 @@ with tabs[4]:
         if not income_by_source.empty:
             fig = px.pie(income_by_source, values='amount', names='source', title='Income Distribution by Source')
             st.plotly_chart(fig, use_container_width=True)
-# Tab 6: Reports & Analytics
+# Tab 6: Reports
 with tabs[5]:
-    st.markdown("<div class='section-card'><h3>📊 Comprehensive Reports & Analytics (جامع رپورٹس اور تجزیات)</h3></div>", unsafe_allow_html=True)
-    
-    # Report Configuration Section
-    st.markdown("<div class='subsection-card'><h4>🔧 Report Configuration (رپورٹ ترتیب)</h4></div>", unsafe_allow_html=True)
+    st.markdown("<div class='section-card'><h3>📊 Comprehensive Reports (جامع رپورٹس)</h3></div>", unsafe_allow_html=True)
     
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         report_type = st.selectbox(
             "Report Type (رپورٹ کی قسم)",
-            [
-                "Comprehensive Financial Report", 
-                "Expense Analysis Report", 
-                "Income Analysis Report", 
-                "Livestock Performance Report", 
-                "Crop Production Report", 
-                "Water Management Report",
-                "Profit & Loss Statement",
-                "Balance Sheet Summary"
-            ],
-            key="tab6_report_type",
-            help="Select the type of report to generate"
+            ["Summary Report", "Expense Report", "Income Report", 
+             "Livestock Report", "Crops Report", "Water Report"],
+            key="tab6_report_type"
         )
     
     with col2:
         report_category = st.selectbox(
-            "Category Filter (زمرہ فلٹر)",
-            ["All Categories (سب زمرے)", "Livestock (مویشی)", "Crop (فصل)", 
-             "Water (پانی)", "Equipment (آلات)", "Labor (مزدوری)"],
+            "Category (زمرہ)",
+            ["All (سب)", "Livestock (مویشی)", "Crop (فصل)", "Water (پانی)"],
             key="tab6_report_category"
         )
     
     with col3:
-        report_date_from = st.date_input(
-            "From Date (تاریخ سے)", 
-            key="tab6_report_date_from", 
-            value=None,
-            help="Start date for report data"
-        )
+        report_date_from = st.date_input("From Date (تاریخ سے)", key="tab6_report_date_from", value=None)
     
     with col4:
-        report_date_to = st.date_input(
-            "To Date (تاریخ تک)", 
-            key="tab6_report_date_to", 
-            value=None,
-            help="End date for report data"
-        )
-    
-    # Advanced Filters
-    with st.expander("⚙️ Advanced Filters (اعلی درجے کے فلٹرز)"):
-        col1, col2 = st.columns(2)
-        with col1:
-            report_format = st.selectbox(
-                "Output Format (آؤٹ پٹ فارمیٹ)",
-                ["PDF Report", "Excel Spreadsheet", "CSV Data", "HTML Report"],
-                key="tab6_report_format"
-            )
-        with col2:
-            include_charts = st.checkbox(
-                "Include Charts & Graphs (چارٹ اور گراف شامل کریں)", 
-                value=True,
-                key="tab6_include_charts"
-            )
-    
-    # Action Buttons
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
-    with col1:
-        if st.button(
-            "📊 Generate Report", 
-            type="primary", 
-            use_container_width=True, 
-            key="tab6_generate_report",
-            help="Generate and preview the report"
-        ):
-            st.session_state.generate_report = True
-            st.session_state.report_generated_time = datetime.now()
-    
-    with col2:
-        if st.button(
-            "🔄 Reset Filters", 
-            use_container_width=True,
-            key="tab6_reset_filters"
-        ):
-            st.session_state.generate_report = False
-            st.rerun()
-    
-    # Report Preview Section
-    if st.session_state.get('generate_report', False):
-        st.markdown("---")
-        st.markdown("<div class='section-card'><h3>📄 Report Preview (رپورٹ پیش نظارہ)</h3></div>", unsafe_allow_html=True)
-        
-        # Show report metadata
-        metadata_col1, metadata_col2, metadata_col3 = st.columns(3)
-        with metadata_col1:
-            st.info(f"**Report ID:** REP-{datetime.now().strftime('%Y%m%d-%H%M%S')}")
-        with metadata_col2:
-            st.info(f"**Generated:** {st.session_state.report_generated_time.strftime('%Y-%m-%d %H:%M:%S')}")
-        with metadata_col3:
-            if report_date_from and report_date_to:
-                st.info(f"**Period:** {report_date_from} to {report_date_to}")
-        
-        # Filter data based on selections
-        filtered_data = apply_filters(
-            st.session_state, 
-            report_date_from, 
-            report_date_to, 
-            report_category
-        )
-        
-        # Calculate comprehensive metrics
-        metrics = calculate_report_metrics(filtered_data)
-        
-        # Display Financial Summary Dashboard
-        st.markdown("<div class='subsection-card'><h4>💰 Financial Summary (مالی خلاصہ)</h4></div>", unsafe_allow_html=True)
-        
-        # Top Level Metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric(
-                label="Total Income (کل آمدنی)", 
-                value=format_currency(metrics['total_income']),
-                delta=format_currency(metrics['income_growth']) if metrics.get('income_growth') else None,
-                delta_color="normal"
-            )
-        with col2:
-            st.metric(
-                label="Total Expenses (کل اخراجات)", 
-                value=format_currency(metrics['total_expenses']),
-                delta=format_currency(metrics['expense_growth']) if metrics.get('expense_growth') else None,
-                delta_color="inverse"
-            )
-        with col3:
-            st.metric(
-                label="Net Profit (خالص منافع)", 
-                value=format_currency(metrics['net_profit']),
-                delta=f"{metrics['profit_margin']:.1f}%",
-                delta_color="normal" if metrics['net_profit'] > 0 else "inverse"
-            )
-        with col4:
-            profit_color = "🟢" if metrics['profit_margin'] > 20 else "🟡" if metrics['profit_margin'] > 0 else "🔴"
-            st.metric(
-                label="Profit Margin (منافع مارجن)", 
-                value=f"{profit_color} {metrics['profit_margin']:.2f}%"
-            )
-        
-        # Detailed Metrics
-        st.markdown("<div class='subsection-card'><h4>📈 Detailed Analytics (تفصیلی تجزیات)</h4></div>", unsafe_allow_html=True)
-        
-        if include_charts:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Income Breakdown Chart
-                if not filtered_data['income'].empty:
-                    st.subheader("Income Breakdown (آمدنی کی تقسیم)")
-                    fig1 = px.pie(
-                        filtered_data['income'].groupby('source')['amount'].sum().reset_index(),
-                        values='amount',
-                        names='source',
-                        title='Income Distribution by Source',
-                        hole=0.3,
-                        color_discrete_sequence=px.colors.sequential.Viridis
-                    )
-                    fig1.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig1, use_container_width=True)
-            
-            with col2:
-                # Expense Breakdown Chart
-                if not filtered_data['expenses'].empty:
-                    st.subheader("Expense Breakdown (اخراجات کی تقسیم)")
-                    fig2 = px.bar(
-                        filtered_data['expenses'].groupby('category')['amount'].sum().reset_index().sort_values('amount', ascending=False),
-                        x='category',
-                        y='amount',
-                        title='Expenses by Category',
-                        color='amount',
-                        color_continuous_scale='Viridis'
-                    )
-                    fig2.update_layout(xaxis_title='Category', yaxis_title='Amount (PKR)')
-                    st.plotly_chart(fig2, use_container_width=True)
-        
-        # Data Tables Section
-        st.markdown("<div class='subsection-card'><h4>📋 Detailed Data (تفصیلی ڈیٹا)</h4></div>", unsafe_allow_html=True)
-        
-        # Display relevant data tables based on report type
-        if report_type == "Livestock Performance Report":
-            if not filtered_data['livestock'].empty:
-                display_livestock_report(filtered_data['livestock'])
-            else:
-                st.warning("No livestock data available for the selected period.")
-        
-        elif report_type == "Crop Production Report":
-            if not filtered_data['crops'].empty:
-                display_crop_report(filtered_data['crops'])
-            else:
-                st.warning("No crop data available for the selected period.")
-        
-        # Export Section
-        st.markdown("---")
-        st.markdown("<div class='section-card'><h3>📤 Export Options (ایکسپورٹ کے اختیارات)</h3></div>", unsafe_allow_html=True)
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            # PDF Export
-            if st.button(
-                "📄 Download PDF Report", 
-                use_container_width=True,
-                help="Download professional PDF report with charts and analysis"
-            ):
-                pdf_bytes = generate_pdf_report(
-                    report_type=report_type,
-                    metrics=metrics,
-                    data=filtered_data,
-                    date_range=(report_date_from, report_date_to),
-                    include_charts=include_charts
-                )
-                
-                st.download_button(
-                    label="⬇️ Save PDF",
-                    data=pdf_bytes,
-                    file_name=f"Farm_Report_{report_type.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                    mime="application/pdf",
-                    key="tab6_download_pdf",
-                    use_container_width=True
-                )
-        
-        with col2:
-            # Excel Export
-            if not all(df.empty for df in filtered_data.values()):
-                excel_buffer = export_to_excel(filtered_data, report_type)
-                st.download_button(
-                    label="📊 Download Excel",
-                    data=excel_buffer,
-                    file_name=f"Farm_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="tab6_download_excel",
-                    use_container_width=True
-                )
-            else:
-                st.button("📊 Download Excel", disabled=True, use_container_width=True)
-        
-        with col3:
-            # JSON Export
-            if st.button("📁 Export as JSON", use_container_width=True):
-                json_data = export_to_json(filtered_data, metrics)
-                st.download_button(
-                    label="📁 Download JSON",
-                    data=json_data,
-                    file_name=f"Farm_Data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json",
-                    key="tab6_download_json",
-                    use_container_width=True
-                )
-        
-        # Report Actions
-        st.markdown("---")
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("🖨️ Print Report", use_container_width=True, icon="🖨️"):
-                st.session_state.print_report = True
-                st.success("Use browser's print function (Ctrl+P) or download PDF for printing")
-        
-        with col2:
-            if st.button("🗑️ Clear Report", use_container_width=True, type="secondary"):
-                st.session_state.generate_report = False
-                st.rerun()
-                # Add these helper functions to your code
-
-def apply_filters(session_state, date_from, date_to, category):
-    """Apply filters to all datasets"""
-    from datetime import datetime
-    import pandas as pd
-    
-    def filter_by_dates(df, date_column='date'):
-        if df.empty:
-            return df
-        
-        df = df.copy()
-        if date_column in df.columns:
-            df[date_column] = pd.to_datetime(df[date_column])
-            
-            if date_from:
-                df = df[df[date_column] >= pd.Timestamp(date_from)]
-            if date_to:
-                df = df[df[date_column] <= pd.Timestamp(date_to)]
-        
-        return df
-    
-    # Filter each dataset
-    filtered = {
-        'income': filter_by_dates(session_state.income_data),
-        'expenses': filter_by_dates(session_state.expenses_data),
-        'livestock': filter_by_dates(session_state.livestock_data),
-        'crops': filter_by_dates(session_state.crop_data),
-        'water': filter_by_dates(session_state.water_supply_data)
-    }
-    
-    # Apply category filter
-    if category != "All Categories (سب زمرے)":
-        category_map = {
-            "Livestock (مویشی)": "livestock",
-            "Crop (فصل)": "crop",
-            "Water (پانی)": "water",
-            "Equipment (آلات)": "equipment",
-            "Labor (مزدوری)": "labor"
-        }
-        
-        selected = category_map.get(category, "")
-        # Additional category filtering logic here
-    
-    return filtered
-
-def calculate_report_metrics(filtered_data):
-    """Calculate comprehensive financial metrics"""
-    metrics = {}
-    
-    # Calculate totals
-    metrics['total_income'] = (
-        filtered_data['income']['amount'].sum() if not filtered_data['income'].empty else 0 +
-        filtered_data['water']['paid'].sum() if not filtered_data['water'].empty else 0
-    )
-    
-    metrics['total_expenses'] = (
-        filtered_data['expenses']['amount'].sum() if not filtered_data['expenses'].empty else 0 +
-        filtered_data['livestock'][filtered_data['livestock']['transaction_type'] == 'expense']['amount'].sum() 
-        if not filtered_data['livestock'].empty else 0 +
-        filtered_data['crops'][filtered_data['crops']['transaction_type'] == 'expense']['amount'].sum()
-        if not filtered_data['crops'].empty else 0
-    )
-    
-    metrics['net_profit'] = metrics['total_income'] - metrics['total_expenses']
-    metrics['profit_margin'] = (
-        (metrics['net_profit'] / metrics['total_income'] * 100) 
-        if metrics['total_income'] > 0 else 0
-    )
-    
-    return metrics
-
-def generate_pdf_report(report_type, metrics, data, date_range, include_charts=True):
-    """Generate professional PDF report"""
-    from reportlab.lib.pagesizes import letter, landscape
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import inch
-    from reportlab.lib import colors
-    from io import BytesIO
-    import plotly.io as pio
-    
-    buffer = BytesIO()
-    
-    # Create PDF document
-    doc = SimpleDocTemplate(
-        buffer,
-        pagesize=landscape(letter),
-        rightMargin=72,
-        leftMargin=72,
-        topMargin=72,
-        bottomMargin=72
-    )
-    
-    styles = getSampleStyleSheet()
-    story = []
-    
-    # Add title
-    title_style = ParagraphStyle(
-        'CustomTitle',
-        parent=styles['Heading1'],
-        fontSize=24,
-        spaceAfter=30,
-        alignment=1  # Center alignment
-    )
-    story.append(Paragraph(f"Farm Management Report: {report_type}", title_style))
-    story.append(Spacer(1, 0.25*inch))
-    
-    # Add metadata
-    meta_style = ParagraphStyle(
-        'MetaStyle',
-        parent=styles['Normal'],
-        fontSize=10,
-        textColor=colors.gray
-    )
-    if date_range[0] and date_range[1]:
-        story.append(Paragraph(f"Report Period: {date_range[0]} to {date_range[1]}", meta_style))
-    story.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", meta_style))
-    story.append(Spacer(1, 0.5*inch))
-    
-    # Add metrics table
-    metrics_data = [
-        ['Metric', 'Value'],
-        ['Total Income', format_currency(metrics['total_income'])],
-        ['Total Expenses', format_currency(metrics['total_expenses'])],
-        ['Net Profit', format_currency(metrics['net_profit'])],
-        ['Profit Margin', f"{metrics['profit_margin']:.2f}%"]
-    ]
-    
-    metrics_table = Table(metrics_data, colWidths=[3*inch, 2*inch])
-    metrics_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, 0), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F0F3FF')),
-        ('GRID', (0, 0), (-1, -1), 1, colors.gray),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-    ]))
-    
-    story.append(metrics_table)
-    story.append(Spacer(1, 0.5*inch))
-    
-    # Add data summary
-    story.append(Paragraph("Data Summary", styles['Heading2']))
-    
-    summary_data = [
-        ['Dataset', 'Records', 'Total Amount'],
-        ['Income Transactions', len(data['income']), format_currency(data['income']['amount'].sum() if not data['income'].empty else 0)],
-        ['Expense Transactions', len(data['expenses']), format_currency(data['expenses']['amount'].sum() if not data['expenses'].empty else 0)],
-        ['Livestock Records', len(data['livestock']), 'N/A'],
-        ['Crop Records', len(data['crops']), 'N/A']
-    ]
-    
-    summary_table = Table(summary_data, colWidths=[2.5*inch, 1.5*inch, 2*inch])
-    summary_table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A23B72')),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.gray),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-    ]))
-    
-    story.append(summary_table)
-    
-    # Build PDF
-    doc.build(story)
-    
-    buffer.seek(0)
-    return buffer.getvalue()
-
-def export_to_excel(data, report_type):
-    """Export data to Excel format"""
-    import pandas as pd
-    from io import BytesIO
-    
-    buffer = BytesIO()
-    
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        for sheet_name, df in data.items():
-            if not df.empty:
-                df.to_excel(writer, sheet_name=sheet_name[:31], index=False)
-        
-        # Add summary sheet
-        summary_df = pd.DataFrame({
-            'Metric': ['Report Type', 'Export Date', 'Total Sheets'],
-            'Value': [report_type, datetime.now().strftime('%Y-%m-%d'), len([df for df in data.values() if not df.empty])]
-        })
-        summary_df.to_excel(writer, sheet_name='Summary', index=False)
-    
-    buffer.seek(0)
-    return buffer
-
-def export_to_json(data, metrics):
-    """Export data and metrics to JSON format"""
-    import json
-    
-    export_data = {
-        'metadata': {
-            'export_date': datetime.now().isoformat(),
-            'report_type': report_type,
-            'data_version': '1.0'
-        },
-        'metrics': metrics,
-        'record_counts': {
-            'income_records': len(data['income']),
-            'expense_records': len(data['expenses']),
-            'livestock_records': len(data['livestock']),
-            'crop_records': len(data['crops']),
-            'water_records': len(data['water'])
-        }
-    }
-    
-    return json.dumps(export_data, indent=2, default=str)
-
-def display_livestock_report(data):
-    """Display formatted livestock report"""
-    if data.empty:
-        return
-    
-    st.subheader("Livestock Performance Metrics")
-    
-    # Calculate livestock metrics
-    total_livestock = len(data)
-    avg_weight = data['weight'].mean() if 'weight' in data.columns else None
-    total_value = (data['quantity'] * data['price']).sum() if all(col in data.columns for col in ['quantity', 'price']) else None
+        report_date_to = st.date_input("To Date (تاریخ تک)", key="tab6_report_date_to", value=None)
     
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Total Livestock Count", total_livestock)
-    with col2:
-        if avg_weight:
-            st.metric("Average Weight (kg)", f"{avg_weight:.1f}")
-    with col3:
-        if total_value:
-            st.metric("Total Value", format_currency(total_value))
+        if st.button("📈 Generate Report", type="primary", use_container_width=True, key="tab6_generate_report"):
+            st.session_state.generate_report = True
     
-    # Display data table
-    st.dataframe(
-        data,
-        use_container_width=True,
-        column_config={
-            'date': st.column_config.DateColumn('Date'),
-            'type': 'Type',
-            'quantity': st.column_config.NumberColumn('Quantity', format="%d"),
-            'price': st.column_config.NumberColumn('Price', format="PKR %.2f"),
-            'weight': st.column_config.NumberColumn('Weight (kg)', format="%.1f kg")
-        }
-    )
+    # Report Preview
+    if st.session_state.generate_report:
+        st.markdown("<div class='section-card'><h3>📄 Report Preview (رپورٹ پیش نظارہ)</h3></div>", unsafe_allow_html=True)
+        
+        # Calculate summary statistics with date filtering
+        income_data_filtered = st.session_state.income_data.copy()
+        water_data_filtered = st.session_state.water_supply_data.copy()
+        expenses_data_filtered = st.session_state.expenses_data.copy()
+        livestock_data_filtered = st.session_state.livestock_data.copy()
+        crop_data_filtered = st.session_state.crop_data.copy()
+        
+        # Apply date filters if provided
+        if report_date_from:
+            income_data_filtered = convert_dates(income_data_filtered)
+            income_data_filtered = income_data_filtered[income_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            water_data_filtered = convert_dates(water_data_filtered)
+            water_data_filtered = water_data_filtered[water_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            expenses_data_filtered = convert_dates(expenses_data_filtered)
+            expenses_data_filtered = expenses_data_filtered[expenses_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            livestock_data_filtered = convert_dates(livestock_data_filtered)
+            livestock_data_filtered = livestock_data_filtered[livestock_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+            
+            crop_data_filtered = convert_dates(crop_data_filtered)
+            crop_data_filtered = crop_data_filtered[crop_data_filtered['date'] >= pd.Timestamp(report_date_from)]
+        
+        if report_date_to:
+            income_data_filtered = convert_dates(income_data_filtered)
+            income_data_filtered = income_data_filtered[income_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            water_data_filtered = convert_dates(water_data_filtered)
+            water_data_filtered = water_data_filtered[water_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            expenses_data_filtered = convert_dates(expenses_data_filtered)
+            expenses_data_filtered = expenses_data_filtered[expenses_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            livestock_data_filtered = convert_dates(livestock_data_filtered)
+            livestock_data_filtered = livestock_data_filtered[livestock_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+            
+            crop_data_filtered = convert_dates(crop_data_filtered)
+            crop_data_filtered = crop_data_filtered[crop_data_filtered['date'] <= pd.Timestamp(report_date_to)]
+        
+        # Apply category filter
+        if report_category != "All (سب)":
+            category_map = {
+                "Livestock (مویشی)": "Livestock",
+                "Crop (فصل)": "Crop",
+                "Water (پانی)": "Water"
+            }
+            selected_category = category_map.get(report_category, "")
+            
+            if selected_category == "Livestock":
+                # Filter livestock-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Livestock|Goats|Beef|Cows', na=False, case=False)
+                ]
+            elif selected_category == "Crop":
+                # Filter crop-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+                expenses_data_filtered = expenses_data_filtered[
+                    expenses_data_filtered['category'].astype(str).str.contains('Crop', na=False, case=False)
+                ]
+            elif selected_category == "Water":
+                # Filter water-related data
+                income_data_filtered = income_data_filtered[
+                    income_data_filtered['source'].astype(str).str.contains('Water', na=False, case=False)
+                ]
+        
+        # Calculate totals
+        total_income = income_data_filtered['amount'].sum() + water_data_filtered['paid'].sum()
+        total_expenses = (
+            expenses_data_filtered['amount'].sum() +
+            livestock_data_filtered[livestock_data_filtered['transaction_type'] == 'expense']['amount'].sum() +
+            crop_data_filtered[crop_data_filtered['transaction_type'] == 'expense']['amount'].sum()
+        )
+        
+        net_profit = total_income - total_expenses
+        profit_margin = (net_profit / total_income * 100) if total_income > 0 else 0
+        
+        # Display financial summary
+        st.markdown("### Financial Summary (مالی خلاصہ)")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Report Total Income", format_currency(total_income))
+        with col2:
+            st.metric("Report Total Expenses", format_currency(total_expenses))
+        with col3:
+            st.metric("Report Net Profit", format_currency(net_profit), delta_color="inverse")
+        with col4:
+            st.metric("Report Profit Margin", f"{profit_margin:.2f}%")
+        
+        # Report-specific content
+        if report_type == "Summary Report":
+            st.markdown("### Detailed Breakdown")
+            
+            # Income by source
+            if not income_data_filtered.empty:
+                st.subheader("Income by Source")
+                income_by_source = income_data_filtered.groupby('source')['amount'].sum().reset_index()
+                if not income_by_source.empty:
+                    fig1 = px.pie(
+                        income_by_source,
+                        values='amount',
+                        names='source',
+                        title='Income by Source'
+                    )
+                    st.plotly_chart(fig1, use_container_width=True, key="tab6_income_pie")
+            
+            # Expenses by category
+            if not expenses_data_filtered.empty:
+                st.subheader("Expenses by Category")
+                expenses_by_category = expenses_data_filtered.groupby('category')['amount'].sum().reset_index()
+                if not expenses_by_category.empty:
+                    fig2 = px.bar(
+                        expenses_by_category,
+                        x='category',
+                        y='amount',
+                        title='Expenses by Category',
+                        color='amount'
+                    )
+                    st.plotly_chart(fig2, use_container_width=True, key="tab6_expenses_bar")
+        
+        elif report_type == "Livestock Report":
+            st.markdown("### Livestock Report")
+            if not livestock_data_filtered.empty:
+                st.dataframe(livestock_data_filtered, use_container_width=True)
+            else:
+                st.info("No livestock data available for the selected filters.")
+        
+        elif report_type == "Crops Report":
+            st.markdown("### Crops Report")
+            if not crop_data_filtered.empty:
+                st.dataframe(crop_data_filtered, use_container_width=True)
+            else:
+                st.info("No crop data available for the selected filters.")
+        
+        elif report_type == "Water Report":
+            st.markdown("### Water Supply Report")
+            if not water_data_filtered.empty:
+                st.dataframe(water_data_filtered, use_container_width=True)
+            else:
+                st.info("No water supply data available for the selected filters.")
+        
+        # Export options
+        st.markdown("### Export Options")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # Export to CSV
+            @st.cache_data
+            def convert_df_to_csv(df):
+                return df.to_csv(index=False).encode('utf-8')
+            
+            # Combine relevant data based on report type
+            if report_type == "Summary Report":
+                export_df = pd.concat([
+                    income_data_filtered,
+                    expenses_data_filtered,
+                    livestock_data_filtered,
+                    crop_data_filtered,
+                    water_data_filtered
+                ], ignore_index=True)
+            elif report_type == "Livestock Report":
+                export_df = livestock_data_filtered
+            elif report_type == "Crops Report":
+                export_df = crop_data_filtered
+            elif report_type == "Water Report":
+                export_df = water_data_filtered
+            else:
+                export_df = income_data_filtered
+            
+            if not export_df.empty:
+                csv = convert_df_to_csv(export_df)
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name=f"{report_type.replace(' ', '_')}_{date.today()}.csv",
+                    mime="text/csv",
+                    key="tab6_download_csv"
+                )
+            else:
+                st.warning("No data to export")
+        
+        with col2:
+            # Clear report button
+            if st.button("Clear Report", use_container_width=True, key="tab6_clear_report"):
+                st.session_state.generate_report = False
+                st.rerun()
+
 # Tab 7: Farmer Ledger Details - FIXED VERSION
 with tabs[6]:
     st.markdown("<div class='section-card'><h3>👤 Farmer Ledger Details (کسان کھاتا کی تفصیل)</h3></div>", unsafe_allow_html=True)
