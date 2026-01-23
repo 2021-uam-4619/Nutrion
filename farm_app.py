@@ -463,7 +463,7 @@ def load_data():
         return False
 
 def format_currency(value):
-    return f"PKR {value:,.2f}"
+    return f"PKR {value:,.0f}"
 
 def create_excel_template(tab_name):
     """Create Excel template for different tabs with sample data"""
