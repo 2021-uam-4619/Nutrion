@@ -585,23 +585,23 @@ with tabs[0]:
         col1, col2, col3 = st.columns(3)
         with col1:
             total_expenses = calc_data[calc_data['transaction_type'] == 'expense']['amount'].sum()
-            st.metric("Total Expenses", format_currency(total_expenses), key="tab1_total_expenses")
+            st.metric("Livestock Total Expenses", format_currency(total_expenses))
         
         with col2:
             total_income = calc_data[calc_data['transaction_type'] == 'income']['amount'].sum()
-            st.metric("Total Income", format_currency(total_income), key="tab1_total_income")
+            st.metric("Livestock Total Income", format_currency(total_income))
         
         with col3:
             net_balance = total_income - total_expenses
-            st.metric("Net Balance", format_currency(net_balance), delta_color="inverse", key="tab1_net_balance")
+            st.metric("Livestock Net Balance", format_currency(net_balance), delta_color="inverse")
     else:
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Expenses", format_currency(0), key="tab1_total_expenses_empty")
+            st.metric("Livestock Expenses (No Data)", format_currency(0))
         with col2:
-            st.metric("Total Income", format_currency(0), key="tab1_total_income_empty")
+            st.metric("Livestock Income (No Data)", format_currency(0))
         with col3:
-            st.metric("Net Balance", format_currency(0), key="tab1_net_balance_empty")
+            st.metric("Livestock Balance (No Data)", format_currency(0))
 
 # Tab 2: Crop Management
 with tabs[1]:
@@ -917,25 +917,25 @@ with tabs[3]:
             today_expenses = expenses_data[
                 expenses_data['date'].dt.date == today
             ]['amount'].sum()
-            st.metric("Today's Expenses", format_currency(today_expenses), key="tab4_today_expenses")
+            st.metric("Today's Expenses", format_currency(today_expenses))
         
         with col2:
             month_expenses = expenses_data[
                 (expenses_data['date'].dt.date >= month_start) &
                 (expenses_data['date'].dt.date <= today)
             ]['amount'].sum()
-            st.metric("This Month", format_currency(month_expenses), key="tab4_month_expenses")
+            st.metric("This Month Expenses", format_currency(month_expenses))
         
         with col3:
             total_expenses = expenses_data['amount'].sum()
-            st.metric("Total Expenses", format_currency(total_expenses), key="tab4_total_expenses")
+            st.metric("Total Expenses", format_currency(total_expenses))
     else:
         with col1:
-            st.metric("Today's Expenses", format_currency(0), key="tab4_today_expenses_empty")
+            st.metric("Today's Expenses (No Data)", format_currency(0))
         with col2:
-            st.metric("This Month", format_currency(0), key="tab4_month_expenses_empty")
+            st.metric("This Month Expenses (No Data)", format_currency(0))
         with col3:
-            st.metric("Total Expenses", format_currency(0), key="tab4_total_expenses_empty")
+            st.metric("Total Expenses (No Data)", format_currency(0))
     
     # All Expenses Table
     st.markdown("<div class='section-card'><h3>📋 All Expenses (تمام اخراجات)</h3></div>", unsafe_allow_html=True)
@@ -1056,16 +1056,16 @@ with tabs[4]:
         total_income = livestock_income + crop_income + water_income
     
     with col1:
-        st.metric("Livestock Income", format_currency(livestock_income), key="tab5_livestock_income")
+        st.metric("Livestock Income", format_currency(livestock_income))
     
     with col2:
-        st.metric("Crop Income", format_currency(crop_income), key="tab5_crop_income")
+        st.metric("Crop Income", format_currency(crop_income))
     
     with col3:
-        st.metric("Water Supply Income", format_currency(water_income), key="tab5_water_income")
+        st.metric("Water Supply Income", format_currency(water_income))
     
     with col4:
-        st.metric("Total Income", format_currency(total_income), key="tab5_total_income")
+        st.metric("Total Income", format_currency(total_income))
     
     # Income Records
     st.markdown("<div class='section-card'><h3>📋 Income Records (آمدنی کے رکارڈز)</h3></div>", unsafe_allow_html=True)
@@ -1202,13 +1202,13 @@ with tabs[5]:
         st.markdown("### Financial Summary (مالی خلاصہ)")
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.metric("Total Income", format_currency(total_income), key="tab6_total_income")
+            st.metric("Report Total Income", format_currency(total_income))
         with col2:
-            st.metric("Total Expenses", format_currency(total_expenses), key="tab6_total_expenses")
+            st.metric("Report Total Expenses", format_currency(total_expenses))
         with col3:
-            st.metric("Net Profit", format_currency(net_profit), delta_color="inverse", key="tab6_net_profit")
+            st.metric("Report Net Profit", format_currency(net_profit), delta_color="inverse")
         with col4:
-            st.metric("Profit Margin", f"{profit_margin:.2f}%", key="tab6_profit_margin")
+            st.metric("Report Profit Margin", f"{profit_margin:.2f}%")
         
         # Report-specific content
         if report_type == "Summary Report":
@@ -1380,7 +1380,7 @@ with st.sidebar:
         len(st.session_state.income_data)
     )
     
-    st.metric("Total Records", total_records, key="sidebar_total_records")
+    st.metric("System Total Records", total_records)
     
     # Quick Actions
     st.markdown("## ⚡ Quick Actions")
