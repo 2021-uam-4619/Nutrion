@@ -1055,7 +1055,9 @@ with tabs[0]:
             with cols[6]:
                 st.write(row['manager'])
             with cols[7]:
-                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                # Safely handle remarks column
+                remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
             with cols[8]:
                 if st.button("✏️", key=f"edit_livestock_{row['id']}_{idx}"):
                     show_edit_modal("livestock", row)
@@ -1265,7 +1267,9 @@ with tabs[1]:
             with cols[6]:
                 st.write(row['manager'])
             with cols[7]:
-                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                # Safely handle remarks column
+                remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
             with cols[8]:
                 if st.button("✏️", key=f"edit_crop_{row['id']}_{idx}"):
                     show_edit_modal("crop", row)
@@ -1606,7 +1610,9 @@ with tabs[2]:
             with cols[4]:
                 st.write(row['payment_method'])
             with cols[5]:
-                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                # Safely handle remarks column
+                remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
             with cols[6]:
                 if st.button("✏️", key=f"edit_payment_{row['id']}_{idx}"):
                     show_edit_modal("payments", row)
@@ -1733,7 +1739,9 @@ with tabs[3]:
             with cols[6]:
                 st.write(row['receipt_no'] if pd.notna(row['receipt_no']) else "")
             with cols[7]:
-                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                # Safely handle remarks column
+                remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
             with cols[8]:
                 if st.button("✏️", key=f"edit_expense_{row['id']}_{idx}"):
                     show_edit_modal("expenses", row)
@@ -1901,7 +1909,9 @@ with tabs[4]:
             with cols[6]:
                 st.write(row['receipt_no'] if pd.notna(row['receipt_no']) else "")
             with cols[7]:
-                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                # Safely handle remarks column
+                remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
             with cols[8]:
                 if st.button("✏️", key=f"edit_income_{row['id']}_{idx}"):
                     show_edit_modal("income", row)
@@ -2192,7 +2202,7 @@ with tabs[5]:
                 st.session_state.generate_report = False
                 st.rerun()
 
-# Tab 7: Farmer Ledger Details
+# Tab 7: Farmer Ledger Details - FIXED VERSION
 with tabs[6]:
     st.markdown("<div class='section-card'><h3>👤 Farmer Ledger Details (کسان کھاتا کی تفصیل)</h3></div>", unsafe_allow_html=True)
     
@@ -2246,7 +2256,7 @@ with tabs[6]:
                     balance_color = "inverse"
                 st.metric("Current Balance", format_currency(ledger_details['current_balance']), delta_color=balance_color)
             
-            # Water Supply Records
+            # Water Supply Records - FIXED: No remarks column
             st.markdown("#### 💧 Water Supply Records")
             if not ledger_details['water_records'].empty:
                 water_display = ledger_details['water_records'].copy()
@@ -2254,9 +2264,9 @@ with tabs[6]:
                 water_display['date'] = water_display['date'].dt.strftime('%Y-%m-%d')
                 water_display['status'] = water_display['balance'].apply(lambda x: 'Paid' if x <= 0 else 'Pending')
                 
-                # Display water records
+                # Display water records - FIXED: 10 columns without remarks
                 for idx, row in water_display.iterrows():
-                    cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+                    cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 1, 1])  # 10 columns
                     with cols[0]:
                         st.write(row['id'])
                     with cols[1]:
@@ -2274,11 +2284,9 @@ with tabs[6]:
                     with cols[7]:
                         st.write(row['status'])
                     with cols[8]:
-                        st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
-                    with cols[9]:
                         if st.button("✏️", key=f"tab7_edit_water_{row['id']}_{idx}"):
                             show_edit_modal("water_supply", row)
-                    with cols[10]:
+                    with cols[9]:
                         if st.button("🗑️", key=f"tab7_delete_water_{row['id']}_{idx}"):
                             if delete_record("water_supply", row['id']):
                                 st.success(f"Record {row['id']} deleted successfully!")
@@ -2286,16 +2294,16 @@ with tabs[6]:
             else:
                 st.info("No water supply records found for this farmer.")
             
-            # Payment Records
+            # Payment Records - FIXED: With remarks column
             st.markdown("#### 💰 Payment History")
             if not ledger_details['payment_records'].empty:
                 payment_display = ledger_details['payment_records'].copy()
                 payment_display = convert_dates(payment_display)
                 payment_display['date'] = payment_display['date'].dt.strftime('%Y-%m-%d')
                 
-                # Display payment records
+                # Display payment records - FIXED: 7 columns with remarks
                 for idx, row in payment_display.iterrows():
-                    cols = st.columns([1, 2, 2, 2, 2, 2, 1, 1])
+                    cols = st.columns([1, 2, 2, 2, 2, 1, 1])  # 7 columns
                     with cols[0]:
                         st.write(row['id'])
                     with cols[1]:
@@ -2305,13 +2313,13 @@ with tabs[6]:
                     with cols[3]:
                         st.write(row['payment_method'] if pd.notna(row['payment_method']) else "")
                     with cols[4]:
-                        st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                        # Safely handle remarks column
+                        remarks_text = str(row['remarks']) if 'remarks' in row and pd.notna(row['remarks']) else ""
+                        st.write(remarks_text[:20] + '...' if len(remarks_text) > 20 else remarks_text)
                     with cols[5]:
-                        st.write("")
-                    with cols[6]:
                         if st.button("✏️", key=f"tab7_edit_payment_{row['id']}_{idx}"):
                             show_edit_modal("payments", row)
-                    with cols[7]:
+                    with cols[6]:
                         if st.button("🗑️", key=f"tab7_delete_payment_{row['id']}_{idx}"):
                             if delete_record("payments", row['id']):
                                 st.success(f"Record {row['id']} deleted successfully!")
