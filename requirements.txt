@@ -11,3 +11,4 @@ plotly
 xlsxwriter
 DatabaseManager
 sqlalchemy
+sql
