@@ -466,35 +466,150 @@ def format_currency(value):
     return f"PKR {value:,.2f}"
 
 def create_excel_template(tab_name):
-    """Create Excel template for different tabs"""
+    """Create Excel template for different tabs with sample data"""
     if tab_name == "livestock":
-        template_df = pd.DataFrame(columns=[
-            'id', 'date', 'category', 'expense_type', 'quantity', 
-            'amount', 'manager', 'remarks', 'transaction_type'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'date': '2024-01-15',
+                'category': 'Cow (گائے)',
+                'expense_type': 'Khal (کھل)',
+                'quantity': 10,
+                'amount': 5000,
+                'manager': 'Manager 1',
+                'remarks': 'Monthly feed purchase',
+                'transaction_type': 'expense'
+            },
+            {
+                'id': 2,
+                'date': '2024-01-20',
+                'category': 'Goat (بکری)',
+                'expense_type': 'Medicine (دوائیں)',
+                'quantity': 5,
+                'amount': 2500,
+                'manager': 'Manager 2',
+                'remarks': 'Vaccination',
+                'transaction_type': 'expense'
+            }
         ])
     elif tab_name == "crop":
-        template_df = pd.DataFrame(columns=[
-            'id', 'date', 'crop_type', 'area', 'expense_type',
-            'amount', 'manager', 'remarks', 'transaction_type'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'date': '2024-01-10',
+                'crop_type': 'Wheat (گندم)',
+                'area': 10,
+                'expense_type': 'Fertilizer (کھاد)',
+                'amount': 15000,
+                'manager': 'Manager 1',
+                'remarks': 'Urea fertilizer',
+                'transaction_type': 'expense'
+            },
+            {
+                'id': 2,
+                'date': '2024-01-25',
+                'crop_type': 'Rice (چاول)',
+                'area': 8,
+                'expense_type': 'Labor (مزدوری)',
+                'amount': 12000,
+                'manager': 'Manager 3',
+                'remarks': 'Harvesting labor',
+                'transaction_type': 'expense'
+            }
         ])
     elif tab_name == "water_supply":
-        template_df = pd.DataFrame(columns=[
-            'id', 'farmer_name', 'farmer_phone', 'start_time', 'end_time',
-            'hours', 'rate', 'total_bill', 'paid', 'balance', 'date'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'farmer_name': 'Farmer 1',
+                'farmer_phone': '0300-1111111',
+                'start_time': '08:00',
+                'end_time': '12:00',
+                'hours': 4,
+                'rate': 500,
+                'total_bill': 2000,
+                'paid': 1000,
+                'balance': 1000,
+                'date': '2024-01-15'
+            },
+            {
+                'id': 2,
+                'farmer_name': 'Farmer 2',
+                'farmer_phone': '0300-2222222',
+                'start_time': '09:00',
+                'end_time': '11:30',
+                'hours': 2.5,
+                'rate': 500,
+                'total_bill': 1250,
+                'paid': 1250,
+                'balance': 0,
+                'date': '2024-01-20'
+            }
         ])
     elif tab_name == "expenses":
-        template_df = pd.DataFrame(columns=[
-            'id', 'date', 'category', 'description', 'amount',
-            'manager', 'receipt_no', 'remarks'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'date': '2024-01-05',
+                'category': 'Salary (تنخواہ)',
+                'description': 'January salary for workers',
+                'amount': 50000,
+                'manager': 'Manager 1',
+                'receipt_no': 'SAL-001',
+                'remarks': 'Paid via bank transfer'
+            },
+            {
+                'id': 2,
+                'date': '2024-01-12',
+                'category': 'Fuel (پیٹرول/ڈیزل)',
+                'description': 'Diesel for tractor',
+                'amount': 15000,
+                'manager': 'Manager 2',
+                'receipt_no': 'FUEL-001',
+                'remarks': 'From Shell station'
+            }
         ])
     elif tab_name == "income":
-        template_df = pd.DataFrame(columns=[
-            'id', 'date', 'source', 'amount', 'received_by',
-            'customer', 'receipt_no', 'remarks'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'date': '2024-01-18',
+                'source': 'Livestock Sale',
+                'amount': 75000,
+                'received_by': 'Manager 1',
+                'customer': 'Local Market',
+                'receipt_no': 'INC-001',
+                'remarks': 'Sold 2 cows'
+            },
+            {
+                'id': 2,
+                'date': '2024-01-22',
+                'source': 'Crop Sale',
+                'amount': 120000,
+                'received_by': 'Manager 3',
+                'customer': 'Grain Merchant',
+                'receipt_no': 'INC-002',
+                'remarks': 'Wheat harvest sold'
+            }
         ])
     elif tab_name == "payments":
-        template_df = pd.DataFrame(columns=[
-            'id', 'farmer_name', 'amount', 'payment_method', 'date', 'remarks'
+        template_df = pd.DataFrame([
+            {
+                'id': 1,
+                'farmer_name': 'Farmer 1',
+                'amount': 1000,
+                'payment_method': 'Cash (نقد)',
+                'date': '2024-01-16',
+                'remarks': 'Partial payment for water supply'
+            },
+            {
+                'id': 2,
+                'farmer_name': 'Farmer 2',
+                'amount': 1250,
+                'payment_method': 'Bank Transfer (بینک)',
+                'date': '2024-01-21',
+                'remarks': 'Full payment cleared'
+            }
         ])
     else:
         return None
@@ -511,11 +626,25 @@ def import_excel_data(file, tab_name):
         df = pd.read_excel(file)
         
         if tab_name == "livestock":
-            required_cols = ['date', 'category', 'amount', 'manager']
+            required_cols = ['date', 'category', 'amount']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_livestock_id, 
-                                st.session_state.next_livestock_id + len(df))
+                # Generate new IDs starting from next available
+                start_id = st.session_state.next_livestock_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_livestock_id += len(df)
+                
+                # Set default values for missing columns
+                if 'transaction_type' not in df.columns:
+                    df['transaction_type'] = 'expense'
+                if 'quantity' not in df.columns:
+                    df['quantity'] = 0
+                if 'expense_type' not in df.columns:
+                    df['expense_type'] = 'Others (دیگر)'
+                if 'manager' not in df.columns:
+                    df['manager'] = st.session_state.managers[0]['name'] if st.session_state.managers else ''
+                if 'remarks' not in df.columns:
+                    df['remarks'] = ''
+                
                 st.session_state.livestock_data = pd.concat(
                     [st.session_state.livestock_data, df], ignore_index=True
                 )
@@ -523,11 +652,23 @@ def import_excel_data(file, tab_name):
                 return True, f"Successfully imported {len(df)} livestock records"
         
         elif tab_name == "crop":
-            required_cols = ['date', 'crop_type', 'amount', 'manager']
+            required_cols = ['date', 'crop_type', 'amount']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_crop_id, 
-                                st.session_state.next_crop_id + len(df))
+                start_id = st.session_state.next_crop_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_crop_id += len(df)
+                
+                if 'transaction_type' not in df.columns:
+                    df['transaction_type'] = 'expense'
+                if 'area' not in df.columns:
+                    df['area'] = 0
+                if 'expense_type' not in df.columns:
+                    df['expense_type'] = 'Others (دیگر)'
+                if 'manager' not in df.columns:
+                    df['manager'] = st.session_state.managers[0]['name'] if st.session_state.managers else ''
+                if 'remarks' not in df.columns:
+                    df['remarks'] = ''
+                
                 st.session_state.crop_data = pd.concat(
                     [st.session_state.crop_data, df], ignore_index=True
                 )
@@ -537,13 +678,21 @@ def import_excel_data(file, tab_name):
         elif tab_name == "water_supply":
             required_cols = ['farmer_name', 'hours', 'rate', 'total_bill', 'date']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_water_id, 
-                                st.session_state.next_water_id + len(df))
+                start_id = st.session_state.next_water_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_water_id += len(df)
+                
                 if 'paid' not in df.columns:
                     df['paid'] = 0
                 if 'balance' not in df.columns:
-                    df['balance'] = df['total_bill']
+                    df['balance'] = df['total_bill'] - df.get('paid', 0)
+                if 'farmer_phone' not in df.columns:
+                    df['farmer_phone'] = ''
+                if 'start_time' not in df.columns:
+                    df['start_time'] = ''
+                if 'end_time' not in df.columns:
+                    df['end_time'] = ''
+                
                 st.session_state.water_supply_data = pd.concat(
                     [st.session_state.water_supply_data, df], ignore_index=True
                 )
@@ -551,11 +700,19 @@ def import_excel_data(file, tab_name):
                 return True, f"Successfully imported {len(df)} water supply records"
         
         elif tab_name == "expenses":
-            required_cols = ['date', 'category', 'description', 'amount', 'manager']
+            required_cols = ['date', 'category', 'description', 'amount']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_expense_id, 
-                                st.session_state.next_expense_id + len(df))
+                start_id = st.session_state.next_expense_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_expense_id += len(df)
+                
+                if 'manager' not in df.columns:
+                    df['manager'] = st.session_state.managers[0]['name'] if st.session_state.managers else ''
+                if 'receipt_no' not in df.columns:
+                    df['receipt_no'] = ''
+                if 'remarks' not in df.columns:
+                    df['remarks'] = ''
+                
                 st.session_state.expenses_data = pd.concat(
                     [st.session_state.expenses_data, df], ignore_index=True
                 )
@@ -565,9 +722,19 @@ def import_excel_data(file, tab_name):
         elif tab_name == "income":
             required_cols = ['date', 'source', 'amount']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_income_id, 
-                                st.session_state.next_income_id + len(df))
+                start_id = st.session_state.next_income_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_income_id += len(df)
+                
+                if 'received_by' not in df.columns:
+                    df['received_by'] = st.session_state.managers[0]['name'] if st.session_state.managers else ''
+                if 'customer' not in df.columns:
+                    df['customer'] = ''
+                if 'receipt_no' not in df.columns:
+                    df['receipt_no'] = ''
+                if 'remarks' not in df.columns:
+                    df['remarks'] = ''
+                
                 st.session_state.income_data = pd.concat(
                     [st.session_state.income_data, df], ignore_index=True
                 )
@@ -577,9 +744,15 @@ def import_excel_data(file, tab_name):
         elif tab_name == "payments":
             required_cols = ['farmer_name', 'amount', 'date']
             if all(col in df.columns for col in required_cols):
-                df['id'] = range(st.session_state.next_payment_id, 
-                                st.session_state.next_payment_id + len(df))
+                start_id = st.session_state.next_payment_id
+                df['id'] = range(start_id, start_id + len(df))
                 st.session_state.next_payment_id += len(df)
+                
+                if 'payment_method' not in df.columns:
+                    df['payment_method'] = 'Cash (نقد)'
+                if 'remarks' not in df.columns:
+                    df['remarks'] = ''
+                
                 st.session_state.payments_data = pd.concat(
                     [st.session_state.payments_data, df], ignore_index=True
                 )
@@ -597,31 +770,32 @@ def delete_record(tab_name, record_id):
         if tab_name == "livestock":
             st.session_state.livestock_data = st.session_state.livestock_data[
                 st.session_state.livestock_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         elif tab_name == "crop":
             st.session_state.crop_data = st.session_state.crop_data[
                 st.session_state.crop_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         elif tab_name == "water_supply":
             st.session_state.water_supply_data = st.session_state.water_supply_data[
                 st.session_state.water_supply_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         elif tab_name == "expenses":
             st.session_state.expenses_data = st.session_state.expenses_data[
                 st.session_state.expenses_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         elif tab_name == "income":
             st.session_state.income_data = st.session_state.income_data[
                 st.session_state.income_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         elif tab_name == "payments":
             st.session_state.payments_data = st.session_state.payments_data[
                 st.session_state.payments_data['id'] != record_id
-            ]
+            ].reset_index(drop=True)
         
         save_data()
         return True
     except Exception as e:
+        st.error(f"Error deleting record: {str(e)}")
         return False
 
 def show_edit_modal(tab_name, record):
@@ -630,20 +804,82 @@ def show_edit_modal(tab_name, record):
     st.session_state.editing_record = record
     st.session_state.show_edit_modal = True
 
+def update_record(tab_name, record_id, updated_data):
+    """Update a record in specified tab"""
+    try:
+        if tab_name == "livestock":
+            mask = st.session_state.livestock_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.livestock_data.loc[mask, key] = value
+                st.session_state.livestock_data = convert_dates(st.session_state.livestock_data)
+        
+        elif tab_name == "crop":
+            mask = st.session_state.crop_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.crop_data.loc[mask, key] = value
+                st.session_state.crop_data = convert_dates(st.session_state.crop_data)
+        
+        elif tab_name == "water_supply":
+            mask = st.session_state.water_supply_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.water_supply_data.loc[mask, key] = value
+                st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
+        
+        elif tab_name == "expenses":
+            mask = st.session_state.expenses_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.expenses_data.loc[mask, key] = value
+                st.session_state.expenses_data = convert_dates(st.session_state.expenses_data)
+        
+        elif tab_name == "income":
+            mask = st.session_state.income_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.income_data.loc[mask, key] = value
+                st.session_state.income_data = convert_dates(st.session_state.income_data)
+        
+        elif tab_name == "payments":
+            mask = st.session_state.payments_data['id'] == record_id
+            if mask.any():
+                for key, value in updated_data.items():
+                    st.session_state.payments_data.loc[mask, key] = value
+                st.session_state.payments_data = convert_dates(st.session_state.payments_data)
+        
+        save_data()
+        return True
+    except Exception as e:
+        st.error(f"Error updating record: {str(e)}")
+        return False
+
 def get_farmer_ledger_details(farmer_name):
     """Get complete ledger details for a farmer"""
     if not farmer_name:
         return None
     
+    # Initialize empty DataFrames if they don't exist
+    if not hasattr(st.session_state, 'payments_data'):
+        st.session_state.payments_data = pd.DataFrame(columns=['id', 'farmer_name', 'amount', 'payment_method', 'date', 'remarks'])
+    
+    if not hasattr(st.session_state, 'water_supply_data'):
+        st.session_state.water_supply_data = pd.DataFrame(columns=['id', 'farmer_name', 'farmer_phone', 'start_time', 'end_time', 'hours', 'rate', 'total_bill', 'paid', 'balance', 'date'])
+    
     # Get water supply records
-    water_records = st.session_state.water_supply_data[
-        st.session_state.water_supply_data['farmer_name'] == farmer_name
-    ].copy()
+    water_records = pd.DataFrame()
+    if 'farmer_name' in st.session_state.water_supply_data.columns:
+        water_records = st.session_state.water_supply_data[
+            st.session_state.water_supply_data['farmer_name'] == farmer_name
+        ].copy()
     
     # Get payment records
-    payment_records = st.session_state.payments_data[
-        st.session_state.payments_data['farmer_name'] == farmer_name
-    ].copy()
+    payment_records = pd.DataFrame()
+    if 'farmer_name' in st.session_state.payments_data.columns:
+        payment_records = st.session_state.payments_data[
+            st.session_state.payments_data['farmer_name'] == farmer_name
+        ].copy()
     
     # Convert dates
     water_records = convert_dates(water_records)
@@ -662,8 +898,7 @@ def get_farmer_ledger_details(farmer_name):
         'total_water_bill': total_water_bill,
         'total_paid': total_paid,
         'total_payments': total_payments,
-        'current_balance': current_balance,
-        'payment_history': payment_records.to_dict('records')
+        'current_balance': current_balance
     }
 
 # Timer Functions
@@ -783,10 +1018,10 @@ with tabs[0]:
                     st.session_state.livestock_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
-                # Convert date to datetime
                 st.session_state.livestock_data = convert_dates(st.session_state.livestock_data)
                 save_data()
                 st.success("Livestock expense added successfully!")
+                st.rerun()
             else:
                 st.error("Please fill all required fields")
     
@@ -798,33 +1033,34 @@ with tabs[0]:
     st.markdown("<div class='section-card'><h3>📋 Livestock Records (مویشیوں کے رکارڈز)</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.livestock_data.empty:
-        # Format date for display
         display_df = st.session_state.livestock_data.copy()
         display_df = convert_dates(display_df)
         display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Display dataframe with edit/delete buttons
+        # Display the dataframe with edit/delete buttons
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1, 2, 2, 2, 2, 2, 2, 1, 1])
-            with col1:
+            cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
                 st.write(row['id'])
-            with col2:
+            with cols[1]:
                 st.write(row['date'])
-            with col3:
+            with cols[2]:
                 st.write(row['category'])
-            with col4:
+            with cols[3]:
                 st.write(row['expense_type'])
-            with col5:
+            with cols[4]:
                 st.write(row['quantity'])
-            with col6:
+            with cols[5]:
                 st.write(format_currency(row['amount']))
-            with col7:
+            with cols[6]:
                 st.write(row['manager'])
-            with col8:
-                if st.button("✏️", key=f"edit_livestock_{row['id']}"):
+            with cols[7]:
+                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+            with cols[8]:
+                if st.button("✏️", key=f"edit_livestock_{row['id']}_{idx}"):
                     show_edit_modal("livestock", row)
-            with col9:
-                if st.button("🗑️", key=f"delete_livestock_{row['id']}"):
+            with cols[9]:
+                if st.button("🗑️", key=f"delete_livestock_{row['id']}_{idx}"):
                     if delete_record("livestock", row['id']):
                         st.success(f"Record {row['id']} deleted successfully!")
                         st.rerun()
@@ -855,8 +1091,6 @@ with tabs[0]:
     # Display ledger
     if not st.session_state.livestock_data.empty:
         filtered_data = st.session_state.livestock_data.copy()
-        
-        # Ensure date column is datetime
         filtered_data = convert_dates(filtered_data)
         
         if ledger_category_filter != "All Categories":
@@ -870,7 +1104,6 @@ with tabs[0]:
             filtered_data = filtered_data[filtered_data['date'] <= pd.Timestamp(ledger_date_to)]
         
         if not filtered_data.empty:
-            # Format date for display
             display_df = filtered_data.copy()
             display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
             
@@ -886,10 +1119,8 @@ with tabs[0]:
     st.markdown("<div class='section-card'><h3>📊 Livestock Statistics</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.livestock_data.empty:
-        # Convert dates for calculation
         calc_data = convert_dates(st.session_state.livestock_data)
         
-        # Apply filters for statistics
         if ledger_date_from:
             calc_data = calc_data[calc_data['date'] >= pd.Timestamp(ledger_date_from)]
         if ledger_date_to:
@@ -1002,10 +1233,10 @@ with tabs[1]:
                     st.session_state.crop_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
-                # Convert date to datetime
                 st.session_state.crop_data = convert_dates(st.session_state.crop_data)
                 save_data()
                 st.success("Crop expense added successfully!")
+                st.rerun()
             else:
                 st.error("Please fill all required fields")
     
@@ -1013,38 +1244,93 @@ with tabs[1]:
     st.markdown("<div class='section-card'><h3>📋 Crop Records (رکارڈز)</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.crop_data.empty:
-        # Format date for display
         display_df = st.session_state.crop_data.copy()
         display_df = convert_dates(display_df)
         display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Display dataframe with edit/delete buttons
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1, 2, 2, 2, 2, 2, 2, 1, 1])
-            with col1:
+            cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
                 st.write(row['id'])
-            with col2:
+            with cols[1]:
                 st.write(row['date'])
-            with col3:
+            with cols[2]:
                 st.write(row['crop_type'])
-            with col4:
+            with cols[3]:
                 st.write(row['area'])
-            with col5:
+            with cols[4]:
                 st.write(row['expense_type'])
-            with col6:
+            with cols[5]:
                 st.write(format_currency(row['amount']))
-            with col7:
+            with cols[6]:
                 st.write(row['manager'])
-            with col8:
-                if st.button("✏️", key=f"edit_crop_{row['id']}"):
+            with cols[7]:
+                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+            with cols[8]:
+                if st.button("✏️", key=f"edit_crop_{row['id']}_{idx}"):
                     show_edit_modal("crop", row)
-            with col9:
-                if st.button("🗑️", key=f"delete_crop_{row['id']}"):
+            with cols[9]:
+                if st.button("🗑️", key=f"delete_crop_{row['id']}_{idx}"):
                     if delete_record("crop", row['id']):
                         st.success(f"Record {row['id']} deleted successfully!")
                         st.rerun()
     else:
         st.info("No crop records available.")
+    
+    # Crop Statistics (NEW)
+    st.markdown("<div class='section-card'><h3>📊 Crop Statistics</h3></div>", unsafe_allow_html=True)
+    
+    if not st.session_state.crop_data.empty:
+        crop_data = convert_dates(st.session_state.crop_data)
+        
+        # Filter by date if needed
+        col1, col2 = st.columns(2)
+        with col1:
+            crop_date_from = st.date_input("From Date", key="crop_date_from", value=None)
+        with col2:
+            crop_date_to = st.date_input("To Date", key="crop_date_to", value=None)
+        
+        if crop_date_from:
+            crop_data = crop_data[crop_data['date'] >= pd.Timestamp(crop_date_from)]
+        if crop_date_to:
+            crop_data = crop_data[crop_data['date'] <= pd.Timestamp(crop_date_to)]
+        
+        # Calculate statistics
+        total_expenses = crop_data[crop_data['transaction_type'] == 'expense']['amount'].sum()
+        total_income = crop_data[crop_data['transaction_type'] == 'income']['amount'].sum()
+        net_balance = total_income - total_expenses
+        
+        # Expenses by crop type
+        expenses_by_crop = crop_data[crop_data['transaction_type'] == 'expense'].groupby('crop_type')['amount'].sum().reset_index()
+        
+        # Expenses by expense type
+        expenses_by_type = crop_data[crop_data['transaction_type'] == 'expense'].groupby('expense_type')['amount'].sum().reset_index()
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Crop Expenses", format_currency(total_expenses))
+        with col2:
+            st.metric("Total Crop Income", format_currency(total_income))
+        with col3:
+            st.metric("Crop Net Balance", format_currency(net_balance), delta_color="inverse")
+        
+        if not expenses_by_crop.empty:
+            st.subheader("Expenses by Crop Type")
+            fig1 = px.pie(expenses_by_crop, values='amount', names='crop_type', title='Crop Expenses Distribution')
+            st.plotly_chart(fig1, use_container_width=True)
+        
+        if not expenses_by_type.empty:
+            st.subheader("Expenses by Type")
+            fig2 = px.bar(expenses_by_type, x='expense_type', y='amount', title='Expense Type Breakdown')
+            st.plotly_chart(fig2, use_container_width=True)
+    else:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Crop Expenses (No Data)", format_currency(0))
+        with col2:
+            st.metric("Crop Income (No Data)", format_currency(0))
+        with col3:
+            st.metric("Crop Balance (No Data)", format_currency(0))
 
 # Tab 3: Water Supply
 with tabs[2]:
@@ -1148,55 +1434,189 @@ with tabs[2]:
                     st.session_state.water_supply_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
-                # Convert date to datetime
                 st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
                 save_data()
                 st.success("Water supply record saved successfully!")
+                st.rerun()
     
     # Water Supply Records with Edit/Delete
     st.markdown("<div class='section-card'><h3>📋 Water Supply Records (پانی سپلائی کے رکارڈز)</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.water_supply_data.empty:
-        # Format date for display
         display_df = st.session_state.water_supply_data.copy()
         display_df = convert_dates(display_df)
         display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Display dataframe with edit/delete buttons
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8, col9, col10, col11, col12 = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1])
-            with col1:
+            cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
                 st.write(row['id'])
-            with col2:
+            with cols[1]:
                 st.write(row['farmer_name'])
-            with col3:
+            with cols[2]:
                 st.write(row['farmer_phone'] if pd.notna(row['farmer_phone']) else "")
-            with col4:
+            with cols[3]:
                 st.write(row['date'])
-            with col5:
-                st.write(row['hours'])
-            with col6:
+            with cols[4]:
+                st.write(f"{row['hours']:.2f}")
+            with cols[5]:
                 st.write(format_currency(row['rate']))
-            with col7:
+            with cols[6]:
                 st.write(format_currency(row['total_bill']))
-            with col8:
+            with cols[7]:
                 st.write(format_currency(row['paid']))
-            with col9:
+            with cols[8]:
                 balance = row['balance']
                 st.write(format_currency(balance))
-            with col10:
+            with cols[9]:
                 status = "Paid" if balance <= 0 else "Pending"
                 st.write(status)
-            with col11:
-                if st.button("✏️", key=f"edit_water_{row['id']}"):
+            with cols[10]:
+                if st.button("✏️", key=f"edit_water_{row['id']}_{idx}"):
                     show_edit_modal("water_supply", row)
-            with col12:
-                if st.button("🗑️", key=f"delete_water_{row['id']}"):
+            with cols[11]:
+                if st.button("🗑️", key=f"delete_water_{row['id']}_{idx}"):
                     if delete_record("water_supply", row['id']):
                         st.success(f"Record {row['id']} deleted successfully!")
                         st.rerun()
     else:
         st.info("No water supply records available.")
+    
+    # Payment Management Section (NEW)
+    st.markdown("<div class='section-card'><h3>💰 Water Supply Payment Management</h3></div>", unsafe_allow_html=True)
+    
+    # Excel Import for Payments
+    with st.expander("📤 Import Payment Excel Data"):
+        col1, col2 = st.columns(2)
+        with col1:
+            template_data = create_excel_template("payments")
+            st.download_button(
+                label="📥 Download Template",
+                data=template_data,
+                file_name="payments_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
+        with col2:
+            uploaded_file = st.file_uploader("Choose Excel file", type=['xlsx'], key="tab3_payment_excel_upload")
+            if uploaded_file:
+                if st.button("Import Payment Data", key="tab3_payment_import"):
+                    success, message = import_excel_data(uploaded_file, "payments")
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
+    
+    # Add new payment
+    st.markdown("#### Add New Payment")
+    
+    # Get unique farmer names
+    farmer_names = []
+    if not st.session_state.water_supply_data.empty and 'farmer_name' in st.session_state.water_supply_data.columns:
+        farmer_names = list(st.session_state.water_supply_data['farmer_name'].unique())
+    
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        payment_farmer = st.selectbox(
+            "Select Farmer",
+            [""] + farmer_names,
+            key="tab3_payment_farmer"
+        )
+    
+    with col2:
+        payment_amount = st.number_input("Payment Amount", min_value=0.0, key="tab3_payment_amount")
+    
+    with col3:
+        payment_method = st.selectbox(
+            "Payment Method",
+            ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"],
+            key="tab3_payment_method"
+        )
+    
+    col4, col5 = st.columns(2)
+    with col4:
+        payment_date = st.date_input("Payment Date", value=date.today(), key="tab3_payment_date")
+    
+    with col5:
+        payment_remarks = st.text_input("Remarks", key="tab3_payment_remarks")
+    
+    if st.button("💳 Record Payment", type="primary", key="tab3_record_payment"):
+        if payment_farmer and payment_amount > 0:
+            # Add to payments data
+            new_payment = {
+                'id': get_next_id('payment'),
+                'farmer_name': payment_farmer,
+                'amount': payment_amount,
+                'payment_method': payment_method,
+                'date': payment_date,
+                'remarks': payment_remarks
+            }
+            st.session_state.payments_data = pd.concat([
+                st.session_state.payments_data,
+                pd.DataFrame([new_payment])
+            ], ignore_index=True)
+            
+            # Update water supply balance
+            if not st.session_state.water_supply_data.empty:
+                mask = st.session_state.water_supply_data['farmer_name'] == payment_farmer
+                if mask.any():
+                    # Find unpaid bills
+                    unpaid_bills = st.session_state.water_supply_data[mask & (st.session_state.water_supply_data['balance'] > 0)]
+                    remaining_payment = payment_amount
+                    
+                    for _, bill in unpaid_bills.iterrows():
+                        if remaining_payment <= 0:
+                            break
+                        
+                        bill_idx = bill.name
+                        current_balance = st.session_state.water_supply_data.loc[bill_idx, 'balance']
+                        payment_to_apply = min(remaining_payment, current_balance)
+                        
+                        st.session_state.water_supply_data.loc[bill_idx, 'paid'] += payment_to_apply
+                        st.session_state.water_supply_data.loc[bill_idx, 'balance'] -= payment_to_apply
+                        remaining_payment -= payment_to_apply
+            
+            st.session_state.payments_data = convert_dates(st.session_state.payments_data)
+            st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
+            
+            save_data()
+            st.success("Payment recorded successfully!")
+            st.rerun()
+        else:
+            st.error("Please select a farmer and enter payment amount")
+    
+    # Display Payment Records
+    st.markdown("#### Payment Records")
+    if not st.session_state.payments_data.empty:
+        payment_display = st.session_state.payments_data.copy()
+        payment_display = convert_dates(payment_display)
+        payment_display['date'] = payment_display['date'].dt.strftime('%Y-%m-%d')
+        
+        for idx, row in payment_display.iterrows():
+            cols = st.columns([1, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
+                st.write(row['id'])
+            with cols[1]:
+                st.write(row['farmer_name'])
+            with cols[2]:
+                st.write(row['date'])
+            with cols[3]:
+                st.write(format_currency(row['amount']))
+            with cols[4]:
+                st.write(row['payment_method'])
+            with cols[5]:
+                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+            with cols[6]:
+                if st.button("✏️", key=f"edit_payment_{row['id']}_{idx}"):
+                    show_edit_modal("payments", row)
+            with cols[7]:
+                if st.button("🗑️", key=f"delete_payment_{row['id']}_{idx}"):
+                    if delete_record("payments", row['id']):
+                        st.success(f"Record {row['id']} deleted successfully!")
+                        st.rerun()
+    else:
+        st.info("No payment records available.")
 
 # Tab 4: Expenses
 with tabs[3]:
@@ -1281,10 +1701,10 @@ with tabs[3]:
                     st.session_state.expenses_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
-                # Convert date to datetime
                 st.session_state.expenses_data = convert_dates(st.session_state.expenses_data)
                 save_data()
                 st.success("Expense added successfully!")
+                st.rerun()
             else:
                 st.error("Please fill all required fields")
     
@@ -1292,33 +1712,33 @@ with tabs[3]:
     st.markdown("<div class='section-card'><h3>📋 All Expenses (تمام اخراجات)</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.expenses_data.empty:
-        # Format date for display
         display_df = st.session_state.expenses_data.copy()
         display_df = convert_dates(display_df)
         display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Display dataframe with edit/delete buttons
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1, 2, 2, 2, 2, 2, 2, 1, 1])
-            with col1:
+            cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
                 st.write(row['id'])
-            with col2:
+            with cols[1]:
                 st.write(row['date'])
-            with col3:
+            with cols[2]:
                 st.write(row['category'])
-            with col4:
-                st.write(row['description'])
-            with col5:
+            with cols[3]:
+                st.write(row['description'][:20] + '...' if len(str(row['description'])) > 20 else row['description'])
+            with cols[4]:
                 st.write(format_currency(row['amount']))
-            with col6:
+            with cols[5]:
                 st.write(row['manager'])
-            with col7:
+            with cols[6]:
                 st.write(row['receipt_no'] if pd.notna(row['receipt_no']) else "")
-            with col8:
-                if st.button("✏️", key=f"edit_expense_{row['id']}"):
+            with cols[7]:
+                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+            with cols[8]:
+                if st.button("✏️", key=f"edit_expense_{row['id']}_{idx}"):
                     show_edit_modal("expenses", row)
-            with col9:
-                if st.button("🗑️", key=f"delete_expense_{row['id']}"):
+            with cols[9]:
+                if st.button("🗑️", key=f"delete_expense_{row['id']}_{idx}"):
                     if delete_record("expenses", row['id']):
                         st.success(f"Record {row['id']} deleted successfully!")
                         st.rerun()
@@ -1331,7 +1751,6 @@ with tabs[3]:
     col1, col2, col3 = st.columns(3)
     
     if not st.session_state.expenses_data.empty:
-        # Convert dates for calculation
         expenses_data = convert_dates(st.session_state.expenses_data)
         
         today = date.today()
@@ -1353,6 +1772,13 @@ with tabs[3]:
         with col3:
             total_expenses = expenses_data['amount'].sum()
             st.metric("Total Expenses", format_currency(total_expenses))
+        
+        # Expenses by category chart
+        st.markdown("#### Expenses by Category")
+        expenses_by_category = expenses_data.groupby('category')['amount'].sum().reset_index()
+        if not expenses_by_category.empty:
+            fig = px.pie(expenses_by_category, values='amount', names='category', title='Expense Distribution by Category')
+            st.plotly_chart(fig, use_container_width=True)
     else:
         with col1:
             st.metric("Today's Expenses (No Data)", format_currency(0))
@@ -1443,10 +1869,10 @@ with tabs[4]:
                     st.session_state.income_data,
                     pd.DataFrame([new_entry])
                 ], ignore_index=True)
-                # Convert date to datetime
                 st.session_state.income_data = convert_dates(st.session_state.income_data)
                 save_data()
                 st.success("Income recorded successfully!")
+                st.rerun()
             else:
                 st.error("Please fill all required fields")
     
@@ -1454,33 +1880,33 @@ with tabs[4]:
     st.markdown("<div class='section-card'><h3>📋 Income Records (آمدنی کے رکارڈز)</h3></div>", unsafe_allow_html=True)
     
     if not st.session_state.income_data.empty:
-        # Format date for display
         display_df = st.session_state.income_data.copy()
         display_df = convert_dates(display_df)
         display_df['date'] = display_df['date'].dt.strftime('%Y-%m-%d')
         
-        # Display dataframe with edit/delete buttons
         for idx, row in display_df.iterrows():
-            col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([1, 2, 2, 2, 2, 2, 2, 1, 1])
-            with col1:
+            cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+            with cols[0]:
                 st.write(row['id'])
-            with col2:
+            with cols[1]:
                 st.write(row['date'])
-            with col3:
+            with cols[2]:
                 st.write(row['source'])
-            with col4:
+            with cols[3]:
                 st.write(format_currency(row['amount']))
-            with col5:
+            with cols[4]:
                 st.write(row['received_by'] if pd.notna(row['received_by']) else "")
-            with col6:
+            with cols[5]:
                 st.write(row['customer'] if pd.notna(row['customer']) else "")
-            with col7:
+            with cols[6]:
                 st.write(row['receipt_no'] if pd.notna(row['receipt_no']) else "")
-            with col8:
-                if st.button("✏️", key=f"edit_income_{row['id']}"):
+            with cols[7]:
+                st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+            with cols[8]:
+                if st.button("✏️", key=f"edit_income_{row['id']}_{idx}"):
                     show_edit_modal("income", row)
-            with col9:
-                if st.button("🗑️", key=f"delete_income_{row['id']}"):
+            with cols[9]:
+                if st.button("🗑️", key=f"delete_income_{row['id']}_{idx}"):
                     if delete_record("income", row['id']):
                         st.success(f"Record {row['id']} deleted successfully!")
                         st.rerun()
@@ -1533,6 +1959,14 @@ with tabs[4]:
     
     with col4:
         st.metric("Total Income", format_currency(total_income))
+    
+    # Income by source chart
+    st.markdown("#### Income by Source")
+    if not st.session_state.income_data.empty:
+        income_by_source = income_data.groupby('source')['amount'].sum().reset_index()
+        if not income_by_source.empty:
+            fig = px.pie(income_by_source, values='amount', names='source', title='Income Distribution by Source')
+            st.plotly_chart(fig, use_container_width=True)
 
 # Tab 6: Reports
 with tabs[5]:
@@ -1769,10 +2203,10 @@ with tabs[6]:
         water_farmers = []
         payment_farmers = []
         
-        if not st.session_state.water_supply_data.empty:
+        if not st.session_state.water_supply_data.empty and 'farmer_name' in st.session_state.water_supply_data.columns:
             water_farmers = list(st.session_state.water_supply_data['farmer_name'].unique())
         
-        if not st.session_state.payments_data.empty:
+        if not st.session_state.payments_data.empty and 'farmer_name' in st.session_state.payments_data.columns:
             payment_farmers = list(st.session_state.payments_data['farmer_name'].unique())
         
         all_farmers = list(set(water_farmers + payment_farmers))
@@ -1816,31 +2250,36 @@ with tabs[6]:
             st.markdown("#### 💧 Water Supply Records")
             if not ledger_details['water_records'].empty:
                 water_display = ledger_details['water_records'].copy()
+                water_display = convert_dates(water_display)
                 water_display['date'] = water_display['date'].dt.strftime('%Y-%m-%d')
                 water_display['status'] = water_display['balance'].apply(lambda x: 'Paid' if x <= 0 else 'Pending')
                 
-                # Add edit/delete buttons
+                # Display water records
                 for idx, row in water_display.iterrows():
-                    col1, col2, col3, col4, col5, col6, col7, col8, col9 = st.columns([2, 2, 2, 2, 2, 2, 2, 1, 1])
-                    with col1:
+                    cols = st.columns([1, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1])
+                    with cols[0]:
+                        st.write(row['id'])
+                    with cols[1]:
                         st.write(row['date'])
-                    with col2:
-                        st.write(row['hours'])
-                    with col3:
+                    with cols[2]:
+                        st.write(f"{row['hours']:.2f}")
+                    with cols[3]:
                         st.write(format_currency(row['rate']))
-                    with col4:
+                    with cols[4]:
                         st.write(format_currency(row['total_bill']))
-                    with col5:
+                    with cols[5]:
                         st.write(format_currency(row['paid']))
-                    with col6:
+                    with cols[6]:
                         st.write(format_currency(row['balance']))
-                    with col7:
+                    with cols[7]:
                         st.write(row['status'])
-                    with col8:
-                        if st.button("✏️", key=f"tab7_edit_water_{row['id']}"):
+                    with cols[8]:
+                        st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                    with cols[9]:
+                        if st.button("✏️", key=f"tab7_edit_water_{row['id']}_{idx}"):
                             show_edit_modal("water_supply", row)
-                    with col9:
-                        if st.button("🗑️", key=f"tab7_delete_water_{row['id']}"):
+                    with cols[10]:
+                        if st.button("🗑️", key=f"tab7_delete_water_{row['id']}_{idx}"):
                             if delete_record("water_supply", row['id']):
                                 st.success(f"Record {row['id']} deleted successfully!")
                                 st.rerun()
@@ -1851,26 +2290,29 @@ with tabs[6]:
             st.markdown("#### 💰 Payment History")
             if not ledger_details['payment_records'].empty:
                 payment_display = ledger_details['payment_records'].copy()
+                payment_display = convert_dates(payment_display)
                 payment_display['date'] = payment_display['date'].dt.strftime('%Y-%m-%d')
                 
-                # Add edit/delete buttons
+                # Display payment records
                 for idx, row in payment_display.iterrows():
-                    col1, col2, col3, col4, col5, col6, col7 = st.columns([2, 2, 2, 2, 2, 1, 1])
-                    with col1:
+                    cols = st.columns([1, 2, 2, 2, 2, 2, 1, 1])
+                    with cols[0]:
+                        st.write(row['id'])
+                    with cols[1]:
                         st.write(row['date'])
-                    with col2:
+                    with cols[2]:
                         st.write(format_currency(row['amount']))
-                    with col3:
+                    with cols[3]:
                         st.write(row['payment_method'] if pd.notna(row['payment_method']) else "")
-                    with col4:
-                        st.write(row['remarks'] if pd.notna(row['remarks']) else "")
-                    with col5:
+                    with cols[4]:
+                        st.write(row['remarks'][:20] + '...' if len(str(row['remarks'])) > 20 else row['remarks'])
+                    with cols[5]:
                         st.write("")
-                    with col6:
-                        if st.button("✏️", key=f"tab7_edit_payment_{row['id']}"):
+                    with cols[6]:
+                        if st.button("✏️", key=f"tab7_edit_payment_{row['id']}_{idx}"):
                             show_edit_modal("payments", row)
-                    with col7:
-                        if st.button("🗑️", key=f"tab7_delete_payment_{row['id']}"):
+                    with cols[7]:
+                        if st.button("🗑️", key=f"tab7_delete_payment_{row['id']}_{idx}"):
                             if delete_record("payments", row['id']):
                                 st.success(f"Record {row['id']} deleted successfully!")
                                 st.rerun()
@@ -1914,7 +2356,7 @@ with tabs[6]:
                     ], ignore_index=True)
                     
                     # Update water supply balance
-                    if not st.session_state.water_supply_data.empty:
+                    if not st.session_state.water_supply_data.empty and 'farmer_name' in st.session_state.water_supply_data.columns:
                         mask = st.session_state.water_supply_data['farmer_name'] == farmer_name
                         if mask.any():
                             # Find the oldest unpaid bill to apply payment
@@ -1928,7 +2370,6 @@ with tabs[6]:
                                 st.session_state.water_supply_data.loc[oldest_bill_idx, 'paid'] += payment_to_apply
                                 st.session_state.water_supply_data.loc[oldest_bill_idx, 'balance'] -= payment_to_apply
                     
-                    # Convert dates
                     st.session_state.payments_data = convert_dates(st.session_state.payments_data)
                     st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
                     
@@ -1944,203 +2385,255 @@ with tabs[6]:
 
 # Edit Modal
 if st.session_state.show_edit_modal and st.session_state.editing_record is not None:
-    # Create modal overlay
-    st.markdown("""
-    <div class="modal-overlay">
-        <div class="modal-content">
-    """, unsafe_allow_html=True)
-    
-    tab_name = st.session_state.editing_tab
-    record = st.session_state.editing_record
-    
-    st.markdown(f"### ✏️ Edit Record #{record['id']}")
-    
-    if tab_name == "livestock":
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_livestock_date")
-            edit_category = st.selectbox("Category", ["Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"], 
-                                        index=["Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"].index(record['category']) 
-                                        if record['category'] in ["Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"] else 0,
-                                        key="edit_livestock_category")
-        with col2:
-            edit_amount = st.number_input("Amount", value=float(record['amount']), key="edit_livestock_amount")
-            edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
-                                       index=next((i for i, m in enumerate(st.session_state.managers) if m["name"] == record['manager']), 0),
-                                       key="edit_livestock_manager")
+    # Create a container for the modal
+    modal_container = st.container()
+    with modal_container:
+        # Add some custom CSS to create modal effect
+        st.markdown("""
+        <style>
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            z-index: 1000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-content {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            z-index: 1001;
+        }
+        </style>
+        """, unsafe_allow_html=True)
         
-        edit_remarks = st.text_area("Remarks", value=record['remarks'], key="edit_livestock_remarks")
-    
-    elif tab_name == "crop":
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_crop_date")
-            edit_crop_type = st.selectbox("Crop Type", ["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"],
-                                         index=["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"].index(record['crop_type'])
-                                         if record['crop_type'] in ["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"] else 0,
-                                         key="edit_crop_type")
-        with col2:
-            edit_amount = st.number_input("Amount", value=float(record['amount']), key="edit_crop_amount")
-            edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
-                                       index=next((i for i, m in enumerate(st.session_state.managers) if m["name"] == record['manager']), 0),
-                                       key="edit_crop_manager")
+        st.markdown('<div class="modal-backdrop">', unsafe_allow_html=True)
+        st.markdown('<div class="modal-content">', unsafe_allow_html=True)
         
-        edit_remarks = st.text_area("Remarks", value=record['remarks'], key="edit_crop_remarks")
-    
-    elif tab_name == "water_supply":
+        tab_name = st.session_state.editing_tab
+        record = st.session_state.editing_record
+        
+        st.markdown(f"### ✏️ Edit Record #{record['id']}")
+        
+        if tab_name == "livestock":
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_livestock_date")
+                edit_category = st.selectbox("Category", ["Cow (گائے)", "Beef (بیف)", "Goat (بکری)", "Others (دیگر)"], 
+                                            index=0, key="edit_livestock_category")
+                if 'category' in record:
+                    if record['category'] == "Cow (گائے)":
+                        edit_category = "Cow (گائے)"
+                    elif record['category'] == "Beef (بیف)":
+                        edit_category = "Beef (بیف)"
+                    elif record['category'] == "Goat (بکری)":
+                        edit_category = "Goat (بکری)"
+                    else:
+                        edit_category = "Others (دیگر)"
+            with col2:
+                edit_amount = st.number_input("Amount", value=float(record['amount']) if 'amount' in record else 0.0, key="edit_livestock_amount")
+                edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
+                                           index=0, key="edit_livestock_manager")
+                if 'manager' in record:
+                    for i, manager in enumerate(st.session_state.managers):
+                        if manager["name"] == record['manager']:
+                            edit_manager = manager["name"]
+                            break
+            
+            edit_remarks = st.text_area("Remarks", value=record['remarks'] if 'remarks' in record else "", key="edit_livestock_remarks")
+        
+        elif tab_name == "crop":
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_crop_date")
+                edit_crop_type = st.selectbox("Crop Type", ["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"],
+                                             index=0, key="edit_crop_type")
+                if 'crop_type' in record:
+                    crop_types = ["Wheat (گندم)", "Rice (چاول)", "Cotton (کپاس)", "Kheera (Cucumber)", "Corn", "Vegetables (سبزیاں)", "Others (دیگر)"]
+                    if record['crop_type'] in crop_types:
+                        edit_crop_type = record['crop_type']
+            with col2:
+                edit_amount = st.number_input("Amount", value=float(record['amount']) if 'amount' in record else 0.0, key="edit_crop_amount")
+                edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
+                                           index=0, key="edit_crop_manager")
+                if 'manager' in record:
+                    for i, manager in enumerate(st.session_state.managers):
+                        if manager["name"] == record['manager']:
+                            edit_manager = manager["name"]
+                            break
+            
+            edit_remarks = st.text_area("Remarks", value=record['remarks'] if 'remarks' in record else "", key="edit_crop_remarks")
+        
+        elif tab_name == "water_supply":
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_water_date")
+                edit_farmer_name = st.text_input("Farmer Name", value=record['farmer_name'] if 'farmer_name' in record else "", key="edit_water_farmer")
+            with col2:
+                edit_hours = st.number_input("Hours", value=float(record['hours']) if 'hours' in record else 0.0, key="edit_water_hours")
+                edit_rate = st.number_input("Rate", value=float(record['rate']) if 'rate' in record else 0.0, key="edit_water_rate")
+            with col3:
+                edit_paid = st.number_input("Paid", value=float(record['paid']) if 'paid' in record else 0.0, key="edit_water_paid")
+                edit_total_bill = st.number_input("Total Bill", value=float(record['total_bill']) if 'total_bill' in record else 0.0, key="edit_water_total")
+        
+        elif tab_name == "expenses":
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_expense_date")
+                edit_category = st.selectbox("Category", ["Salary (تنخواہ)", "Machinery (مشینری)", "Fuel (پیٹرول/ڈیزل)", "Maintenance (مرمت)", "Kitchen", "Construction", "Petrol", "Diesel", "Electricity Bill", "Turbine Bill", "Others (دیگر)"],
+                                            index=0, key="edit_expense_category")
+                if 'category' in record:
+                    categories = ["Salary (تنخواہ)", "Machinery (مشینری)", "Fuel (پیٹرول/ڈیزل)", "Maintenance (مرمت)", "Kitchen", "Construction", "Petrol", "Diesel", "Electricity Bill", "Turbine Bill", "Others (دیگر)"]
+                    if record['category'] in categories:
+                        edit_category = record['category']
+            with col2:
+                edit_amount = st.number_input("Amount", value=float(record['amount']) if 'amount' in record else 0.0, key="edit_expense_amount")
+                edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
+                                           index=0, key="edit_expense_manager")
+                if 'manager' in record:
+                    for i, manager in enumerate(st.session_state.managers):
+                        if manager["name"] == record['manager']:
+                            edit_manager = manager["name"]
+                            break
+            
+            edit_description = st.text_input("Description", value=record['description'] if 'description' in record else "", key="edit_expense_desc")
+            edit_remarks = st.text_area("Remarks", value=record['remarks'] if 'remarks' in record else "", key="edit_expense_remarks")
+        
+        elif tab_name == "income":
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_income_date")
+                edit_source = st.selectbox("Source", ["Livestock Sale", "Goats", "Beef", "Cows", "Crop Sale", "Water Supply", "Others"],
+                                          index=0, key="edit_income_source")
+                if 'source' in record:
+                    sources = ["Livestock Sale", "Goats", "Beef", "Cows", "Crop Sale", "Water Supply", "Others"]
+                    if record['source'] in sources:
+                        edit_source = record['source']
+            with col2:
+                edit_amount = st.number_input("Amount", value=float(record['amount']) if 'amount' in record else 0.0, key="edit_income_amount")
+                edit_received_by = st.selectbox("Received By", [m["name"] for m in st.session_state.managers],
+                                               index=0, key="edit_income_received")
+                if 'received_by' in record:
+                    for i, manager in enumerate(st.session_state.managers):
+                        if manager["name"] == record['received_by']:
+                            edit_received_by = manager["name"]
+                            break
+            
+            edit_customer = st.text_input("Customer", value=record['customer'] if 'customer' in record else "", key="edit_income_customer")
+            edit_remarks = st.text_area("Remarks", value=record['remarks'] if 'remarks' in record else "", key="edit_income_remarks")
+        
+        elif tab_name == "payments":
+            col1, col2 = st.columns(2)
+            with col1:
+                edit_date = st.date_input("Date", value=pd.to_datetime(record['date']).date() if pd.notna(record['date']) else date.today(), key="edit_payment_date")
+                edit_farmer_name = st.text_input("Farmer Name", value=record['farmer_name'] if 'farmer_name' in record else "", key="edit_payment_farmer")
+            with col2:
+                edit_amount = st.number_input("Amount", value=float(record['amount']) if 'amount' in record else 0.0, key="edit_payment_amount")
+                edit_method = st.selectbox("Payment Method", ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"],
+                                          index=0, key="edit_payment_method")
+                if 'payment_method' in record:
+                    methods = ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"]
+                    if record['payment_method'] in methods:
+                        edit_method = record['payment_method']
+            
+            edit_remarks = st.text_area("Remarks", value=record['remarks'] if 'remarks' in record else "", key="edit_payment_remarks")
+        
+        # Action buttons
         col1, col2, col3 = st.columns(3)
         with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_water_date")
-            edit_farmer_name = st.text_input("Farmer Name", value=record['farmer_name'], key="edit_water_farmer")
-        with col2:
-            edit_hours = st.number_input("Hours", value=float(record['hours']), key="edit_water_hours")
-            edit_rate = st.number_input("Rate", value=float(record['rate']), key="edit_water_rate")
-        with col3:
-            edit_paid = st.number_input("Paid", value=float(record['paid']), key="edit_water_paid")
-            edit_total_bill = st.number_input("Total Bill", value=float(record['hours']) * float(record['rate']), 
-                                             disabled=True, key="edit_water_total")
-    
-    elif tab_name == "expenses":
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_expense_date")
-            edit_category = st.selectbox("Category", ["Salary (تنخواہ)", "Machinery (مشینری)", "Fuel (پیٹرول/ڈیزل)", "Maintenance (مرمت)", "Kitchen", "Construction", "Petrol", "Diesel", "Electricity Bill", "Turbine Bill", "Others (دیگر)"],
-                                        index=["Salary (تنخواہ)", "Machinery (مشینری)", "Fuel (پیٹرول/ڈیزل)", "Maintenance (مرمت)", "Kitchen", "Construction", "Petrol", "Diesel", "Electricity Bill", "Turbine Bill", "Others (دیگر)"].index(record['category'])
-                                        if record['category'] in ["Salary (تنخواہ)", "Machinery (مشینری)", "Fuel (پیٹرول/ڈیزل)", "Maintenance (مرمت)", "Kitchen", "Construction", "Petrol", "Diesel", "Electricity Bill", "Turbine Bill", "Others (دیگر)"] else 0,
-                                        key="edit_expense_category")
-        with col2:
-            edit_amount = st.number_input("Amount", value=float(record['amount']), key="edit_expense_amount")
-            edit_manager = st.selectbox("Manager", [m["name"] for m in st.session_state.managers],
-                                       index=next((i for i, m in enumerate(st.session_state.managers) if m["name"] == record['manager']), 0),
-                                       key="edit_expense_manager")
+            if st.button("💾 Save Changes", type="primary", use_container_width=True, key="modal_save"):
+                # Prepare updated data
+                updated_data = {}
+                
+                if tab_name == "livestock":
+                    updated_data = {
+                        'date': edit_date,
+                        'category': edit_category,
+                        'amount': edit_amount,
+                        'manager': edit_manager,
+                        'remarks': edit_remarks
+                    }
+                elif tab_name == "crop":
+                    updated_data = {
+                        'date': edit_date,
+                        'crop_type': edit_crop_type,
+                        'amount': edit_amount,
+                        'manager': edit_manager,
+                        'remarks': edit_remarks
+                    }
+                elif tab_name == "water_supply":
+                    updated_data = {
+                        'date': edit_date,
+                        'farmer_name': edit_farmer_name,
+                        'hours': edit_hours,
+                        'rate': edit_rate,
+                        'total_bill': edit_total_bill,
+                        'paid': edit_paid,
+                        'balance': edit_total_bill - edit_paid
+                    }
+                elif tab_name == "expenses":
+                    updated_data = {
+                        'date': edit_date,
+                        'category': edit_category,
+                        'description': edit_description,
+                        'amount': edit_amount,
+                        'manager': edit_manager,
+                        'remarks': edit_remarks
+                    }
+                elif tab_name == "income":
+                    updated_data = {
+                        'date': edit_date,
+                        'source': edit_source,
+                        'amount': edit_amount,
+                        'received_by': edit_received_by,
+                        'customer': edit_customer,
+                        'remarks': edit_remarks
+                    }
+                elif tab_name == "payments":
+                    updated_data = {
+                        'date': edit_date,
+                        'farmer_name': edit_farmer_name,
+                        'amount': edit_amount,
+                        'payment_method': edit_method,
+                        'remarks': edit_remarks
+                    }
+                
+                # Update the record
+                if update_record(tab_name, record['id'], updated_data):
+                    st.success("Record updated successfully!")
+                    st.session_state.show_edit_modal = False
+                    st.session_state.editing_record = None
+                    st.session_state.editing_tab = None
+                    st.rerun()
         
-        edit_description = st.text_input("Description", value=record['description'], key="edit_expense_desc")
-        edit_remarks = st.text_area("Remarks", value=record['remarks'], key="edit_expense_remarks")
-    
-    elif tab_name == "income":
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_income_date")
-            edit_source = st.selectbox("Source", ["Livestock Sale", "Goats", "Beef", "Cows", "Crop Sale", "Water Supply", "Others"],
-                                      index=["Livestock Sale", "Goats", "Beef", "Cows", "Crop Sale", "Water Supply", "Others"].index(record['source'])
-                                      if record['source'] in ["Livestock Sale", "Goats", "Beef", "Cows", "Crop Sale", "Water Supply", "Others"] else 0,
-                                      key="edit_income_source")
         with col2:
-            edit_amount = st.number_input("Amount", value=float(record['amount']), key="edit_income_amount")
-            edit_received_by = st.selectbox("Received By", [m["name"] for m in st.session_state.managers],
-                                           index=next((i for i, m in enumerate(st.session_state.managers) if m["name"] == record['received_by']), 0),
-                                           key="edit_income_received")
-        
-        edit_customer = st.text_input("Customer", value=record['customer'], key="edit_income_customer")
-        edit_remarks = st.text_area("Remarks", value=record['remarks'], key="edit_income_remarks")
-    
-    elif tab_name == "payments":
-        col1, col2 = st.columns(2)
-        with col1:
-            edit_date = st.date_input("Date", value=record['date'], key="edit_payment_date")
-            edit_farmer_name = st.text_input("Farmer Name", value=record['farmer_name'], key="edit_payment_farmer")
-        with col2:
-            edit_amount = st.number_input("Amount", value=float(record['amount']), key="edit_payment_amount")
-            edit_method = st.selectbox("Payment Method", ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"],
-                                      index=["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"].index(record['payment_method'])
-                                      if record['payment_method'] in ["Cash (نقد)", "Bank Transfer (بینک)", "Check (چیک)"] else 0,
-                                      key="edit_payment_method")
-        
-        edit_remarks = st.text_area("Remarks", value=record['remarks'], key="edit_payment_remarks")
-    
-    # Action buttons
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if st.button("💾 Save Changes", type="primary", use_container_width=True, key="modal_save"):
-            # Update the record based on tab_name
-            if tab_name == "livestock":
-                mask = st.session_state.livestock_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.livestock_data.loc[mask, 'date'] = edit_date
-                    st.session_state.livestock_data.loc[mask, 'category'] = edit_category
-                    st.session_state.livestock_data.loc[mask, 'amount'] = edit_amount
-                    st.session_state.livestock_data.loc[mask, 'manager'] = edit_manager
-                    st.session_state.livestock_data.loc[mask, 'remarks'] = edit_remarks
-                    st.session_state.livestock_data = convert_dates(st.session_state.livestock_data)
-            
-            elif tab_name == "crop":
-                mask = st.session_state.crop_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.crop_data.loc[mask, 'date'] = edit_date
-                    st.session_state.crop_data.loc[mask, 'crop_type'] = edit_crop_type
-                    st.session_state.crop_data.loc[mask, 'amount'] = edit_amount
-                    st.session_state.crop_data.loc[mask, 'manager'] = edit_manager
-                    st.session_state.crop_data.loc[mask, 'remarks'] = edit_remarks
-                    st.session_state.crop_data = convert_dates(st.session_state.crop_data)
-            
-            elif tab_name == "water_supply":
-                mask = st.session_state.water_supply_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.water_supply_data.loc[mask, 'date'] = edit_date
-                    st.session_state.water_supply_data.loc[mask, 'farmer_name'] = edit_farmer_name
-                    st.session_state.water_supply_data.loc[mask, 'hours'] = edit_hours
-                    st.session_state.water_supply_data.loc[mask, 'rate'] = edit_rate
-                    st.session_state.water_supply_data.loc[mask, 'total_bill'] = edit_hours * edit_rate
-                    st.session_state.water_supply_data.loc[mask, 'paid'] = edit_paid
-                    st.session_state.water_supply_data.loc[mask, 'balance'] = (edit_hours * edit_rate) - edit_paid
-                    st.session_state.water_supply_data = convert_dates(st.session_state.water_supply_data)
-            
-            elif tab_name == "expenses":
-                mask = st.session_state.expenses_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.expenses_data.loc[mask, 'date'] = edit_date
-                    st.session_state.expenses_data.loc[mask, 'category'] = edit_category
-                    st.session_state.expenses_data.loc[mask, 'description'] = edit_description
-                    st.session_state.expenses_data.loc[mask, 'amount'] = edit_amount
-                    st.session_state.expenses_data.loc[mask, 'manager'] = edit_manager
-                    st.session_state.expenses_data.loc[mask, 'remarks'] = edit_remarks
-                    st.session_state.expenses_data = convert_dates(st.session_state.expenses_data)
-            
-            elif tab_name == "income":
-                mask = st.session_state.income_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.income_data.loc[mask, 'date'] = edit_date
-                    st.session_state.income_data.loc[mask, 'source'] = edit_source
-                    st.session_state.income_data.loc[mask, 'amount'] = edit_amount
-                    st.session_state.income_data.loc[mask, 'received_by'] = edit_received_by
-                    st.session_state.income_data.loc[mask, 'customer'] = edit_customer
-                    st.session_state.income_data.loc[mask, 'remarks'] = edit_remarks
-                    st.session_state.income_data = convert_dates(st.session_state.income_data)
-            
-            elif tab_name == "payments":
-                mask = st.session_state.payments_data['id'] == record['id']
-                if mask.any():
-                    st.session_state.payments_data.loc[mask, 'date'] = edit_date
-                    st.session_state.payments_data.loc[mask, 'farmer_name'] = edit_farmer_name
-                    st.session_state.payments_data.loc[mask, 'amount'] = edit_amount
-                    st.session_state.payments_data.loc[mask, 'payment_method'] = edit_method
-                    st.session_state.payments_data.loc[mask, 'remarks'] = edit_remarks
-                    st.session_state.payments_data = convert_dates(st.session_state.payments_data)
-            
-            save_data()
-            st.success("Record updated successfully!")
-            st.session_state.show_edit_modal = False
-            st.session_state.editing_record = None
-            st.session_state.editing_tab = None
-            st.rerun()
-    
-    with col2:
-        if st.button("❌ Cancel", use_container_width=True, key="modal_cancel"):
-            st.session_state.show_edit_modal = False
-            st.session_state.editing_record = None
-            st.session_state.editing_tab = None
-            st.rerun()
-    
-    with col3:
-        if st.button("🗑️ Delete", type="secondary", use_container_width=True, key="modal_delete"):
-            if delete_record(tab_name, record['id']):
-                st.success("Record deleted successfully!")
+            if st.button("❌ Cancel", use_container_width=True, key="modal_cancel"):
                 st.session_state.show_edit_modal = False
                 st.session_state.editing_record = None
                 st.session_state.editing_tab = None
                 st.rerun()
-    
-    st.markdown("</div></div>", unsafe_allow_html=True)
+        
+        with col3:
+            if st.button("🗑️ Delete", type="secondary", use_container_width=True, key="modal_delete"):
+                if delete_record(tab_name, record['id']):
+                    st.success("Record deleted successfully!")
+                    st.session_state.show_edit_modal = False
+                    st.session_state.editing_record = None
+                    st.session_state.editing_tab = None
+                    st.rerun()
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # Sidebar for data management
 with st.sidebar:
